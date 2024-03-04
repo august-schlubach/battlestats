@@ -1,5 +1,15 @@
 {% extends "base.html" %}
 {% load humanize %}
+{% load static %}
+
+{% block d3 %}
+<script src="https://d3js.org/d3.v6.min.js"></script>
+<script>var player_id = {{ context.player.player_id }};</script>
+<script src="{% static 'plots.js' %}"></script>
+{% endblock %}
+
+{% 
+
 {% block content %} 
 <div class="mw9 center ph3-ns">
   <div class="cf ph2-ns">
@@ -15,11 +25,11 @@
           <div>
             Last Game: {{ context.player.days_since_last_battle }} days ago
           </div>
-          <div class="pv4">
-            <img src="data:image/png;base64,{{ context.recent_plot }}"/>
-          </div>
-          <div class="pv4">
-            <img src="data:image/png;base64,{{ context.ship_plot }}"/>
+          <div id="container"></div>
+          <div>
+            <input type="radio" onclick="changeType('all')" name="battle_type" value="all" checked="checked"> All<br>
+            <input type="radio" onclick="changeType('pvp')" name="battle_type" value="pvp"> PvP<br>
+            <input type="radio" onclick="changeType('pve')" name="battle_type" value="pve"> PvE<br>
           </div>
         </div>
         <div>
@@ -30,18 +40,21 @@
           Survival: Overall: {{context.player.pvp_survival_rate }}%, Wins {{ context.player.wins_survival_rate }}%
         </div>
         <div>
-          Experienced
-          Active
-          Great at Battleships
-          Awesome at Destroyers
-          Poor at Cruisers
-          Ace in CVs
-          No subs
+
+          <div>
+            Experienced
+            Active
+            Great at Battleships
+            Awesome at Destroyers
+            Poor at Cruisers
+            Ace in CVs
+            No subs
+          </div>
         </div>
       </div>
-    </div>
-    <div class="fl w-100 w-third-ns pa2">
-      <div class="pv5"></div>
+      <div class="fl w-100 w-third-ns pa2">
+        <div class="pv5"></div>
+      </div>
     </div>
   </div>
 </div>

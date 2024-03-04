@@ -1,45 +1,30 @@
 from .utils.api import get_player_by_name
 from django.shortcuts import render
-import matplotlib.ticker as ticker
-import pandas as pd
-import seaborn as sns
-from .utils.data import get_encoded_fig, prepare_battles_data
+from .utils.data import fetch_battle_data
+from django.http import HttpResponse
+import csv
 
 
-def player(request, name="lil_boots"):
+def player(request, name: str = "lil_boots") -> render:
+    # fetch basic player data and render for template
     player = get_player_by_name(name)
 
-    custom_params = {
-        "figure.figsize": (5, 3),
-        "axes.spines.right": False,
-        "axes.spines.top": False,
-        "axes.spines.left": False,
-        "axes.spines.bottom": False,
-        "axes.xmargin": 0,
-        "axes.ymargin": 0,
-    }
-    sns.set_theme(style="white", rc=custom_params)
-
-    # build a bar plot of recent games
-    player_df = pd.DataFrame(data=player.recent_games)
-    bar = sns.barplot(data=player_df, x="dates",
-                      y="games_played", palette="deep")
-    bar.set(xlabel=None)
-    bar.set(ylabel=None)
-    bar.set(xticklabels=[])
-    bar.yaxis.set_major_locator(ticker.MultipleLocator(5))
-    recent_encoded = get_encoded_fig(bar)
-
-    # build a bar plot of ship data by # battles
-    ship_df = prepare_battles_data(player.player_id)
-    g = sns.barplot(data=ship_df.head(10), x="ship_name",
-                    y="pvp_battles", palette="deep", orient="h")
-    ship_encoded = get_encoded_fig(g)
-
     return render(
-        request, 'player.html',  {"context":
-                                  {
-                                      "player": player,
-                                      "recent_plot": recent_encoded,
-                                      "ship_plot": ship_encoded
-                                  }})
+        request, 'player.html',  {"context": {"player": player}})
+
+
+def load_activity_data(request, player_id: str, battle_type: str = "all") -> HttpResponse:
+
+    # Create the HttpResponse object with the appropriate CSV header.
+    response = HttpResponse(content_type="text/csv")
+
+    # fetch battle data for a given player and prepare it for display
+    df = fetch_battle_data(player_id, battle_type)
+
+    writer = csv.writer(response)
+    writer.writerow(["ship", "all", "pvp", "pve", "type"])
+    for index, row in df.iterrows():
+        writer.writerow(
+            [row['ship_name'], row['all_battles'], row['pvp_battles'], row['pve_battles'], row['ship_type']])
+
+    return response

@@ -7,7 +7,7 @@ import requests
 import os
 
 
-def get_ship_by_id(ship_id: str) -> Ship:
+def get_ship_by_id(ship_id: str):
     """
     Get ship data for a given ship_id
     """
@@ -22,22 +22,24 @@ def get_ship_by_id(ship_id: str) -> Ship:
         response = requests.get(url, params=params)
         data = response.json()
         try:
-            if data is not None:
+            if data['data'][str(ship_id)] is not None:
                 ship.name = data['data'][str(ship_id)]['name']
                 ship.nation = data['data'][str(ship_id)]['nation']
                 ship.is_premium = data['data'][str(ship_id)]['is_premium']
                 ship.ship_type = data['data'][str(ship_id)]['type']
                 ship.save()
                 print(f'Created ship {ship.name}')
+                return ship
         except KeyError:
-            breakpoint()
-    return ship
+            print(f"Error in response for ship_id: {ship_id}")
+            print(data)
+            return None
 
 
 def get_player_by_name(player_name: str) -> Player:
-    """
-    Get the player_id for a given player name
-    """
+    player_name = player_name.lower()
+
+    # given a player name, get the player_id
     url = "https://api.worldofwarships.com/wows/account/list/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
@@ -91,6 +93,21 @@ def get_player_by_name(player_name: str) -> Player:
     return player
 
 
+def get_ship_stats(player_id: int):
+    url = "https://api.worldofwarships.com/wows/ships/stats/"
+    params = {
+        "application_id": os.environ.get('WG_APP_ID'),
+        "account_id": player_id
+    }
+    response = requests.get(url, params=params)
+    data = response.json()
+    if data is None:
+        print("No data found")
+        return []
+    else:
+        return data
+
+
 def _get_player_data(player_id: int):
     """
     Get player data for a given player_id
@@ -118,7 +135,7 @@ def _get_recent_statistics(player: Player) -> list:
     }
 
     for i in range(28):
-        date = (datetime.datetime.now() -
+        date = ((datetime.datetime.now() - datetime.timedelta(28)) +
                 datetime.timedelta(days=i)).date().strftime("%m-%d")
         games_played = random.randint(0, 12)
         battle_data['dates'].append(date)

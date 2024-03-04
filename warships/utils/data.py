@@ -1,22 +1,13 @@
-from io import BytesIO
-from warships.models import Ship
 from warships.utils.api import get_ship_by_id
-import base64
-import json
-import os
 import pandas as pd
+from ..models import Player, Ship
+from .api import get_ship_stats
 
 
-def get_encoded_fig(plot) -> str:
-    # perform an in-memory save of a plot and prepare it for display as
-    # inline base64
-    fig_file = BytesIO()
-    plot.get_figure().savefig(fig_file, format='png')
-    return base64.b64encode(fig_file.getvalue()).decode('utf-8')
-
-
-def prepare_battles_data(player_id: str) -> pd.DataFrame:
+def fetch_battle_data(player_id: str, battle_type: str = "all") -> pd.DataFrame:
+    # fetch battle data for a given player and prepare it for display
     prepared_data = {}
+    ship_data = {}
 
     attribs = ['ship_name', 'all_battles', 'distance', 'wins',
                'losses', 'ship_type', 'pve_battles', 'pvp_battles']
@@ -26,12 +17,13 @@ def prepare_battles_data(player_id: str) -> pd.DataFrame:
     # prepare the ship data for display
     # TODO: get this from API
 
-    # add sample data to path
-    module_dir = os.path.dirname(__file__)
-    parent_dir = os.path.abspath(os.path.join(module_dir, os.pardir))
-    file_path = os.path.join(parent_dir, 'data', 'all_battles_by_ship.json')
-    with open(file_path, 'r') as f:
-        ship_data = json.load(f)
+    player = Player.objects.get(player_id=player_id)
+    if player.recent_games is None:
+        ship_data = get_ship_stats(player_id)
+        player.recent_games = ship_data
+        player.save()
+    else:
+        ship_data = player.recent_games
 
     # flatten data and filter into dataframe
     for ship in ship_data['data'][str(player_id)]:
@@ -47,10 +39,13 @@ def prepare_battles_data(player_id: str) -> pd.DataFrame:
         prepared_data['pvp_battles'].append(
             ship['pvp']['wins'] + ship['pvp']['losses'])
 
+    sort_order = f'{battle_type}_battles'
+
     df = pd.DataFrame(prepared_data).sort_values(
-        by="all_battles", ascending=False)
+        by=sort_order, ascending=False)
 
     plot_df = df.filter(
-        ['ship_name', 'pvp_battles'], axis=1)
+        ['ship_name', 'all_battles', 'pvp_battles', 'pve_battles', 'ship_type'], axis=1).head(25)
 
+    breakpoint()
     return plot_df

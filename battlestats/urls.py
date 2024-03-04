@@ -21,4 +21,6 @@ from warships import views
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('warships/player/<str:name>', views.player, name='player'),
+    path('warships/player/load_activity_data/<str:player_id>:<str:battle_type>',
+         views.load_activity_data, name='load_activity_data'),
 ]

@@ -18,7 +18,7 @@ class Player(models.Model):
     recent_games = models.JSONField(null=True, blank=True)
 
     def __str__(self):
-        return self.name + " (" + self.player_id + ")"
+        return self.name + " (" + str(self.player_id) + ")"
 
 
 class Ship(models.Model):
