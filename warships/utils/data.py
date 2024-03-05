@@ -1,16 +1,16 @@
 from warships.utils.api import get_ship_by_id
 import pandas as pd
-from ..models import Player, Ship
-from .api import get_ship_stats
+from warships.models import Player, Ship
+from warships.utils.api import get_ship_stats
 
 
-def fetch_battle_data(player_id: str, battle_type: str = "all") -> pd.DataFrame:
+def fetch_battle_data(player_id: str, sort_type: str = "pvp_battles") -> pd.DataFrame:
     # fetch battle data for a given player and prepare it for display
     prepared_data = {}
     ship_data = {}
 
     attribs = ['ship_name', 'all_battles', 'distance', 'wins',
-               'losses', 'ship_type', 'pve_battles', 'pvp_battles']
+               'losses', 'ship_type', 'pve_battles', 'pvp_battles', 'win_ratio']
     for attrib in attribs:
         prepared_data[attrib] = []
 
@@ -28,24 +28,27 @@ def fetch_battle_data(player_id: str, battle_type: str = "all") -> pd.DataFrame:
     # flatten data and filter into dataframe
     for ship in ship_data['data'][str(player_id)]:
         ship_model = get_ship_by_id(ship['ship_id'])
-        prepared_data['ship_name'].append(ship_model.name)
-        prepared_data['all_battles'].append(ship['battles'])
-        prepared_data['distance'].append(ship['distance'])
-        prepared_data['wins'].append(ship['pvp']['wins'])
-        prepared_data['losses'].append(ship['pvp']['losses'])
-        prepared_data['ship_type'].append(ship_model.ship_type)
-        prepared_data['pve_battles'].append(int(ship['battles']) -
-                                            (ship['pvp']['wins'] + ship['pvp']['losses']))
-        prepared_data['pvp_battles'].append(
-            ship['pvp']['wins'] + ship['pvp']['losses'])
 
-    sort_order = f'{battle_type}_battles'
+        if ship_model is not None:
+            if ship_model.name is not None and ship_model.name != "":
+                prepared_data['ship_name'].append(ship_model.name)
+                prepared_data['all_battles'].append(ship['battles'])
+                prepared_data['distance'].append(ship['distance'])
+                prepared_data['wins'].append(ship['pvp']['wins'])
+                prepared_data['losses'].append(ship['pvp']['losses'])
+                prepared_data['ship_type'].append(ship_model.ship_type)
+                prepared_data['pve_battles'].append(int(ship['battles']) -
+                                                    (ship['pvp']['wins'] + ship['pvp']['losses']))
+                prepared_data['pvp_battles'].append(
+                    ship['pvp']['wins'] + ship['pvp']['losses'])
+
+                if int(ship['pvp']['battles']) == 0:
+                    prepared_data['win_ratio'].append(0)
+                else:
+                    prepared_data['win_ratio'].append(
+                        round(int(ship['pvp']['wins']) / int(ship['pvp']['battles']), 2))
 
     df = pd.DataFrame(prepared_data).sort_values(
-        by=sort_order, ascending=False)
+        by=sort_type, ascending=False).head(30)
 
-    plot_df = df.filter(
-        ['ship_name', 'all_battles', 'pvp_battles', 'pve_battles', 'ship_type'], axis=1).head(25)
-
-    breakpoint()
-    return plot_df
+    return df

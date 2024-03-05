@@ -29,11 +29,12 @@ def get_ship_by_id(ship_id: str):
                 ship.ship_type = data['data'][str(ship_id)]['type']
                 ship.save()
                 print(f'Created ship {ship.name}')
-                return ship
+
         except KeyError:
             print(f"Error in response for ship_id: {ship_id}")
             print(data)
-            return None
+
+    return ship
 
 
 def get_player_by_name(player_name: str) -> Player:

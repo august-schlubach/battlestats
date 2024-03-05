@@ -1,11 +1,10 @@
 
-// set the dimensions and margins of the graph
-const margin = { top: 20, right: 30, bottom: 40, left: 110 },
-    width = 460 - margin.left - margin.right,
-    height = 500 - margin.top - margin.bottom;
+const margin = { top: 20, right: 30, bottom: 40, left: 120 },
+    width = 700 - margin.left - margin.right,
+    height = 700 - margin.top - margin.bottom;
 
 // append the svg object to the body of the page
-const svg = d3.select("#container")
+const g = d3.select("#container")
     .append("svg")
     .attr("width", width + margin.left + margin.right)
     .attr("height", height + margin.top + margin.bottom)
@@ -14,29 +13,44 @@ const svg = d3.select("#container")
 
 // Parse the Data
 
+function select_color(win_ratio) {
+    // return a color based on the player's win ratio
+    if (win_ratio < 0.40) {
+        return "#FE0E00"; //bad
+    }
+    else if (win_ratio < 0.45) {
+        return "#FE7903"; // below average
+    }
+    else if (win_ratio < 0.50) {
+        return "#FFC71F"; // average
+    }
+    else if (win_ratio < 0.52) {
+        return "#44B300"; // very good
+    }
+    else if (win_ratio < 0.56) {
+        return "#318000"; // great
+    }
+    else if (win_ratio < 0.62) {
+        return "#02C9B3"; // unicum
+    }
+    else {
+        return "#D042F3"; // unicum
+    }
+}
 
 function drawPlot(battle_type) {
     var path = "http://127.0.0.1:8000/warships/player/load_activity_data/" + player_id + ":" + battle_type;
     d3.csv(path).then(function (data) {
-        console.log(data)
-        console.log('battle_type: ' + battle_type)
         var max = d3.max(data, function (d) { return + d[battle_type]; });
 
-        function select_color(d) {
-            if (d.type == "Cruiser") return ("blue");
-            else if (d.type == "Destroyer") return ("#1b9e77");
-            else if (d.type == "Battleship") return ("#d95f02");
-            else if (d.type == "Aircraft Carrier") return ("#7570b3");
-            else
-                return ("#e7298a");
-        }
-        svg.selectAll("*").remove();
+        // remove the previous plot on re-render
+        g.selectAll("*").remove();
 
         // X axis
         const x = d3.scaleLinear()
             .domain([0, max])
-            .range([0, width]);
-        svg.append("g")
+            .range([1, width]);
+        g.append("g")
             .attr("transform", `translate(0, ${height})`)
             .call(d3.axisBottom(x))
             .selectAll("text")
@@ -48,22 +62,45 @@ function drawPlot(battle_type) {
             .range([0, height])
             .domain(data.map(d => d.ship))
             .padding(.1);
-        svg.append("g")
+        g.append("g")
             .call(d3.axisLeft(y))
 
-        //Bars
-        svg.selectAll("myRect")
+
+        var nodes = g.selectAll(".rect")
             .data(data)
-            .join("rect")
+            .enter()
+            .append("g")
+            .classed('rect', true)
+
+        nodes.append("rect")
+            .attr("x", x(0))
+            .attr("y", d => y(d.ship) + 4)
+            .attr("width", d => x(d[battle_type]))
+            .attr("height", (y.bandwidth() / 2))
+            .attr("class", "bar1");
+
+        nodes.append("rect")
             .attr("x", x(0))
             .attr("y", d => y(d.ship))
-            .attr("width", d => x(d[battle_type]))
+            .attr("width", d => x(d.wins))
             .attr("height", y.bandwidth())
-            .attr("fill", select_color)(d => d.type);
+            .attr("fill", d => select_color(d.win_ratio))
+            .on('mouseover', function (d, i) {
+                d3.select(this).transition()
+                    .duration('50')
+                    .attr('fill', 'black')
+            })
+            .on('mouseout', function (d, i) {
+                d3.select(this).transition()
+                    .duration('50')
+                    .attr("fill", d => select_color(d.win_ratio))
+            });
+
+
     })
 }
 
-drawPlot("all");
+drawPlot("pvp_battles");
 
 function changeType(battle_type) {
     drawPlot(battle_type);

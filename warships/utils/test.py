@@ -11,7 +11,6 @@ django.setup()
 
 # foil autopep8; will move these to the top otherwise
 if True:
-    from data import prepare_battles_data
+    from data import fetch_battle_data
 
-df = prepare_battles_data(os.environ.get('TEST_PLAYER_ID'))
-breakpoint()
+df = fetch_battle_data("1003892077")
