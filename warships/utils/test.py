@@ -14,3 +14,4 @@ if True:
     from data import fetch_battle_data
 
 df = fetch_battle_data("1003892077")
+breakpoint()

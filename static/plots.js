@@ -38,10 +38,10 @@ function select_color(win_ratio) {
     }
 }
 
-function drawPlot(battle_type) {
-    var path = "http://127.0.0.1:8000/warships/player/load_activity_data/" + player_id + ":" + battle_type;
+function drawPlot(filter_type = "pvp_battles") {
+    var path = "http://127.0.0.1:8000/warships/player/load_activity_data/" + player_id + ":" + filter_type;
     d3.csv(path).then(function (data) {
-        var max = d3.max(data, function (d) { return + d[battle_type]; });
+        var max = d3.max(data, function (d) { return + d.pvp_battles; });
 
         // remove the previous plot on re-render
         g.selectAll("*").remove();
@@ -75,7 +75,7 @@ function drawPlot(battle_type) {
         nodes.append("rect")
             .attr("x", x(0))
             .attr("y", d => y(d.ship) + 4)
-            .attr("width", d => x(d[battle_type]))
+            .attr("width", d => x(d.pvp_battles))
             .attr("height", (y.bandwidth() / 2))
             .attr("class", "bar1");
 
@@ -100,8 +100,8 @@ function drawPlot(battle_type) {
     })
 }
 
-drawPlot("pvp_battles");
+drawPlot();
 
-function changeType(battle_type) {
-    drawPlot(battle_type);
+function changeType(filter_type) {
+    drawPlot(filter_type);
 }

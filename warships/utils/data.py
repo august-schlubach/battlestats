@@ -1,21 +1,18 @@
 from warships.utils.api import get_ship_by_id
 import pandas as pd
-from warships.models import Player, Ship
+from warships.models import Player
 from warships.utils.api import get_ship_stats
 
 
-def fetch_battle_data(player_id: str, sort_type: str = "pvp_battles") -> pd.DataFrame:
+def fetch_battle_data(player_id: str) -> pd.DataFrame:
     # fetch battle data for a given player and prepare it for display
-    prepared_data = {}
-    ship_data = {}
 
+    ship_data = {}
+    prepared_data = {}
     attribs = ['ship_name', 'all_battles', 'distance', 'wins',
                'losses', 'ship_type', 'pve_battles', 'pvp_battles', 'win_ratio']
     for attrib in attribs:
         prepared_data[attrib] = []
-
-    # prepare the ship data for display
-    # TODO: get this from API
 
     player = Player.objects.get(player_id=player_id)
     if player.recent_games is None:
@@ -40,7 +37,7 @@ def fetch_battle_data(player_id: str, sort_type: str = "pvp_battles") -> pd.Data
                 prepared_data['pve_battles'].append(int(ship['battles']) -
                                                     (ship['pvp']['wins'] + ship['pvp']['losses']))
                 prepared_data['pvp_battles'].append(
-                    ship['pvp']['wins'] + ship['pvp']['losses'])
+                    ship['pvp']['battles'])
 
                 if int(ship['pvp']['battles']) == 0:
                     prepared_data['win_ratio'].append(0)
@@ -49,6 +46,5 @@ def fetch_battle_data(player_id: str, sort_type: str = "pvp_battles") -> pd.Data
                         round(int(ship['pvp']['wins']) / int(ship['pvp']['battles']), 2))
 
     df = pd.DataFrame(prepared_data).sort_values(
-        by=sort_type, ascending=False).head(30)
-
+        by="pvp_battles", ascending=False)
     return df
