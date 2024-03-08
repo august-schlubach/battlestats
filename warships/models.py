@@ -30,3 +30,12 @@ class Ship(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class RecentLookup(models.Model):
+    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    date_created = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.player.name

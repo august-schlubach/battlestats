@@ -18,8 +18,10 @@ from django.contrib import admin
 from django.urls import path
 from warships import views
 
+
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('', views.splash, name='splash'),
     path('warships/player/<str:name>', views.player, name='player'),
     path('warships/player/load_activity_data/<str:player_id>:<str:filter_type>',
          views.load_activity_data, name='load_activity_data'),
