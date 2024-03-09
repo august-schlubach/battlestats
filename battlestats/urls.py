@@ -23,6 +23,9 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', views.splash, name='splash'),
     path('warships/player/<str:name>', views.player, name='player'),
-    path('warships/player/load_activity_data/<str:player_id>:<str:filter_type>',
+    path('warships/player/load_activity_data/<str:player_id>:<str:ship_type>:<str:ship_tier>',
          views.load_activity_data, name='load_activity_data'),
+    path('warships/clan/plot/<str:clan_id>',
+         views.load_clan_plot_data, name='load_clan_plot_data'),
+    path('warships/clan/<str:clan_id>', views.clan, name='clan'),
 ]

@@ -3,12 +3,10 @@
 {% load static %}
 
 {% block d3 %}
-<script src="https://d3js.org/d3.v6.min.js"></script>
-<script>var player_id = {{ context.player.player_id }};</script>
-<script src="{% static 'plots.js' %}"></script>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <script>var player_id = {{ context.player.player_id }};</script>
+  <script src="{% static 'battle_plot.js' %}"></script>
 {% endblock %}
-
-{% 
 
 {% block content %} 
 <style>
@@ -27,6 +25,12 @@
     opacity: 0.5;
   }
 
+  .clan_tag a {
+    color: #777;
+    text-decoration: none;
+    font-size: 0.5em;
+  }
+
 </style>
 
 <div class="mw9 center ph2-ns">
@@ -35,7 +39,9 @@
       <div class="ph2">
         <div class="pv2">
           <div class="f6 lh-copy">
-            <h1 class="f2 lh-solid">{{ context.player.name }}</h1>  
+            <h1 class="f2 lh-solid">{{ context.player.name }} 
+              <span class="clan_tag v-top"><a href="{% url 'clan' context.player.clan.clan_id %}">[{{ context.player.clan.tag }}]</a></span>
+            </h1>  
           </div>
           <div class="f6 lh-copy ph3">
             <span class="ph3"><span class="f3 lh-solid">{{ context.player.pvp_ratio }}</span>% Win Rate</span>
@@ -47,26 +53,32 @@
           </div>
 
           <div id="pvp_stats_svg_container"></div>
-          <div class="pa3">
+          <div class="ph3">
           Ship Type: 
-            <input type="radio" onclick="drawBattlePlot('pvp_battles')" name="filter_type" checked="checked"> All
-            <input type="radio" onclick="drawBattlePlot('Battleship')" name="filter_type"> Battleships
-            <input type="radio" onclick="drawBattlePlot('Cruiser')" name="filter_type"> Cruisers
-            <input type="radio" onclick="drawBattlePlot('Destroyer')" name="filter_type"> Destroyers
-            <input type="radio" onclick="drawBattlePlot('AirCarrier')" name="filter_type"> CVs
-            <input type="radio" onclick="drawBattlePlot('Submarine')" name="filter_type"> Subs
-
+            <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_type" checked="checked"> All
+            <input type="radio" onclick="drawBattlePlot()" value="Battleship" name="filter_type"> Battleships
+            <input type="radio" onclick="drawBattlePlot()" value="Cruiser" name="filter_type"> Cruisers
+            <input type="radio" onclick="drawBattlePlot()" value="Destroyer" name="filter_type"> Destroyers
+            <input type="radio" onclick="drawBattlePlot()" value="AirCarrier" name="filter_type"> CVs
+            <input type="radio" onclick="drawBattlePlot()" value="Submarine" name="filter_type"> Subs
+          </div>
+          <div class="ph3">
           Tier: 
-            <input type="radio" onclick="drawBattlePlot('tier_all')" name="filter_tier" checked="checked"> All
-            <input type="radio" onclick="drawBattlePlot('tier_10')" name="filter_tier"> X
-            <input type="radio" onclick="drawBattlePlot('tier_9')" name="filter_tier"> IX
-            <input type="radio" onclick="drawBattlePlot('tier_8')" name="filter_tier"> VIII
-            <input type="radio" onclick="drawBattlePlot('tier_7')" name="filter_tier"> VII
-            <input type="radio" onclick="drawBattlePlot('tier_6')" name="filter_tier"> VII
+            <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_tier" checked="checked"> All
+            <input type="radio" onclick="drawBattlePlot()" value="10" name="filter_tier"> X
+            <input type="radio" onclick="drawBattlePlot()" value="9" name="filter_tier"> IX
+            <input type="radio" onclick="drawBattlePlot()" value="8" name="filter_tier"> VIII
+            <input type="radio" onclick="drawBattlePlot()" value="7" name="filter_tier"> VII
+            <input type="radio" onclick="drawBattlePlot()" value="6" name="filter_tier"> VI
+            <input type="radio" onclick="drawBattlePlot()" value="5" name="filter_tier"> V
+            <input type="radio" onclick="drawBattlePlot()" value="4" name="filter_tier"> IV
+            <input type="radio" onclick="drawBattlePlot()" value="3" name="filter_tier"> III
+            <input type="radio" onclick="drawBattlePlot()" value="2" name="filter_tier"> II
+            <input type="radio" onclick="drawBattlePlot()" value="1" name="filter_tier"> I
           </div>
         </div>
 
-        <div class="f6 lh-copy ph3">
+        <div class="f6 lh-copy pa3">
         other recent lookups:
         {% for lookup in context.recent_players %}
           <a href="{% url 'player' lookup.player.name %}">{{ lookup.player.name }}</a>

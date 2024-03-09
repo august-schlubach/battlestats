@@ -1,10 +1,25 @@
-from warships.utils.api import get_ship_by_id
+from warships.models import Player, RecentLookup, Clan
+from warships.utils.api import get_ship_stats, get_ship_by_id
 import pandas as pd
-from warships.models import Player, RecentLookup
-from warships.utils.api import get_ship_stats
+
+
+def fetch_clan_data(clan_id: str) -> pd.DataFrame:
+    players = Player.objects.filter(clan__clan_id=clan_id)
+    prepared_data = {}
+    attribs = ['name', 'pvp_battles', 'pvp_ratio',]
+    for attrib in attribs:
+        prepared_data[attrib] = []
+
+    for player in players:
+        prepared_data["name"].append(player.name)
+        prepared_data["pvp_battles"].append(player.pvp_battles)
+        prepared_data["pvp_ratio"].append(player.pvp_ratio)
+
+    return pd.DataFrame(prepared_data)
 
 
 def fetch_battle_data(player_id: str) -> pd.DataFrame:
+
     # fetch battle data for a given player and prepare it for display
     player = Player.objects.get(player_id=player_id)
 
@@ -15,7 +30,7 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
 
     ship_data = {}
     prepared_data = {}
-    attribs = ['ship_name', 'all_battles', 'distance', 'wins',
+    attribs = ['ship_name', 'ship_tier', 'all_battles', 'distance', 'wins',
                'losses', 'ship_type', 'pve_battles', 'pvp_battles',
                'win_ratio', 'kdr']
     for attrib in attribs:
@@ -29,12 +44,13 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
         ship_data = player.recent_games
 
     # flatten data and filter into dataframe
-    for ship in ship_data['data'][str(player_id)]:
+    for ship in ship_data['data'][player_id]:
         ship_model = get_ship_by_id(ship['ship_id'])
 
         if ship_model is not None:
             if ship_model.name is not None and ship_model.name != "":
                 prepared_data['ship_name'].append(ship_model.name)
+                prepared_data['ship_tier'].append(ship_model.tier)
                 prepared_data['all_battles'].append(ship['battles'])
                 prepared_data['distance'].append(ship['distance'])
                 prepared_data['wins'].append(ship['pvp']['wins'])
@@ -56,4 +72,5 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
 
     df = pd.DataFrame(prepared_data).sort_values(
         by="pvp_battles", ascending=False)
+
     return df

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% load static %}
+
+{% block d3 %}
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <script>var clan_id = {{ context.clan.clan_id }}</script>
+  <script src="{% static 'clan_plot.js' %}"></script>
+{% endblock %}
+
+{% block content %} 
+
+<div class="mw9 center ph2-ns">
+  <div class="cf ph2-ns">
+    <div class="fl w-60 pa0">
+      <div class="ph2">
+        <div class="pv2">
+          <div class="f6 lh-copy">
+            <h1 class="f2 lh-solid">{{ context.clan.name }}<span class="ph3">({{ context.clan.tag }})</span></h1>
+            <p class="f4 lh-copy">{{ context.clan.members_count }} Members</p>
+          </div>
+          <div id="svg_container"></div>
+          <div>
+            <h2 class="f3 lh-copy">Members</h2>
+            <ul class="list pl0">
+              {% for player in context.members %}
+                <a href="{% url 'player' player.name %}">{{ player.name }}</a>
+              {% endfor %}
+            </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} 

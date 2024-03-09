@@ -1,17 +1,40 @@
 # utility functions to interact with the warships API
-from warships.models import Player, Ship
+from warships.models import Player, Ship, Clan
 from dateutil.relativedelta import relativedelta
 import datetime
 import random
 import requests
 import os
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+
+def get_clan_members(clan_id: str):
+    """
+    Get clan members for a given clan_id
+    """
+
+    url = "https://api.worldofwarships.com/wows/clans/info/"
+    params = {
+        "application_id": os.environ.get('WG_APP_ID'),
+        "clan_id": clan_id
+    }
+    logging.info(f'--> remote fetching clan members for clan_id: {clan_id}')
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    for player_id in data['data'][str(clan_id)]['members_ids']:
+        logging.info(f' adding player_id: {player_id} to clan_id: {clan_id}')
+        get_player_by_id(player_id)
+
+    return data
 
 
 def get_ship_by_id(ship_id: str):
     """
     Get ship data for a given ship_id
     """
-
     ship, created = Ship.objects.get_or_create(ship_id=int(ship_id))
     if created:
         url = "https://api.worldofwarships.com/wows/encyclopedia/ships/"
@@ -19,6 +42,7 @@ def get_ship_by_id(ship_id: str):
             "application_id": os.environ.get('WG_APP_ID'),
             "ship_id": ship_id
         }
+        logging.info(f'--> remote fetching ship info for id: {ship_id}')
         response = requests.get(url, params=params)
         data = response.json()
         try:
@@ -27,8 +51,12 @@ def get_ship_by_id(ship_id: str):
                 ship.nation = data['data'][str(ship_id)]['nation']
                 ship.is_premium = data['data'][str(ship_id)]['is_premium']
                 ship.ship_type = data['data'][str(ship_id)]['type']
+                ship.tier = data['data'][str(ship_id)]['tier']
                 ship.save()
                 print(f'Created ship {ship.name}')
+            else:
+                print(f"Error in response for ship_id: {ship_id}")
+                print(data)
 
         except KeyError:
             print(f"Error in response for ship_id: {ship_id}")
@@ -37,69 +65,121 @@ def get_ship_by_id(ship_id: str):
     return ship
 
 
-def get_player_by_name(player_name: str) -> Player:
-    player_name = player_name.lower()
+def get_clan_info_by_player_id(player_id: str):
+    print(f'fetching clan info for id: {player_id}')
 
-    # given a player name, get the player_id
-    url = "https://api.worldofwarships.com/wows/account/list/"
+    url = "https://api.worldofwarships.com/wows/clans/accountinfo/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
-        "search": player_name
+        "account_id": player_id,
+        "extra": "clan"
     }
+    logging.info(f'--> remote fetching clan info for player_id: {player_id}')
     response = requests.get(url, params=params)
-    if response.json()['status'] == "error":
-        print('error in response')
+    data = response.json()
+    clan_id = None
+    try:
+        clan_id = data['data'][str(player_id)]['clan_id']
+    except TypeError:
+        print('no clan found')
         return None
-    # TODO: handle failed lookups
+    else:
+        clan, created = Clan.objects.get_or_create(
+            clan_id=clan_id,
+            name=data['data'][str(player_id)]['clan']['name'],
+            tag=data['data'][str(player_id)]['clan']['tag'],
+            members_count=data['data'][str(player_id)]['clan']['members_count'])
+        clan.save()
+        if created:
+            get_clan_members(str(clan.clan_id))
 
-    player, created = Player.objects.get_or_create(name=player_name)
-    player.player_id = response.json()['data'][0]['account_id']
+        return clan
 
+
+def get_player_by_id(player_id: str) -> Player:
+    player, created = Player.objects.get_or_create(player_id=player_id)
+    if created:
+        player.player_id = player_id
+        player.save()
+        create_new_player(player)
+    return player
+
+
+def get_player_by_name(player_name: str) -> Player:
+
+    player, created = Player.objects.get_or_create(name__iexact=player_name)
+    if created:
+        url = "https://api.worldofwarships.com/wows/account/list/"
+        params = {
+            "application_id": os.environ.get('WG_APP_ID'),
+            "search": player_name
+        }
+
+        logging.info(
+            f'--> remote fetching player info for: {player_name}')
+
+        response = requests.get(url, params=params)
+        if response.json()['status'] == "error":
+            print('error in response')
+            return None
+        # TODO: handle failed lookups
+
+        player.player_id = response.json()['data'][0]['account_id']
+        player.save()
+        create_new_player(player)
+
+    return player
+
+
+def create_new_player(player: Player):
     player_data = _get_player_data(player.player_id)
+    player.name = player_data[str(player.player_id)]["nickname"]
 
-    # battle counts
     player.total_battles = player_data[str(
         player.player_id)]["statistics"]["battles"]
-
     player.pvp_battles = int(player_data[str(
         player.player_id)]["statistics"]["pvp"]["battles"])
-
-    # calculate win/loss ratio
     player.pvp_wins = int(
         player_data[str(player.player_id)]["statistics"]["pvp"]["wins"])
     player.pvp_losses = int(
         player_data[str(player.player_id)]["statistics"]["pvp"]["losses"])
-    player.pvp_ratio = round(
-        (int(player.pvp_wins) / player.pvp_battles * 100), 2)
+    player.last_battle_date = datetime.datetime.fromtimestamp(
+        int(player_data[str(player.player_id)]["last_battle_time"])).date()
+
+    # calculate win/loss ratio
+    if player.pvp_battles == 0:
+        player.pvp_ratio = 0
+    else:
+        player.pvp_ratio = round(
+            (int(player.pvp_wins) / player.pvp_battles * 100), 2)
 
     player.creation_date = datetime.datetime.fromtimestamp(
         int(player_data[str(player.player_id)]["created_at"]))
 
     # calculate the time since the last battle
-    player.last_battle_date = datetime.datetime.fromtimestamp(
-        int(player_data[str(player.player_id)]["last_battle_time"])).date()
     player.days_since_last_battle = int(
         (datetime.datetime.now().date() - player.last_battle_date).days)
 
     # calculate survival rates
     player.pvp_survival_rate = round((player_data[str(
         player.player_id)]["statistics"]["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
+
+    clan = get_clan_info_by_player_id(str(player.player_id))
+    if clan is not None:
+        player.clan = clan
+        player.save()
+
+    player.recent_games = get_ship_stats(player.player_id)
     player.save()
 
-    # calculate win survival rate
-    player.wins_survival_rate = round((player_data[str(
-        player.player_id)]["statistics"]["pvp"]["survived_wins"] / player.pvp_wins) * 100, 2)
 
-    player.recent_games = _get_recent_statistics(player)
-    return player
-
-
-def get_ship_stats(player_id: int):
+def get_ship_stats(player_id: str):
     url = "https://api.worldofwarships.com/wows/ships/stats/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
         "account_id": player_id
     }
+    logging.info(f'--> remote fetching ship stats for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
     if data is None:
@@ -118,7 +198,7 @@ def _get_player_data(player_id: int):
         "application_id": os.environ.get('WG_APP_ID'),
         "account_id": player_id
     }
-
+    logging.info(f'--> remote fetching player data for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
     if data is None:
