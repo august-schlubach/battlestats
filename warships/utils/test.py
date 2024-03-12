@@ -17,4 +17,4 @@ if True:
     from data import fetch_battle_data
     from api import get_clan_members
 
-get_clan_members("1000055908")
+get_clan_members("1000071694")

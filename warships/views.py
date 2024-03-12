@@ -1,32 +1,36 @@
 from django.http import HttpResponse
 from django.shortcuts import render
-from warships.models import RecentLookup
-from warships.utils.api import get_player_by_name
-from warships.utils.data import fetch_battle_data, fetch_clan_data
-from warships.models import Clan
+from warships.utils.data import (
+    fetch_battle_data,
+    fetch_clan_data,
+    get_player_by_name
+)
+from warships.models import Clan, Player
 import csv
 import random
 
 
 def clan(request, clan_id: str = "1000057393") -> render:
-    # fetch basic clan data and render for template
+    # fetch clan data and render for template
     clan = Clan.objects.get(clan_id=clan_id)
-    members = clan.player_set.filter(clan=clan)
-    # call api to get clan members
+    members = clan.player_set.filter(clan=clan).order_by('-last_battle_date')
+    clan_list = Clan.objects.all()
     return render(request, 'clan.html', {"context": {"clan": clan,
-                                                     "members": members}})
+                                                     "members": members,
+                                                     "clan_list": clan_list}})
 
 
 def splash(request) -> render:
-    # render splash page
-    recent_players = RecentLookup.objects.all().order_by('-last_updated')
+    # render splash page, which gets recent lookups
+    recent_players = Player.objects.all().order_by('-last_battle_date')
     return render(request, 'splash.html', {"context": {"recent_players": recent_players}})
 
 
 def player(request, name: str = "lil_boots") -> render:
     # fetch basic player data and render for template
     player = get_player_by_name(name)
-    recent_players = RecentLookup.objects.all().order_by('-last_updated')
+    recent_players = Player.objects.all().order_by(
+        '-last_battle_date')[:25]
     return render(
         request, 'player.html',  {"context": {"player": player,
                                               "recent_players": recent_players}})
@@ -38,6 +42,8 @@ def load_clan_plot_data(request, clan_id: str) -> HttpResponse:
 
     # fetch battle data for a given player and prepare it for display
     df = fetch_clan_data(clan_id)
+    df = df.loc[df['pvp_battles'] > 15]
+
     writer = csv.writer(response)
     writer.writerow(["player_name", "pvp_battles", "pvp_ratio"])
 

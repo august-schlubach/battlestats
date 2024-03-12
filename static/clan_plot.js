@@ -23,7 +23,12 @@ function drawClanPlot() {
             .range([0, width]);
         svg.append("g")
             .attr("transform", "translate(0," + height + ")")
-            .call(d3.axisBottom(x));
+            .call(d3.axisBottom(x))
+            .selectAll("text")
+            .attr("transform", "translate(-10,0)rotate(-45)")
+            .style("text-anchor", "end");
+
+
 
         // Add Y axis
         var y = d3.scaleLinear()
@@ -31,6 +36,21 @@ function drawClanPlot() {
             .range([height, 0]);
         svg.append("g")
             .call(d3.axisLeft(y));
+
+        svg.append("text")
+            .attr("class", "f6 lh-copy axisLabel")
+            .attr("text-anchor", "end")
+            .attr("x", width)
+            .attr("y", height - 6)
+            .text("Random Battles");
+
+        svg.append("text")
+            .attr("class", "f6 lh-copy axisLabel")
+            .attr("text-anchor", "end")
+            .attr("transform", "translate(-10,0)rotate(-90)")
+            .attr("x", 0)
+            .attr("y", 25)
+            .text("Win Rate");
 
         svg.append('g')
             .selectAll("dot")
@@ -59,7 +79,7 @@ function drawClanPlot() {
 }
 
 function showDetails(d) {
-    const start_x = 20, start_y = 20, x_offset = 10;
+    const start_x = 30, start_y = 10, x_offset = 10;
 
     detailGroup = svg.append("g")
         .classed('details', true);
@@ -74,7 +94,7 @@ function showDetails(d) {
         .attr("font-weight", "400")
         .text(d.pvp_battles + " Battles");
     detailGroup.append("text")
-        .attr("x", start_x + 100)
+        .attr("x", start_x + 110)
         .attr("y", start_y + 20)
         .attr("font-weight", "400")
         .text(d.pvp_ratio + "% Win Rate");

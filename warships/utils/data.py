@@ -1,6 +1,70 @@
-from warships.models import Player, RecentLookup, Clan
-from warships.utils.api import get_ship_stats, get_ship_by_id
+from warships.models import Player, RecentLookup
+from warships.utils.api.ships import (
+    _get_ship_stats_for_player,
+    _get_ship_info_by_id
+)
+from warships.utils.api.players import _get_player_data, _get_player_by_name
+from warships.utils.api.clans import _get_clan_info_by_player_id
 import pandas as pd
+import datetime
+
+
+def get_player_by_name(player_name: str) -> Player:
+    player, created = Player.objects.get_or_create(name__iexact=player_name)
+    if created:
+        player = _get_player_by_name(player_name)
+        create_new_player(player)
+    return player
+
+
+def create_new_player(player: Player, player_data: dict = None):
+    if player_data is None:
+        player_data = _get_player_data(player.player_id)
+    player.name = player_data[str(player.player_id)]["nickname"]
+
+    try:
+        player.total_battles = player_data[str(
+            player.player_id)]["statistics"]["battles"]
+        player.pvp_battles = int(player_data[str(
+            player.player_id)]["statistics"]["pvp"]["battles"])
+        player.pvp_wins = int(
+            player_data[str(player.player_id)]["statistics"]["pvp"]["wins"])
+        player.pvp_losses = int(
+            player_data[str(player.player_id)]["statistics"]["pvp"]["losses"])
+        player.last_battle_date = datetime.datetime.fromtimestamp(
+            int(player_data[str(player.player_id)]["last_battle_time"])).date()
+    except TypeError:
+        print(f'Error in response for player_id: {player.player_id}')
+        return player
+
+    # calculate win/loss ratio
+    if player.pvp_battles == 0:
+        player.pvp_ratio = 0
+    else:
+        player.pvp_ratio = round(
+            (int(player.pvp_wins) / player.pvp_battles * 100), 2)
+
+    player.creation_date = datetime.datetime.fromtimestamp(
+        int(player_data[str(player.player_id)]["created_at"]))
+
+    # calculate the time since the last battle
+    player.days_since_last_battle = int(
+        (datetime.datetime.now().date() - player.last_battle_date).days)
+
+    # calculate survival rates
+    if player.pvp_battles == 0:
+        player.pvp_survival_rate = 0
+    else:
+        player.pvp_survival_rate = round((player_data[str(
+            player.player_id)]["statistics"]["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
+
+    clan = _get_clan_info_by_player_id(str(player.player_id))
+    if clan is not None:
+        player.clan = clan
+        player.save()
+
+    player.recent_games = _get_ship_stats_for_player(player.player_id)
+    player.save()
 
 
 def fetch_clan_data(clan_id: str) -> pd.DataFrame:
@@ -37,7 +101,7 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
         prepared_data[attrib] = []
 
     if player.recent_games is None:
-        ship_data = get_ship_stats(player_id)
+        ship_data = _get_ship_stats_for_player(player_id)
         player.recent_games = ship_data
         player.save()
     else:
@@ -45,7 +109,7 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
 
     # flatten data and filter into dataframe
     for ship in ship_data['data'][player_id]:
-        ship_model = get_ship_by_id(ship['ship_id'])
+        ship_model = _get_ship_info_by_id(ship['ship_id'])
 
         if ship_model is not None:
             if ship_model.name is not None and ship_model.name != "":

@@ -22,14 +22,46 @@
   
   .bar2 {
     fill: #333333;
-    opacity: 0.5;
+    opacity: 0.5;b
   }
 
-  .clan_tag a {
-    color: #777;
+ a {
+    color: #555;
     text-decoration: none;
-    font-size: 0.5em;
   }
+  a:hover {
+    color: #a503fc;
+  }
+  nav {
+	position: fixed;
+	top: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	width: 100%;
+	z-index: 2;
+	transition: background .15s linear;
+}
+nav.page-nav {
+	position: relative;
+	background: white;
+}
+nav .nav-content {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	max-width: 1920px;
+	margin: 0 auto;
+	padding: .7222222222rem .8888888889rem;
+}
+nav .brand {
+	display: flex;
+	align-items: center;
+	flex: 1;
+	overflow: hidden;
+}
+
+
 
 </style>
 
@@ -40,7 +72,7 @@
         <div class="pv2">
           <div class="f6 lh-copy">
             <h1 class="f2 lh-solid">{{ context.player.name }} 
-              <span class="clan_tag v-top"><a href="{% url 'clan' context.player.clan.clan_id %}">[{{ context.player.clan.tag }}]</a></span>
+              <span class="clan_tag v-top"><a href="{% url 'clan' context.player.clan.clan_id %}">  [{{ context.player.clan.tag }}]</a></span>
             </h1>  
           </div>
           <div class="f6 lh-copy ph3">
@@ -48,12 +80,13 @@
             <span class="ph3"><span class="f3 lh-solid">{{ context.player.pvp_battles|intcomma }}</span> PvP Battles</span>
             <span class="f3 lh-solid">{{context.player.pvp_survival_rate }}</span>% Survival
           </div>
-          <div class="f6 lh-copy pa3">
+          <div class="f6 lh-copy pb3 pt1 pl3">
             <span class="ph3">Last Played: {{ context.player.days_since_last_battle }} days ago</span>
           </div>
-
+         <div class="f6 b lh-copy pa1 pt3">Random Battles: Win Rate/Games Played</div> 
           <div id="pvp_stats_svg_container"></div>
-          <div class="ph3">
+
+          <div class="pa3">
           Ship Type: 
             <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_type" checked="checked"> All
             <input type="radio" onclick="drawBattlePlot()" value="Battleship" name="filter_type"> Battleships
@@ -61,8 +94,7 @@
             <input type="radio" onclick="drawBattlePlot()" value="Destroyer" name="filter_type"> Destroyers
             <input type="radio" onclick="drawBattlePlot()" value="AirCarrier" name="filter_type"> CVs
             <input type="radio" onclick="drawBattlePlot()" value="Submarine" name="filter_type"> Subs
-          </div>
-          <div class="ph3">
+          <br/>
           Tier: 
             <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_tier" checked="checked"> All
             <input type="radio" onclick="drawBattlePlot()" value="10" name="filter_tier"> X
@@ -78,16 +110,17 @@
           </div>
         </div>
 
-        <div class="f6 lh-copy pa3">
-        other recent lookups:
-        {% for lookup in context.recent_players %}
-          <a href="{% url 'player' lookup.player.name %}">{{ lookup.player.name }}</a>
-        {% endfor %}
-        </div>
+
       </div>
     </div>
     <div class="fl w-40 ph6">
-    <div class="" id="ship_battles_svg_container"></div>
+      <div class="f6 lh-copy pa3">
+        recently active players:
+        {% for player in context.recent_players %}
+          <a href="{% url 'player' player.name %}">{{ player.name }}</a><br/>
+        {% endfor %}
+      </div>
+    
   </div>
 </div>
 {% endblock %}

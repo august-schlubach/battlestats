@@ -9,24 +9,46 @@
 {% endblock %}
 
 {% block content %} 
+<style>
 
+  .x_axis path {
+    display: none;
+  }
+
+  .axisLabel {
+    fill: #333;
+    opacity: 0.5;
+  }
+  a {
+    color: #555;
+    text-decoration: none;
+  }
+  a:hover {
+    color: #a503fc;
+  }
+</style>
 <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
     <div class="fl w-60 pa0">
       <div class="ph2">
         <div class="pv2">
           <div class="f6 lh-copy">
-            <h1 class="f2 lh-solid">{{ context.clan.name }}<span class="ph3">({{ context.clan.tag }})</span></h1>
-            <p class="f4 lh-copy">{{ context.clan.members_count }} Members</p>
+            <h1 class="f2 lh-solid">{{ context.clan.name }}<span class="ph3">[{{ context.clan.tag }}]</span></h1>
+            <p class="f4 lh-copy">{{ context.clan.members_count }} Members </p>
           </div>
           <div id="svg_container"></div>
           <div>
             <h2 class="f3 lh-copy">Members</h2>
-            <ul class="list pl0">
+            <div class="f6 lh-copy pa3">
               {% for player in context.members %}
-                <a href="{% url 'player' player.name %}">{{ player.name }}</a>
+                <span class="pl0 pr0"><a href="{% url 'player' player.name %}">{{ player.name }}</a> &#9737;</span>&nbsp;
               {% endfor %}
-            </ul>
+            </div>
+            <div class="f6 lh-copy pa3">groovy clans:
+              {% for clan in context.clan_list %}
+                <span class="pl0 pr0"><a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> &#9737;</span>&nbsp;
+              {% endfor %}
+            </div>
         </div>
       </div>
     </div>

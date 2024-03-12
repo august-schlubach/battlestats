@@ -1,6 +1,6 @@
 
-const margin = { top: 20, right: 30, bottom: 40, left: 140 },
-    width = 700 - margin.left - margin.right,
+const margin = { top: 10, right: 20, bottom: 30, left: 140 },
+    width = 600 - margin.left - margin.right,
     height = 500 - margin.top - margin.bottom;
 
 // append the svg object to the body of the page
@@ -40,6 +40,13 @@ function drawBattlePlot() {
         g.append("g")
             .call(d3.axisLeft(y));
 
+        g.append("text")
+            .attr("class", "f6 lh-copy bar1")
+            .attr("text-anchor", "end")
+            .attr("x", width)
+            .attr("y", height - 6)
+            .text("Random Battles");
+
         var nodes = g.selectAll(".rect")
             .data(data)
             .enter()
@@ -75,7 +82,7 @@ function drawBattlePlot() {
 }
 
 function showDetails(d) {
-    const start_x = 350, start_y = 350, x_offset = 10;
+    const start_x = 300, start_y = 320, x_offset = 10;
     var win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
     detailGroup = g.append("g")
@@ -90,34 +97,34 @@ function showDetails(d) {
         .attr("x", start_x + x_offset)
         .attr("y", start_y + 25)
         .style("font-size", "16px")
-        .text(d.pvp_battles);
-    detailGroup.append("text")
-        .attr("x", start_x + x_offset + 45)
-        .attr("y", start_y + 25)
-        .style("font-size", "12px")
-        .text("Battles");
-
-    detailGroup.append("text")
-        .attr("x", start_x + x_offset)
-        .attr("y", start_y + 42)
-        .style("font-size", "16px")
         .text(win_percentage);
     detailGroup.append("text")
         .attr("x", start_x + x_offset + 45)
-        .attr("y", start_y + 42)
+        .attr("y", start_y + 25)
         .style("font-size", "12px")
         .text("% Win Rate");
 
     detailGroup.append("text")
         .attr("x", start_x + x_offset)
-        .attr("y", start_y + 59)
+        .attr("y", start_y + 47)
+        .style("font-size", "16px")
+        .text(d.pvp_battles);
+    detailGroup.append("text")
+        .attr("x", start_x + x_offset + 45)
+        .attr("y", start_y + 47)
+        .style("font-size", "12px")
+        .text("Battles");
+
+    detailGroup.append("text")
+        .attr("x", start_x + x_offset)
+        .attr("y", start_y + 64)
         .style("font-size", "16px")
         .text(d.kdr);
     detailGroup.append("text")
         .attr("x", start_x + x_offset + 45)
-        .attr("y", start_y + 59)
+        .attr("y", start_y + 64)
         .style("font-size", "12px")
-        .text(" KDR");
+        .text("  Kills per game");
 }
 
 function hideDetails() {

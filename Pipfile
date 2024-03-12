@@ -12,6 +12,7 @@ seaborn = "*"
 matplotlib = "*"
 asgiref = "*"
 grequests = "*"
+django-timezone-utils = "*"
 
 [dev-packages]
 
