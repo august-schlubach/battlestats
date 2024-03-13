@@ -1,5 +1,4 @@
 from warships.models import Player, Clan
-from warships.utils.data import create_new_player
 import requests
 import os
 import logging
@@ -7,12 +6,13 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
-def _get_clan_info_by_player_id(player_id: str):
+def _fetch_clan_data(player_id: str) -> dict:
     """
     fetch clan info for a given player_id. if a player is part of 
-    a naval clan, return the info for that clan. otherwise, return None
+    a naval clan, return the info for that clan. otherwise, return 
+    an empty dict
     """
-
+    return_data = {}
     url = "https://api.worldofwarships.com/wows/clans/accountinfo/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
@@ -22,35 +22,21 @@ def _get_clan_info_by_player_id(player_id: str):
     logging.info(f'--> remote fetching clan info for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
-    clan_id = None
-    try:
-        clan_id = data['data'][str(player_id)]['clan_id']
-    except TypeError:
-        print('ERROR: typeerror accessing clan data by id')
 
-    if clan_id is not None:
-        clan, created = Clan.objects.get_or_create(
-            clan_id=clan_id,
-            name=data['data'][str(player_id)]['clan']['name'],
-            tag=data['data'][str(player_id)]['clan']['tag'],
-            members_count=data['data'][str(player_id)]['clan']['members_count'])
-        clan.save()
-        if created:
-            # TODO: make this an async call
-            _get_clan_members(str(clan.clan_id))
-        return clan
-    else:
-        return None
+    if data['status'] == "ok":
+        return_data = data['data'][player_id]
+
+    return return_data
 
 
-def _get_clan_members(clan_id: str) -> None:
+def _fetch_clan_member_ids(clan_id: str) -> list:
     """
     fetch all of the members of a given clan and get_or_create a new player object 
     for each member. this method is intended to be run asynchonously
     when a new clan is created so that all of the data is fetched and stored
     before it is needed.
     """
-
+    members = []
     url = "https://api.worldofwarships.com/wows/clans/info/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
@@ -63,22 +49,28 @@ def _get_clan_members(clan_id: str) -> None:
     # extract list of player ids from clan data and join into a string
     # for batch loading from api
     members = data['data'][str(clan_id)]['members_ids']
-    member_list = ','.join([str(member) for member in members])
+    return members
+
+
+def _fetch_player_data_from_list(players: list) -> dict:
+    """
+    fetch all of the player data for a given list of player ids
+    """
+    return_data = {}
+    member_list = ','.join([str(member) for member in players])
 
     url = "https://api.worldofwarships.com/wows/account/info/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
         "account_id": member_list
     }
-    logging.info(f'--> remote fetching player data for members: member_list')
+    logging.info(f'--> remote fetching player data for members: {member_list}')
     response = requests.get(url, params=params)
     data = response.json()
-    if data is None:
-        print("No data found")
 
-    for player_id in members:
-        player, created = Player.objects.get_or_create(player_id=player_id)
-        if created:
-            player.player_id = str(player_id)
-            print(f'Creating new player with id: {player_id}')
-            create_new_player(player, data['data'])
+    if data is None:
+        print("ERROR: No data found for list of players")
+    else:
+        return_data = data['data']
+
+    return return_data

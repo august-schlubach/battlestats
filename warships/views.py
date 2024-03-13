@@ -22,7 +22,7 @@ def clan(request, clan_id: str = "1000057393") -> render:
 
 def splash(request) -> render:
     # render splash page, which gets recent lookups
-    recent_players = Player.objects.all().order_by('-last_battle_date')
+    recent_players = Player.objects.all().order_by('-last_battle_date')[:25]
     return render(request, 'splash.html', {"context": {"recent_players": recent_players}})
 
 
@@ -35,6 +35,9 @@ def player(request, name: str = "lil_boots") -> render:
         request, 'player.html',  {"context": {"player": player,
                                               "recent_players": recent_players}})
 
+
+# -----
+# utility views for fetching data for ajax calls
 
 def load_clan_plot_data(request, clan_id: str) -> HttpResponse:
     # Create the HttpResponse object with the appropriate CSV header.

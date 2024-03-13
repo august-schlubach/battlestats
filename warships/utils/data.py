@@ -1,10 +1,13 @@
 from warships.models import Player, RecentLookup
 from warships.utils.api.ships import (
-    _get_ship_stats_for_player,
-    _get_ship_info_by_id
+    _fetch_ship_stats_for_player,
+    _fetch_ship_info
 )
-from warships.utils.api.players import _get_player_data, _get_player_by_name
-from warships.utils.api.clans import _get_clan_info_by_player_id
+from warships.utils.api.players import (
+    _fetch_player_battle_data,
+    _fetch_player_id_by_name
+)
+from warships.utils.api.clans import _fetch_clan_data
 import pandas as pd
 import datetime
 
@@ -12,14 +15,20 @@ import datetime
 def get_player_by_name(player_name: str) -> Player:
     player, created = Player.objects.get_or_create(name__iexact=player_name)
     if created:
-        player = _get_player_by_name(player_name)
-        create_new_player(player)
+        player.player_id = _fetch_player_id_by_name(player_name)
+        player = populate_new_player(player)
     return player
 
 
-def create_new_player(player: Player, player_data: dict = None):
+def populate_new_player(player: Player, player_data: dict = None) -> Player:
+    # player objects come in with a player_id but no other data
+
+    # make sure we have the player data, passed in or fetched
     if player_data is None:
-        player_data = _get_player_data(player.player_id)
+        player_data = _fetch_player_battle_data(player.player_id)
+
+    # -------
+    # populate the player object with data from the api response
     player.name = player_data[str(player.player_id)]["nickname"]
 
     try:
@@ -58,13 +67,45 @@ def create_new_player(player: Player, player_data: dict = None):
         player.pvp_survival_rate = round((player_data[str(
             player.player_id)]["statistics"]["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
 
-    clan = _get_clan_info_by_player_id(str(player.player_id))
-    if clan is not None:
+    # ------
+    # fetch naval clan data
+
+    clan_data = _fetch_clan_data(str(player.player_id))
+    ''' Response Format
+        {
+            "clan": {
+                "members_count":
+                "created_at":
+                "clan_id":
+                "tag":
+                "name":
+            },
+            "account_id":
+            "joined_at":
+            "clan_id":
+            "role":
+            "account_name":
+        }
+    '''
+    if clan_data is not None:
+        clan, created = Clan.objects.get_or_create(
+            clan_id=clan_data['clan']['clan_id'],
+            name=clan_data['clan']['name'],
+            tag=clan_data['clan']['tag'],
+            members_count=clan_data['clan']['members_count'])
+        clan.save()
         player.clan = clan
         player.save()
+    #     if created:
+    #         # TODO: make this an async call
+    #         _fetch_clan_members(str(clan.clan_id))
+    #     return clan
+    # else:
+    #     return None
 
-    player.recent_games = _get_ship_stats_for_player(player.player_id)
+    player.recent_games = _fetch_ship_stats_for_player(player.player_id)
     player.save()
+    return player
 
 
 def fetch_clan_data(clan_id: str) -> pd.DataFrame:
@@ -101,7 +142,7 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
         prepared_data[attrib] = []
 
     if player.recent_games is None:
-        ship_data = _get_ship_stats_for_player(player_id)
+        ship_data = _fetch_ship_stats_for_player(player_id)
         player.recent_games = ship_data
         player.save()
     else:
@@ -109,7 +150,7 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
 
     # flatten data and filter into dataframe
     for ship in ship_data['data'][player_id]:
-        ship_model = _get_ship_info_by_id(ship['ship_id'])
+        ship_model = _fetch_ship_info(ship['ship_id'])
 
         if ship_model is not None:
             if ship_model.name is not None and ship_model.name != "":

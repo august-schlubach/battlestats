@@ -6,7 +6,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 
-def _get_ship_stats_for_player(player_id: str) -> dict:
+def _fetch_ship_stats_for_player(player_id: str) -> dict:
     """
     fetch all of the competitive data for all of the ships for a given player_id.
     returns a json object that can be parsed for display keyed off of ship_id
@@ -28,7 +28,7 @@ def _get_ship_stats_for_player(player_id: str) -> dict:
     return data
 
 
-def _get_ship_info_by_id(ship_id: str) -> Ship:
+def _fetch_ship_info(ship_id: str) -> Ship:
     """
     Get or create a specific ship model and populate with non-competitive
     data for a given ship_id
@@ -43,6 +43,7 @@ def _get_ship_info_by_id(ship_id: str) -> Ship:
         logging.info(f'--> remote fetching ship info for id: {ship_id}')
         response = requests.get(url, params=params)
         data = response.json()
+    
         try:
             if data['data'][str(ship_id)] is not None:
                 ship.name = data['data'][str(ship_id)]['name']

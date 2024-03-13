@@ -1,12 +1,12 @@
-from warships.models import Player
 import logging
 import os
 import requests
+from warships.models import Player
 
 logging.basicConfig(level=logging.INFO)
 
 
-def _get_player_data(player_id: int) -> dict:
+def _fetch_player_battle_data(player_id: int) -> dict:
     """
     fetch json data for a given player_id. returns a dict of 
     either player data or empty if player id not found
@@ -20,6 +20,7 @@ def _get_player_data(player_id: int) -> dict:
     logging.info(f'--> remote fetching player data for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
+
     if data is None:
         print(f"ERROR: No data found for player_id: {player_id}")
     else:
@@ -28,8 +29,10 @@ def _get_player_data(player_id: int) -> dict:
     return return_data
 
 
-def _get_player_by_name(player_name: str) -> Player:
-
+def _fetch_player_id_by_name(player_name: str) -> str:
+    """
+    get_or_create a Player object by player name and return it
+    """
     player, created = Player.objects.get_or_create(name__iexact=player_name)
     if created:
         url = "https://api.worldofwarships.com/wows/account/list/"
@@ -47,8 +50,12 @@ def _get_player_by_name(player_name: str) -> Player:
             return None
         # TODO: handle failed lookups
 
-        player.player_id = response.json()['data'][0]['account_id']
-        player.name = response.json()['data'][0]['nickname']
-        player.save()
+        try:
+            player_id = response.json()['data'][0]['account_id']
+        except KeyError:
+            print(f'ERROR: accessing player data by name: {player_name}')
+            player_id = ''
 
-    return player
+        return player_id
+    else:
+        return player.player_id
