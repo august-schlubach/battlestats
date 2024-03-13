@@ -24,7 +24,7 @@ def _fetch_player_battle_data(player_id: int) -> dict:
     if data is None:
         print(f"ERROR: No data found for player_id: {player_id}")
     else:
-        return_data = data['data']
+        return_data = data['data'][str(player_id)]
 
     return return_data
 

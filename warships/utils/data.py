@@ -1,4 +1,4 @@
-from warships.models import Player, RecentLookup
+from warships.models import Player, RecentLookup, Clan
 from warships.utils.api.ships import (
     _fetch_ship_stats_for_player,
     _fetch_ship_info
@@ -7,9 +7,16 @@ from warships.utils.api.players import (
     _fetch_player_battle_data,
     _fetch_player_id_by_name
 )
-from warships.utils.api.clans import _fetch_clan_data
+from warships.utils.api.clans import (
+    _fetch_clan_data,
+    _fetch_clan_member_ids,
+    _fetch_player_data_from_list
+)
 import pandas as pd
 import datetime
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 
 def get_player_by_name(player_name: str) -> Player:
@@ -18,6 +25,22 @@ def get_player_by_name(player_name: str) -> Player:
         player.player_id = _fetch_player_id_by_name(player_name)
         player = populate_new_player(player)
     return player
+
+
+def populate_clan(clan_id: str) -> None:
+    clan_members = _fetch_clan_member_ids(str(clan_id))
+    local_members = Player.objects.filter(clan__clan_id=clan_id).count()
+    if local_members < len(clan_members):
+        player_data = _fetch_player_data_from_list(clan_members)
+        for p in player_data:
+            player, created = Player.objects.get_or_create(
+                player_id=int(p))
+            if created:
+                player.player_id = p
+                player.save()
+                player = populate_new_player(player, player_data[p])
+    else:
+        logging.info('Clan already populated')
 
 
 def populate_new_player(player: Player, player_data: dict = None) -> Player:
@@ -29,21 +52,69 @@ def populate_new_player(player: Player, player_data: dict = None) -> Player:
 
     # -------
     # populate the player object with data from the api response
-    player.name = player_data[str(player.player_id)]["nickname"]
 
+    '''
+    "account_id":
+    "last_battle_time":
+    "nickname":
+    "stats_updated_at":
+    "updated_at":
+    "statistics":
+        "distance":
+        "battles":
+        "pvp":
+            "battles":
+            "draws":
+            "frags":
+            "losses":
+            "survived_battles":
+            "survived_wins":
+            "wins":
+            "main_battery":
+                "max_frags_battle":
+                "frags":
+                "hits":
+                "max_frags_ship_id":
+                "shots":
+            },
+            "ramming":
+                "max_frags_battle":
+                "frags":
+                "max_frags_ship_id":
+            },
+            "torpedoes":
+                "max_frags_battle":
+                "frags":
+                "hits":
+                "max_frags_ship_id":
+                "shots":
+            },
+            "second_battery":
+                "max_frags_battle":
+                "frags":
+                "hits":
+                "max_frags_ship_id":
+                "shots":
+            },
+        }
+    }
+    '''
     try:
-        player.total_battles = player_data[str(
-            player.player_id)]["statistics"]["battles"]
-        player.pvp_battles = int(player_data[str(
-            player.player_id)]["statistics"]["pvp"]["battles"])
-        player.pvp_wins = int(
-            player_data[str(player.player_id)]["statistics"]["pvp"]["wins"])
-        player.pvp_losses = int(
-            player_data[str(player.player_id)]["statistics"]["pvp"]["losses"])
+        player.name = player_data["nickname"]
         player.last_battle_date = datetime.datetime.fromtimestamp(
-            int(player_data[str(player.player_id)]["last_battle_time"])).date()
-    except TypeError:
-        print(f'Error in response for player_id: {player.player_id}')
+            int(player_data["last_battle_time"])).date()
+        player.creation_date = datetime.datetime.fromtimestamp(
+            int(player_data["created_at"]))
+
+        stats = player_data["statistics"]
+        player.total_battles = stats["battles"]
+        player.pvp_battles = int(stats["pvp"]["battles"])
+        player.pvp_wins = int(stats["pvp"]["wins"])
+        player.pvp_losses = int(stats["pvp"]["losses"])
+
+    except (TypeError, KeyError) as e:
+        print(f'Error in response for player_id {player.player_id}: {e}')
+        breakpoint()
         return player
 
     # calculate win/loss ratio
@@ -53,9 +124,6 @@ def populate_new_player(player: Player, player_data: dict = None) -> Player:
         player.pvp_ratio = round(
             (int(player.pvp_wins) / player.pvp_battles * 100), 2)
 
-    player.creation_date = datetime.datetime.fromtimestamp(
-        int(player_data[str(player.player_id)]["created_at"]))
-
     # calculate the time since the last battle
     player.days_since_last_battle = int(
         (datetime.datetime.now().date() - player.last_battle_date).days)
@@ -64,12 +132,11 @@ def populate_new_player(player: Player, player_data: dict = None) -> Player:
     if player.pvp_battles == 0:
         player.pvp_survival_rate = 0
     else:
-        player.pvp_survival_rate = round((player_data[str(
-            player.player_id)]["statistics"]["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
+        player.pvp_survival_rate = round(
+            (stats["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
 
     # ------
     # fetch naval clan data
-
     clan_data = _fetch_clan_data(str(player.player_id))
     ''' Response Format
         {
@@ -95,16 +162,10 @@ def populate_new_player(player: Player, player_data: dict = None) -> Player:
             members_count=clan_data['clan']['members_count'])
         clan.save()
         player.clan = clan
-        player.save()
-    #     if created:
-    #         # TODO: make this an async call
-    #         _fetch_clan_members(str(clan.clan_id))
-    #     return clan
-    # else:
-    #     return None
 
     player.recent_games = _fetch_ship_stats_for_player(player.player_id)
     player.save()
+
     return player
 
 

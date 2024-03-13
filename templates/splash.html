@@ -4,7 +4,7 @@
 <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
     <div class="fl w-100 pa0">
-{% for player in context.recent_players %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> {% endfor %}
+{% for player in context.recent %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> {% endfor %}
     </div>
   </div>
 </div>

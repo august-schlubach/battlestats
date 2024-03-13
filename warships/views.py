@@ -3,7 +3,8 @@ from django.shortcuts import render
 from warships.utils.data import (
     fetch_battle_data,
     fetch_clan_data,
-    get_player_by_name
+    get_player_by_name,
+    populate_clan
 )
 from warships.models import Clan, Player
 import csv
@@ -22,18 +23,25 @@ def clan(request, clan_id: str = "1000057393") -> render:
 
 def splash(request) -> render:
     # render splash page, which gets recent lookups
-    recent_players = Player.objects.all().order_by('-last_battle_date')[:25]
-    return render(request, 'splash.html', {"context": {"recent_players": recent_players}})
+    recent = Player.objects.all().order_by('-last_battle_date')[:25]
+    return render(request, 'splash.html', {"context": {"recent": recent}})
 
 
 def player(request, name: str = "lil_boots") -> render:
     # fetch basic player data and render for template
     player = get_player_by_name(name)
-    recent_players = Player.objects.all().order_by(
+    try:
+        clan = Clan.objects.get(clan_id=player.clan.clan_id)
+        print(f'---> clan found: {clan.name} {clan.clan_id}')
+        populate_clan(clan.clan_id)
+    except Clan.DoesNotExist:
+        print('player has no clan')
+
+    recent = Player.objects.all().order_by(
         '-last_battle_date')[:25]
     return render(
         request, 'player.html',  {"context": {"player": player,
-                                              "recent_players": recent_players}})
+                                              "recent": recent}})
 
 
 # -----
