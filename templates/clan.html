@@ -16,7 +16,7 @@
   }
 
   .axisLabel {
-    fill: #333;
+    fill: #222;
     opacity: 0.5;
   }
   a {
@@ -37,11 +37,24 @@
             <p class="f4 lh-copy">{{ context.clan.members_count }} Members </p>
           </div>
           <div id="svg_container"></div>
+                    <div class="pa3 f6 lh-copy">
+            Ship Type:
+            <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_type" checked="checked"> All
+            <input type="radio" onclick="drawBattlePlot()" value="Battleship" name="filter_type"> Battleships
+            <input type="radio" onclick="drawBattlePlot()" value="Cruiser" name="filter_type"> Cruisers
+            <input type="radio" onclick="drawBattlePlot()" value="Destroyer" name="filter_type"> Destroyers
+            <input type="radio" onclick="drawBattlePlot()" value="AirCarrier" name="filter_type"> CVs
+            <input type="radio" onclick="drawBattlePlot()" value="Submarine" name="filter_type"> Subs
+          </div>
           <div>
             <h2 class="f3 lh-copy">Members</h2>
             <div class="f6 lh-copy pa3">
               {% for player in context.members %}
-                <span class="pl0 pr0"><a href="{% url 'player' player.name %}">{{ player.name }}</a> &#9737;</span>&nbsp;
+                {% if player.is_hidden == False %}
+                  <span class="pl0 pr0"><a href="{% url 'player' player.name %}">{{ player.name }}</a> &#9737;</span>&nbsp;
+                {% else %}
+                  <span class="pl0 pr0">{{ player.name }} &#9737;</span>&nbsp;
+                {% endif %}
               {% endfor %}
             </div>
             <div class="f6 lh-copy pa3">groovy clans:

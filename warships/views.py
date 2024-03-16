@@ -9,6 +9,7 @@ from warships.utils.data import (
 from warships.models import Clan, Player
 import csv
 import random
+import pandas as pd
 
 
 def clan(request, clan_id: str = "1000057393") -> render:
@@ -32,7 +33,6 @@ def player(request, name: str = "lil_boots") -> render:
     player = get_player_by_name(name)
     try:
         clan = Clan.objects.get(clan_id=player.clan.clan_id)
-        print(f'---> clan found: {clan.name} {clan.clan_id}')
         populate_clan(clan.clan_id)
     except Clan.DoesNotExist:
         print('player has no clan')
@@ -71,7 +71,6 @@ def load_activity_data(request, player_id: str,
                        ship_type: str = "all",
                        ship_tier: str = "all") -> HttpResponse:
 
-    print(f"loading battle activity data for player_id: {player_id}")
     # Create the HttpResponse object with the appropriate CSV header.
     response = HttpResponse(content_type="text/csv")
 
@@ -104,5 +103,75 @@ def load_activity_data(request, player_id: str,
         writer.writerow([r, "1",
                         "0", "Battleship", "0", "0", "0"])
         count += 1
+
+    return response
+
+
+def load_tier_data(request, player_id: str) -> HttpResponse:
+    # Create the HttpResponse object with the appropriate CSV header.
+    response = HttpResponse(content_type="text/csv")
+
+    # fetch battle data for a given player and prepare it for display
+    df = fetch_battle_data(player_id)
+    df = df.filter(['ship_tier', 'pvp_battles', 'wins'])
+
+    data = {'ship_tier': [], 'pvp_battles': [], 'wins': [], 'win_ratio': []}
+    for i in range(1, 12):
+        j = 12-i  # reverse the tier order
+        battles = int(df.loc[df['ship_tier'] == 12-i, 'pvp_battles'].sum())
+        wins = int(df.loc[df['ship_tier'] == 12-i, 'wins'].sum())
+        wr = round(wins/battles if battles > 0 else 0, 2)
+        data["pvp_battles"].append(battles)
+        data["ship_tier"].append(12-i)
+        data["wins"].append(wins)
+        data["win_ratio"].append(wr)
+
+    df = pd.DataFrame(
+        data, columns=["ship_tier", "pvp_battles", "wins", "win_ratio"])
+
+    writer = csv.writer(response)
+    writer.writerow(["ship_tier", "pvp_battles", "wins", "win_ratio"])
+
+    for index, row in df.iterrows():
+        writer.writerow(
+            [row['ship_tier'],
+             row['pvp_battles'],
+             row['wins'],
+             row['win_ratio']])
+
+    return response
+
+
+def load_type_data(request, player_id: str) -> HttpResponse:
+    # Create the HttpResponse object with the appropriate CSV header.
+    response = HttpResponse(content_type="text/csv")
+
+    # fetch battle data for a given player and prepare it for display
+    df = fetch_battle_data(player_id)
+    df = df.filter(['ship_type', 'pvp_battles', 'wins', 'win_ratio'])
+
+    data = {'ship_type': [], 'pvp_battles': [], 'wins': [], 'win_ratio': []}
+    for ship_type in df['ship_type'].unique():
+        battles = int(df.loc[df['ship_type'] ==
+                      ship_type, 'pvp_battles'].sum())
+        wins = int(df.loc[df['ship_type'] == ship_type, 'wins'].sum())
+        wr = round(wins/battles if battles > 0 else 0, 2)
+        data["pvp_battles"].append(battles)
+        data["ship_type"].append(ship_type)
+        data["wins"].append(wins)
+        data["win_ratio"].append(wr)
+
+    df = pd.DataFrame(
+        data, columns=["ship_type", "pvp_battles", "wins", "win_ratio"]).sort_values(by='pvp_battles', ascending=False)
+
+    writer = csv.writer(response)
+    writer.writerow(["ship_type", "pvp_battles", "wins", "win_ratio"])
+
+    for index, row in df.iterrows():
+        writer.writerow(
+            [row['ship_type'],
+             row['pvp_battles'],
+             row['wins'],
+             row['win_ratio']])
 
     return response

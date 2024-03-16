@@ -18,6 +18,10 @@ class Player(models.Model):
     recent_games = models.JSONField(null=True, blank=True)
     clan = models.ForeignKey(
         'Clan', on_delete=models.CASCADE, null=True, blank=True)
+    is_hidden = models.BooleanField(default=False)
+    stats_updated_at = models.DateTimeField(
+        auto_now=False, null=True, blank=True)
+    last_fetch = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.name + " (" + str(self.player_id) + ")"
@@ -49,6 +53,7 @@ class Clan(models.Model):
     name = models.CharField(max_length=200, null=True, blank=True)
     tag = models.CharField(max_length=200, null=True, blank=True)
     members_count = models.IntegerField(null=True, blank=True)
+    last_fetch = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return str(self.clan_id) + '-' + self.name

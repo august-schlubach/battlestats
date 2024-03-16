@@ -50,7 +50,19 @@ function drawClanPlot() {
             .attr("transform", "translate(-10,0)rotate(-90)")
             .attr("x", 0)
             .attr("y", 25)
-            .text("Win Rate");
+            .text("Win %");
+
+        svg.append("g")
+            .selectAll("name")
+            .data(data)
+            .enter()
+            .append("text")
+            .attr("class", "f6 lh-copy axisLabel")
+            .style("font-size", "10px")
+            .attr("text-anchor", "end")
+            .attr("x", function (d) { return x(d.pvp_battles) - 9; })
+            .attr("y", function (d) { return y(d.pvp_ratio) + 4; })
+            .text(d => d.player_name);
 
         svg.append('g')
             .selectAll("dot")
@@ -62,6 +74,8 @@ function drawClanPlot() {
             .attr("cx", function (d) { return x(d.pvp_battles); })
             .attr("cy", function (d) { return y(d.pvp_ratio); })
             .attr("r", 6)
+            .style("stroke", "#444")
+            .style("stroke-width", 0.75)
             .attr("fill", d => select_color_by_wr(d.pvp_ratio))
             .on('mouseover', function (event, d) {
                 showDetails(d);
@@ -75,6 +89,7 @@ function drawClanPlot() {
                     .duration('50')
                     .attr("fill", d => select_color_by_wr(d.pvp_ratio))
             });
+
     });
 }
 

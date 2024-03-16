@@ -65,6 +65,8 @@ function drawBattlePlot() {
             .attr("y", d => y(d.ship))
             .attr("width", d => x(d.wins))
             .attr("height", y.bandwidth())
+            .style("stroke", "#444")
+            .style("stroke-width", 0.75)
             .attr("fill", d => select_color_by_wr(d.win_ratio))
             .on('mouseover', function (event, d) {
                 showDetails(d);

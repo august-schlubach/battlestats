@@ -24,31 +24,50 @@ def get_player_by_name(player_name: str) -> Player:
     if created:
         player.player_id = _fetch_player_id_by_name(player_name)
         player = populate_new_player(player)
+
+    if player.last_fetch is None or (datetime.datetime.now() - player.last_fetch).days > 1:
+        logging.info(f'old timestamp: fetching new data for {player.name}')
+        player.recent_games = _fetch_ship_stats_for_player(player.player_id)
+        player.last_fetch = datetime.datetime.now()
+        player.save()
+
     return player
 
 
 def populate_clan(clan_id: str) -> None:
-    clan_members = _fetch_clan_member_ids(str(clan_id))
-    local_members = Player.objects.filter(clan__clan_id=clan_id).count()
-    if local_members < len(clan_members):
-        player_data = _fetch_player_data_from_list(clan_members)
-        for p in player_data:
-            player, created = Player.objects.get_or_create(
-                player_id=int(p))
-            if created:
-                player.player_id = p
-                player.save()
-                player = populate_new_player(player, player_data[p])
-    else:
-        logging.info('Clan already populated')
+    clan = Clan.objects.get(clan_id=clan_id)
+    if clan.last_fetch is None or (datetime.datetime.now() - clan.last_fetch).days > 1:
+        clan_members = _fetch_clan_member_ids(str(clan_id))
+        local_members = Player.objects.filter(clan__clan_id=clan_id).count()
+        if local_members < len(clan_members):
+            logging.info(
+                'Clan contains more members than database: fetching new data')
+            player_data = _fetch_player_data_from_list(clan_members)
+            for p in player_data:
+                player, created = Player.objects.get_or_create(
+                    player_id=int(p))
+                if created:
+                    player.player_id = p
+                    player = populate_new_player(
+                        player, player_data[p], clan_id)
+        else:
+            logging.info('Clan data updated: no changes needed')
+
+        clan.last_fetch = datetime.datetime.now()
+        clan.save()
 
 
-def populate_new_player(player: Player, player_data: dict = None) -> Player:
+def populate_new_player(player: Player,
+                        player_data: dict = None,
+                        clan_id: int = None) -> Player:
     # player objects come in with a player_id but no other data
 
     # make sure we have the player data, passed in or fetched
     if player_data is None:
         player_data = _fetch_player_battle_data(player.player_id)
+
+    if player_data['hidden_profile'] is True:
+        player.is_hidden = True
 
     # -------
     # populate the player object with data from the api response
@@ -99,73 +118,76 @@ def populate_new_player(player: Player, player_data: dict = None) -> Player:
         }
     }
     '''
-    try:
-        player.name = player_data["nickname"]
-        player.last_battle_date = datetime.datetime.fromtimestamp(
-            int(player_data["last_battle_time"])).date()
-        player.creation_date = datetime.datetime.fromtimestamp(
-            int(player_data["created_at"]))
+    # populate fields accessible to both hidden and open accounts
+    player.name = player_data["nickname"]
+    player.creation_date = datetime.datetime.fromtimestamp(
+        int(player_data["created_at"]))
 
+    player.last_battle_date = datetime.datetime.fromtimestamp(
+        int(player_data["last_battle_time"])).date()
+
+    # calculate the time since the last battle
+    if player.last_battle_date is not None:
+        player.days_since_last_battle = int(
+            (datetime.datetime.now().date() - player.last_battle_date).days)
+
+    if player.is_hidden is not True:
+        player.stats_updated_at = datetime.datetime.fromtimestamp(
+            int(player_data["stats_updated_at"]))
         stats = player_data["statistics"]
         player.total_battles = stats["battles"]
         player.pvp_battles = int(stats["pvp"]["battles"])
         player.pvp_wins = int(stats["pvp"]["wins"])
         player.pvp_losses = int(stats["pvp"]["losses"])
 
-    except (TypeError, KeyError) as e:
-        print(f'Error in response for player_id {player.player_id}: {e}')
-        breakpoint()
-        return player
+        # calculate win/loss ratio
+        if player.pvp_battles == 0:
+            player.pvp_ratio = 0
+        elif player.pvp_battles is not None and player.pvp_wins is not None:
+            player.pvp_ratio = round(
+                (int(player.pvp_wins) / player.pvp_battles * 100), 2)
 
-    # calculate win/loss ratio
-    if player.pvp_battles == 0:
-        player.pvp_ratio = 0
-    else:
-        player.pvp_ratio = round(
-            (int(player.pvp_wins) / player.pvp_battles * 100), 2)
+        # calculate survival rates
+        if player.pvp_battles == 0:
+            player.pvp_survival_rate = 0
+        elif stats["pvp"]["survived_battles"] is not None and player.pvp_battles is not None:
+            player.pvp_survival_rate = round(
+                (stats["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
 
-    # calculate the time since the last battle
-    player.days_since_last_battle = int(
-        (datetime.datetime.now().date() - player.last_battle_date).days)
-
-    # calculate survival rates
-    if player.pvp_battles == 0:
-        player.pvp_survival_rate = 0
-    else:
-        player.pvp_survival_rate = round(
-            (stats["pvp"]["survived_battles"] / player.pvp_battles) * 100, 2)
+        player.recent_games = _fetch_ship_stats_for_player(player.player_id)
 
     # ------
     # fetch naval clan data
-    clan_data = _fetch_clan_data(str(player.player_id))
-    ''' Response Format
-        {
-            "clan": {
-                "members_count":
-                "created_at":
+    if clan_id is not None:
+        player.clan = Clan.objects.get(clan_id=clan_id)
+    else:
+        clan_data = _fetch_clan_data(str(player.player_id))
+        ''' Response Format
+            {
+                "clan": {
+                    "members_count":
+                    "created_at":
+                    "clan_id":
+                    "tag":
+                    "name":
+                },
+                "account_id":
+                "joined_at":
                 "clan_id":
-                "tag":
-                "name":
-            },
-            "account_id":
-            "joined_at":
-            "clan_id":
-            "role":
-            "account_name":
-        }
-    '''
-    if clan_data is not None:
-        clan, created = Clan.objects.get_or_create(
-            clan_id=clan_data['clan']['clan_id'],
-            name=clan_data['clan']['name'],
-            tag=clan_data['clan']['tag'],
-            members_count=clan_data['clan']['members_count'])
-        clan.save()
-        player.clan = clan
+                "role":
+                "account_name":
+            }
+        '''
+        if clan_data is not None:
+            clan, created = Clan.objects.get_or_create(
+                clan_id=clan_data['clan']['clan_id'],
+                name=clan_data['clan']['name'],
+                tag=clan_data['clan']['tag'],
+                members_count=clan_data['clan']['members_count'])
+            clan.save()
+            player.clan = clan
 
-    player.recent_games = _fetch_ship_stats_for_player(player.player_id)
     player.save()
-
     return player
 
 
@@ -190,9 +212,9 @@ def fetch_battle_data(player_id: str) -> pd.DataFrame:
     player = Player.objects.get(player_id=player_id)
 
     # log player lookup
-    lookup, created = RecentLookup.objects.get_or_create(player=player)
-    lookup.last_updated = pd.Timestamp.now()
-    lookup.save()
+    # lookup, created = RecentLookup.objects.get_or_create(player=player)
+    # lookup.last_updated = pd.Timestamp.now()
+    # lookup.save()
 
     ship_data = {}
     prepared_data = {}

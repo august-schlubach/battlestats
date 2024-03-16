@@ -6,6 +6,8 @@
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <script>var player_id = {{ context.player.player_id }};</script>
   <script src="{% static 'battle_plot.js' %}"></script>
+  <script src="{% static 'tier_plot.js' %}"></script>
+  <script src="{% static 'type_plot.js' %}"></script>
 {% endblock %}
 
 {% block content %} 
@@ -60,42 +62,40 @@ nav .brand {
 	flex: 1;
 	overflow: hidden;
 }
-
-
-
 </style>
 
 <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
-    <div class="fl w-60 pa0">
+    <div class="fl pa0">
       <div class="ph2">
         <div class="pv2">
           <div class="f6 lh-copy">
-            <h1 class="f2 lh-solid">{{ context.player.name }} 
-              <span class="clan_tag v-top"><a href="{% url 'clan' context.player.clan.clan_id %}">  [{{ context.player.clan.tag }}]</a></span>
-            </h1>  
+            <h1 class="f2 lh-solid">{{ context.player.name }}
+              <span class="clan_tag v-top"><a href="{% url 'clan' context.player.clan.clan_id %}"> [{{ context.player.clan.tag }}]</a></span>
+            </h1>
           </div>
           <div class="f6 lh-copy ph3">
             <span class="ph3"><span class="f3 lh-solid">{{ context.player.pvp_ratio }}</span>% Win Rate</span>
-            <span class="ph3"><span class="f3 lh-solid">{{ context.player.pvp_battles|intcomma }}</span> PvP Battles</span>
+            <span class="ph3"><span class="f3 lh-solid">{{ context.player.pvp_battles|intcomma }}</span> PvP
+              Battles</span>
             <span class="f3 lh-solid">{{context.player.pvp_survival_rate }}</span>% Survival
           </div>
           <div class="f6 lh-copy pb3 pt1 pl3">
             <span class="ph3">Last Played: {{ context.player.days_since_last_battle }} days ago</span>
           </div>
-         <div class="f6 b lh-copy pa1 pt3">Random Battles: Win Rate/Games Played</div> 
+          <div class="f5 b lh-copy pa1 pt3">Random Battles: Win Rate/Games Played</div>
           <div id="pvp_stats_svg_container"></div>
 
-          <div class="pa3">
-          Ship Type: 
+          <div class="pa3 f6 lh-copy">
+            Ship Type:
             <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_type" checked="checked"> All
             <input type="radio" onclick="drawBattlePlot()" value="Battleship" name="filter_type"> Battleships
             <input type="radio" onclick="drawBattlePlot()" value="Cruiser" name="filter_type"> Cruisers
             <input type="radio" onclick="drawBattlePlot()" value="Destroyer" name="filter_type"> Destroyers
             <input type="radio" onclick="drawBattlePlot()" value="AirCarrier" name="filter_type"> CVs
             <input type="radio" onclick="drawBattlePlot()" value="Submarine" name="filter_type"> Subs
-          <br/>
-          Tier: 
+            <br />
+            Tier:
             <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_tier" checked="checked"> All
             <input type="radio" onclick="drawBattlePlot()" value="10" name="filter_tier"> X
             <input type="radio" onclick="drawBattlePlot()" value="9" name="filter_tier"> IX
@@ -110,17 +110,14 @@ nav .brand {
           </div>
         </div>
 
+        <div class="f5 b lh-copy pa1 pt3">Random Battles: Tier/Games Played</div>
+        <div id="tier_svg_container"></div>
+
+        <div class="f5 b lh-copy pa1 pt3">Random Battles: Ship Type/Games Played</div>
+        <div id="type_svg_container"></div>
 
       </div>
     </div>
-    <div class="fl w-40 ph6">
-      <div class="f6 lh-copy pa3">
-        recently active players:
-        {% for player in context.recent %}
-          <a href="{% url 'player' player.name %}">{{ player.name }}</a><br/>
-        {% endfor %}
-      </div>
-    
   </div>
 </div>
 {% endblock %}

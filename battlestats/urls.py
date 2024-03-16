@@ -28,4 +28,8 @@ urlpatterns = [
     path('warships/clan/plot/<str:clan_id>',
          views.load_clan_plot_data, name='load_clan_plot_data'),
     path('warships/clan/<str:clan_id>', views.clan, name='clan'),
+    path('warships/player/load_tier_data/<str:player_id>',
+         views.load_tier_data, name='load_tier_data'),
+    path('warships/player/load_type_data/<str:player_id>',
+         views.load_type_data, name='load_type_data'),
 ]
