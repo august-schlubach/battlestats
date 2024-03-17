@@ -19,10 +19,9 @@ function drawActivityPlot() {
         var loading_image = document.getElementById("activity_loading_image");
         loading_image.remove();
 
-        console.log(data);
         var max_battles = d3.max(data, function (d) { return + d.battles; });
         max_battles = Math.max(max_battles, 5);
-        console.log("max_battles: ", max_battles);
+
         const x = d3.scaleTime()
             .domain([start_date, Date.now()])
             .range([6, activity_svg_width]);
@@ -52,20 +51,19 @@ function drawActivityPlot() {
         nodes.append("rect")
             .attr("x", d => x(new Date(d.date)))
             .attr("y", d => y(d.battles))
-            .attr("height", function (d) { return activity_svg_height - y(d.battles); })
+            .attr("height", function (d) { return activity_svg_height - ((y(d.battles) === undefined) ? 0 : y(d.battles)) })
             .attr("width", "12")
             .attr("fill", "#ccc");
 
         nodes.append("rect")
             .attr("x", d => x(new Date(d.date)) + 1)
             .attr("y", d => y(d.wins))
-            .attr("height", function (d) { return activity_svg_height - y(d.wins); })
+            .attr("height", function (d) { return activity_svg_height - ((y(d.wins) === undefined) ? 0 : y(d.wins)) })
             .attr("width", "10")
             .style("stroke", "#444")
             .style("stroke-width", 0.5)
             .attr("fill", "#74c476");
     });
-
 }
 
 drawActivityPlot();

@@ -1,7 +1,6 @@
 $(function () {
     $.getJSON("/warships/fetch/load_player_names", function (data) {
         player_names = data;
-        console.log("player names from the source:", player_names);
         $("#player_query").autocomplete({
             source: player_names
         });
