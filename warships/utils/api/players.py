@@ -20,7 +20,7 @@ def _fetch_snapshot_data(player_id: int, dates: str = '') -> dict:
         "fields": "pvp.account_id,pvp.battles,pvp.wins,pvp.survived_battles,pvp.battle_type,pvp.date"
     }
     logging.info(
-        f'--> remote fetching snapshot data for player_id: {player_id} dates: {dates}')
+        f'--> remote fetching snapshot for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
 

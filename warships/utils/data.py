@@ -75,7 +75,7 @@ def populate_new_player(player: Player,
     # -------
     # populate the player object with data from the api response
 
-    '''
+    ''' Response Format
     "account_id":
     "last_battle_time":
     "nickname":
@@ -218,13 +218,9 @@ def update_snapshot_data(player: Player) -> None:
         last_fetch_date = last_snapshot.last_fetch
     except Snapshot.DoesNotExist:
         last_fetch_date = datetime.datetime.now() - datetime.timedelta(days=50)
-        print(f'last_fetch_date: {last_fetch_date}')
     if (datetime.datetime.now() - last_fetch_date).days < 1:
-        logging.info(
-            f'snapshot data already updated today at {last_fetch_date}')
         return
 
-    logging.info('updating snapshot data')
     dates = []
     for i in range(29):
         date = ((datetime.datetime.now() - datetime.timedelta(28)) +
@@ -271,14 +267,11 @@ def update_snapshot_data(player: Player) -> None:
 
 
 def fetch_snapshot_data(player_id: str) -> pd.DataFrame:
-    # fetch battle data for a given player and prepare it for display
     player = Player.objects.get(player_id=player_id)
     update_snapshot_data(player)
 
-    start_date = datetime.datetime.now() - datetime.timedelta(28)
-
-    # iterate through 28 days of snapshots and prepare data for display
-    data = {'date': [], 'battles': []}
+    # iterate through 28 days of snapshots and prepare df for display
+    data = {'date': [], 'battles': [], 'wins': []}
     for i in range(29):
         date = ((datetime.datetime.now() - datetime.timedelta(28)) +
                 datetime.timedelta(days=i)).date().strftime("%Y-%m-%d")
@@ -286,17 +279,24 @@ def fetch_snapshot_data(player_id: str) -> pd.DataFrame:
 
         if Snapshot.objects.filter(player=player, date=date).exists():
             interval_battles = 0
+            wins = 0
+            snap = Snapshot.objects.get(player=player, date=date)
             try:
-                interval_battles = int(Snapshot.objects.get(
-                    player=player, date=date).interval_battles)
+                interval_battles = snap.interval_battles
+                wins = snap.interval_wins
             except TypeError:
                 logging.info(f'Snapshot error: {player.name} - {date}')
+                snap.interval_battles = 0
+                snap.wins = 0
+                snap.save()
 
             data["battles"].append(interval_battles)
+            data["wins"].append(wins)
         else:
             data["battles"].append(0)
+            data["wins"].append(0)
 
-    df = pd.DataFrame(data, columns=["date", "battles"])
+    df = pd.DataFrame(data, columns=["date", "battles", "wins"])
 
     return df
 

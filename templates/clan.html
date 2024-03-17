@@ -6,6 +6,11 @@
   <script src="https://d3js.org/d3.v6.min.js"></script>
   <script>var clan_id = {{ context.clan.clan_id }}</script>
   <script src="{% static 'clan_plot.js' %}"></script>
+  
+  <script src="https://code.jquery.com/jquery-3.6.0.js"></script>
+  <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+  <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+  <script src="{% static 'search.js' %}"></script>
 {% endblock %}
 
 {% block content %} 
@@ -29,9 +34,15 @@
 </style>
 <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
-    <div class="fl w-60 pa0">
+    <div class="fl pa0">
       <div class="ph2">
         <div class="pv2">
+
+          <div class="ui-widget">
+            <label for="player_query">Search Players: </label>
+            <input id="player_query">
+          </div>
+
           <div class="f6 lh-copy">
             <h1 class="f2 lh-solid">{{ context.clan.name }}<span class="ph3">[{{ context.clan.tag }}]</span></h1>
             <p class="f4 lh-copy">{{ context.all_members }} Members | {{ context.active_members }} Active </p>

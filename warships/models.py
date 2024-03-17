@@ -53,6 +53,8 @@ class Clan(models.Model):
     name = models.CharField(max_length=200, null=True, blank=True)
     tag = models.CharField(max_length=200, null=True, blank=True)
     members_count = models.IntegerField(null=True, blank=True)
+    leader_name = models.CharField(max_length=200, null=True, blank=True)
+    leader_id = models.IntegerField(null=True, blank=True)
     last_fetch = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):

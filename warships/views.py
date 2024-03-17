@@ -1,4 +1,4 @@
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from warships.utils.data import (
     fetch_battle_data,
@@ -11,7 +11,8 @@ from warships.models import Clan, Player
 import csv
 import random
 import pandas as pd
-import datetime
+import os
+import json
 
 
 def clan(request, clan_id: str = "1000057393") -> render:
@@ -52,6 +53,15 @@ def player(request, name: str = "lil_boots") -> render:
 
 # -----
 # utility views for fetching data for ajax calls
+def load_player_names(request) -> JsonResponse:
+    # fetch all player names and return as JSON
+    module_dir = os.path.dirname(__file__)
+    file_path = os.path.join(module_dir, 'data', 'player_names.json')
+    with open(file_path, 'r') as f:
+        player_names = json.load(f)
+
+    return JsonResponse(player_names, safe=False)
+
 
 def load_clan_plot_data(request, clan_id: str, filter_type: str = "all") -> HttpResponse:
     # Create the HttpResponse object with the appropriate CSV header.
@@ -143,9 +153,9 @@ def load_tier_data(request, player_id: str) -> HttpResponse:
 
     for index, row in df.iterrows():
         writer.writerow(
-            [row['ship_tier'],
-             row['pvp_battles'],
-             row['wins'],
+            [int(row['ship_tier']),
+             int(row['pvp_battles']),
+             int(row['wins']),
              row['win_ratio']])
 
     return response
@@ -193,11 +203,12 @@ def load_recent_data(request, player_id: str) -> HttpResponse:
     # fetch battle data for a given player and prepare it for display
     df = fetch_snapshot_data(player_id)
     writer = csv.writer(response)
-    writer.writerow(["date", "battles"])
+    writer.writerow(["date", "battles", "wins"])
 
     for index, row in df.iterrows():
         writer.writerow(
             [row['date'],
-             row['battles']])
+             row['battles'],
+             row['wins']])
 
     return response

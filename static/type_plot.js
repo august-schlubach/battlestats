@@ -12,7 +12,7 @@ const type_svg = d3.select("#type_svg_container")
     .attr("transform", `translate(${type_svg_margin.left}, ${type_svg_margin.top})`);
 
 function drawTierPlot() {
-    var path = "http://127.0.0.1:8000/warships/player/load_type_data/" + player_id;
+    var path = "http://127.0.0.1:8000/warships/fetch/load_type_data/" + player_id;
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; });
 
@@ -60,11 +60,13 @@ function drawTierPlot() {
             .style("stroke-width", 0.75)
             .attr("fill", d => select_color_by_wr(d.win_ratio))
             .on('mouseover', function (event, d) {
+                showTypeDetails(d);
                 d3.select(this).transition()
                     .duration('50')
                     .attr('fill', '#bcbddc')
             })
             .on('mouseout', function (event, d) {
+                hideTypeDetails();
                 d3.select(this).transition()
                     .duration('50')
                     .attr("fill", d => select_color_by_wr(d.win_ratio))
@@ -72,5 +74,48 @@ function drawTierPlot() {
     })
 }
 
+function showTypeDetails(d) {
+    const start_x = 350, start_y = 105, x_offset = 10;
+    var win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
+
+    detailGroup = type_svg.append("g")
+        .classed('details', true);
+
+    detailGroup.append("text")
+        .attr("x", start_x)
+        .attr("y", start_y)
+        .style("font-size", "14px")
+        .attr("text-anchor", "end")
+        .attr("font-weight", "700")
+        .text(d.pvp_battles);
+    detailGroup.append("text")
+        .attr("x", start_x + 40)
+        .attr("y", start_y)
+        .style("font-size", "12px")
+        .attr("text-anchor", "end")
+        .text("Battles");
+
+    detailGroup.append("text")
+        .attr("x", start_x + 95)
+        .attr("y", start_y)
+        .style("font-size", "14px")
+        .attr("text-anchor", "end")
+        .attr("font-weight", "700")
+        .text(win_percentage);
+    detailGroup.append("text")
+        .attr("x", start_x + 160)
+        .attr("y", start_y)
+        .style("font-size", "12px")
+        .attr("text-anchor", "end")
+        .text("% Win Rate");
+
+
+
+}
+
+function hideTypeDetails() {
+    detailGroup = type_svg.select(".details");
+    detailGroup.remove();
+}
 
 drawTierPlot();

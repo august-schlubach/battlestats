@@ -12,10 +12,12 @@ const activity_svg = d3.select("#activity_svg_container")
     .attr("transform", `translate(${activity_svg_margin.left}, ${activity_svg_margin.top})`);
 
 function drawActivityPlot() {
-    var path = "http://127.0.0.1:8000/warships/player/load_recent_data/" + player_id;
+    var path = "http://127.0.0.1:8000/warships/fetch/load_recent_data/" + player_id;
     var start_date = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
 
     d3.csv(path).then(function (data) {
+        var loading_image = document.getElementById("activity_loading_image");
+        loading_image.remove();
 
         console.log(data);
         var max_battles = d3.max(data, function (d) { return + d.battles; });
@@ -52,10 +54,18 @@ function drawActivityPlot() {
             .attr("y", d => y(d.battles))
             .attr("height", function (d) { return activity_svg_height - y(d.battles); })
             .attr("width", "12")
+            .attr("fill", "#ccc");
+
+        nodes.append("rect")
+            .attr("x", d => x(new Date(d.date)) + 1)
+            .attr("y", d => y(d.wins))
+            .attr("height", function (d) { return activity_svg_height - y(d.wins); })
+            .attr("width", "10")
             .style("stroke", "#444")
-            .style("stroke-width", 0.75)
-            .attr("fill", "#ddd");
+            .style("stroke-width", 0.5)
+            .attr("fill", "#74c476");
     });
+
 }
 
 drawActivityPlot();

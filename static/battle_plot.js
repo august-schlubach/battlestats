@@ -14,10 +14,11 @@ const g = d3.select("#pvp_stats_svg_container")
 function drawBattlePlot() {
     var filter_type = document.querySelector('input[name="filter_type"]:checked').value;
     var filter_tier = document.querySelector('input[name="filter_tier"]:checked').value;
-    var path = ["http://127.0.0.1:8000/warships/player/load_activity_data/" + player_id, filter_type, filter_tier].join(":");
+    var path = ["http://127.0.0.1:8000/warships/fetch/load_activity_data/" + player_id, filter_type, filter_tier].join(":");
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; });
-
+        max = Math.max(max, 15);
+        
         // remove the previous plot
         g.selectAll("*").remove();
 

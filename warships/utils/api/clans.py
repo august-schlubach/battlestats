@@ -17,7 +17,8 @@ def _fetch_clan_data(player_id: str) -> dict:
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
         "account_id": player_id,
-        "extra": "clan"
+        "extra": "clan",
+        "fields": "clan.members_count,clan.tag,clan.name,clan.clan_id"
     }
     logging.info(f'--> remote fetching clan info for player_id: {player_id}')
     response = requests.get(url, params=params)
@@ -40,7 +41,8 @@ def _fetch_clan_member_ids(clan_id: str) -> list:
     url = "https://api.worldofwarships.com/wows/clans/info/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
-        "clan_id": clan_id
+        "clan_id": clan_id,
+        "fields": "members_ids"
     }
     logging.info(f'--> remote fetching clan members for clan_id: {clan_id}')
     response = requests.get(url, params=params)
@@ -54,7 +56,8 @@ def _fetch_clan_member_ids(clan_id: str) -> list:
 
 def _fetch_player_data_from_list(players: list) -> dict:
     """
-    fetch all of the player data for a given list of player ids
+    fetch all of the player data for a given list of player ids.
+    this gets called from a list of clan ids to get all of the players.
     """
     return_data = {}
     member_list = ','.join([str(member) for member in players])
