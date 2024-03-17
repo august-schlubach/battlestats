@@ -8,6 +8,7 @@
   <script src="{% static 'battle_plot.js' %}"></script>
   <script src="{% static 'tier_plot.js' %}"></script>
   <script src="{% static 'type_plot.js' %}"></script>
+  <script src="{% static 'activity_plot.js' %}"></script>
 {% endblock %}
 
 {% block content %} 
@@ -83,6 +84,8 @@ nav .brand {
           <div class="f6 lh-copy pb3 pt1 pl3">
             <span class="ph3">Last Played: {{ context.player.days_since_last_battle }} days ago</span>
           </div>
+          <div class="f5 b lh-copy pa1 pt3">Random Battles: Recent Activity</div>
+          <div id="activity_svg_container"></div>
           <div class="f5 b lh-copy pa1 pt3">Random Battles: Win Rate/Games Played</div>
           <div id="pvp_stats_svg_container"></div>
 

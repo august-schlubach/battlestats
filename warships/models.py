@@ -57,3 +57,18 @@ class Clan(models.Model):
 
     def __str__(self):
         return str(self.clan_id) + '-' + self.name
+
+
+class Snapshot(models.Model):
+    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    date = models.DateField(null=True, blank=True)
+    battles = models.IntegerField(null=True, blank=True)
+    wins = models.IntegerField(null=True, blank=True)
+    survived_battles = models.IntegerField(null=True, blank=True)
+    battle_type = models.CharField(max_length=200, null=True, blank=True)
+    last_fetch = models.DateTimeField(null=True, blank=True)
+    interval_battles = models.IntegerField(null=True, blank=True)
+    interval_wins = models.IntegerField(null=True, blank=True)
+
+    def __str__(self):
+        return self.player.name + " - " + str(self.date) + " - " + str(self.battles)

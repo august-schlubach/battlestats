@@ -1,6 +1,6 @@
 
 const margin = { top: 20, right: 30, bottom: 40, left: 40 },
-    width = 600 - margin.left - margin.right,
+    width = 650 - margin.left - margin.right,
     height = 500 - margin.top - margin.bottom;
 
 // append the svg object to the body of the page
@@ -12,11 +12,15 @@ const svg = d3.select("#svg_container")
     .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
 function drawClanPlot() {
-    var path = "http://127.0.0.1:8000/warships/clan/plot/" + clan_id;
+    var filter_type = document.querySelector('input[name="filter_type"]:checked').value;
+    var path = "http://127.0.0.1:8000/warships/clan/plot/" + clan_id + ":" + filter_type;
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; }) + 100;
         var ymax = d3.max(data, function (d) { return + d.pvp_ratio; }) + 5
         var ymin = d3.min(data, function (d) { return + d.pvp_ratio; }) - 5
+
+        svg.selectAll("*").remove();
+
         // Add X axis
         var x = d3.scaleLinear()
             .domain([0, max])
@@ -58,7 +62,7 @@ function drawClanPlot() {
             .enter()
             .append("text")
             .attr("class", "f6 lh-copy axisLabel")
-            .style("font-size", "10px")
+            .style("font-size", "9px")
             .attr("text-anchor", "end")
             .attr("x", function (d) { return x(d.pvp_battles) - 9; })
             .attr("y", function (d) { return y(d.pvp_ratio) + 4; })
@@ -75,7 +79,7 @@ function drawClanPlot() {
             .attr("cy", function (d) { return y(d.pvp_ratio); })
             .attr("r", 6)
             .style("stroke", "#444")
-            .style("stroke-width", 0.75)
+            .style("stroke-width", 1.25)
             .attr("fill", d => select_color_by_wr(d.pvp_ratio))
             .on('mouseover', function (event, d) {
                 showDetails(d);

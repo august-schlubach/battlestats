@@ -14,7 +14,8 @@ django.setup()
 
 # foil autopep8; will move these to the top otherwise
 if True:
-    from data import fetch_battle_data
-    from api import get_clan_members
+    from data import fetch_snapshot_data
 
-get_clan_members("1000071694")
+
+df = fetch_snapshot_data("1000269914")
+print(df.head(20))

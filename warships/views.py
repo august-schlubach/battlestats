@@ -4,22 +4,28 @@ from warships.utils.data import (
     fetch_battle_data,
     fetch_clan_data,
     get_player_by_name,
-    populate_clan
+    populate_clan,
+    fetch_snapshot_data
 )
 from warships.models import Clan, Player
 import csv
 import random
 import pandas as pd
+import datetime
 
 
 def clan(request, clan_id: str = "1000057393") -> render:
     # fetch clan data and render for template
     clan = Clan.objects.get(clan_id=clan_id)
     members = clan.player_set.filter(clan=clan).order_by('-last_battle_date')
+    all_members = members.count()
+    active_members = members.filter(days_since_last_battle__lt=30).count()
     clan_list = Clan.objects.all()
     return render(request, 'clan.html', {"context": {"clan": clan,
                                                      "members": members,
-                                                     "clan_list": clan_list}})
+                                                     "clan_list": clan_list,
+                                                     "active_members": active_members,
+                                                     "all_members": all_members}})
 
 
 def splash(request) -> render:
@@ -47,7 +53,7 @@ def player(request, name: str = "lil_boots") -> render:
 # -----
 # utility views for fetching data for ajax calls
 
-def load_clan_plot_data(request, clan_id: str) -> HttpResponse:
+def load_clan_plot_data(request, clan_id: str, filter_type: str = "all") -> HttpResponse:
     # Create the HttpResponse object with the appropriate CSV header.
     response = HttpResponse(content_type="text/csv")
 
@@ -55,13 +61,16 @@ def load_clan_plot_data(request, clan_id: str) -> HttpResponse:
     df = fetch_clan_data(clan_id)
     df = df.loc[df['pvp_battles'] > 15]
 
+    if filter_type != "all":
+        df = df.loc[df['days_since_last_battle'] < 30]
+
     writer = csv.writer(response)
     writer.writerow(["player_name", "pvp_battles", "pvp_ratio"])
 
     for index, row in df.iterrows():
         writer.writerow(
             [row['name'],
-             row['pvp_battles'],
+             int(row['pvp_battles']),
              row['pvp_ratio']])
 
     return response
@@ -173,5 +182,22 @@ def load_type_data(request, player_id: str) -> HttpResponse:
              row['pvp_battles'],
              row['wins'],
              row['win_ratio']])
+
+    return response
+
+
+def load_recent_data(request, player_id: str) -> HttpResponse:
+    # Create the HttpResponse object with the appropriate CSV header.
+    response = HttpResponse(content_type="text/csv")
+
+    # fetch battle data for a given player and prepare it for display
+    df = fetch_snapshot_data(player_id)
+    writer = csv.writer(response)
+    writer.writerow(["date", "battles"])
+
+    for index, row in df.iterrows():
+        writer.writerow(
+            [row['date'],
+             row['battles']])
 
     return response

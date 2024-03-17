@@ -16,7 +16,7 @@
   }
 
   .axisLabel {
-    fill: #222;
+    fill: #111;
     opacity: 0.5;
   }
   a {
@@ -34,17 +34,13 @@
         <div class="pv2">
           <div class="f6 lh-copy">
             <h1 class="f2 lh-solid">{{ context.clan.name }}<span class="ph3">[{{ context.clan.tag }}]</span></h1>
-            <p class="f4 lh-copy">{{ context.clan.members_count }} Members </p>
+            <p class="f4 lh-copy">{{ context.all_members }} Members | {{ context.active_members }} Active </p>
           </div>
           <div id="svg_container"></div>
-                    <div class="pa3 f6 lh-copy">
-            Ship Type:
-            <input type="radio" onclick="drawBattlePlot()" value="all" name="filter_type" checked="checked"> All
-            <input type="radio" onclick="drawBattlePlot()" value="Battleship" name="filter_type"> Battleships
-            <input type="radio" onclick="drawBattlePlot()" value="Cruiser" name="filter_type"> Cruisers
-            <input type="radio" onclick="drawBattlePlot()" value="Destroyer" name="filter_type"> Destroyers
-            <input type="radio" onclick="drawBattlePlot()" value="AirCarrier" name="filter_type"> CVs
-            <input type="radio" onclick="drawBattlePlot()" value="Submarine" name="filter_type"> Subs
+          <div class="pa3 f6 lh-copy">
+            Activity:
+            <input type="radio" onclick="drawClanPlot()" value="active" name="filter_type" checked="checked"> Active
+            <input type="radio" onclick="drawClanPlot()" value="all" name="filter_type" > All
           </div>
           <div>
             <h2 class="f3 lh-copy">Members</h2>

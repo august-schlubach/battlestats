@@ -6,10 +6,36 @@ from warships.models import Player
 logging.basicConfig(level=logging.INFO)
 
 
+def _fetch_snapshot_data(player_id: int, dates: str = '') -> dict:
+    """
+    fetch json data containing recent battle stats for a given player_id. 
+    returns a dict of either player data or empty dict if player id not found
+    """
+    return_data = {}
+    url = "https://api.worldofwarships.com/wows/account/statsbydate/"
+    params = {
+        "application_id": os.environ.get('WG_APP_ID'),
+        "account_id": player_id,
+        "dates": dates,
+        "fields": "pvp.account_id,pvp.battles,pvp.wins,pvp.survived_battles,pvp.battle_type,pvp.date"
+    }
+    logging.info(
+        f'--> remote fetching snapshot data for player_id: {player_id} dates: {dates}')
+    response = requests.get(url, params=params)
+    data = response.json()
+
+    if data is None:
+        print(f"ERROR: No snapshot data found for player_id: {player_id}")
+    else:
+        return_data = data['data'][str(player_id)]['pvp']
+
+    return return_data
+
+
 def _fetch_player_battle_data(player_id: int) -> dict:
     """
     fetch json data for a given player_id. returns a dict of 
-    either player data or empty if player id not found
+    either player data or empty dict if player id not found
     """
     return_data = {}
     url = "https://api.worldofwarships.com/wows/account/info/"

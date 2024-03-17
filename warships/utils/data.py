@@ -1,11 +1,12 @@
-from warships.models import Player, RecentLookup, Clan
+from warships.models import Player, Snapshot, Clan
 from warships.utils.api.ships import (
     _fetch_ship_stats_for_player,
     _fetch_ship_info
 )
 from warships.utils.api.players import (
     _fetch_player_battle_data,
-    _fetch_player_id_by_name
+    _fetch_player_id_by_name,
+    _fetch_snapshot_data
 )
 from warships.utils.api.clans import (
     _fetch_clan_data,
@@ -28,8 +29,9 @@ def get_player_by_name(player_name: str) -> Player:
     if player.last_fetch is None or (datetime.datetime.now() - player.last_fetch).days > 1:
         logging.info(f'old timestamp: fetching new data for {player.name}')
         player.recent_games = _fetch_ship_stats_for_player(player.player_id)
-        player.last_fetch = datetime.datetime.now()
-        player.save()
+
+    player.last_fetch = datetime.datetime.now()
+    player.save()
 
     return player
 
@@ -65,6 +67,7 @@ def populate_new_player(player: Player,
     # make sure we have the player data, passed in or fetched
     if player_data is None:
         player_data = _fetch_player_battle_data(player.player_id)
+        player.last_fetch = datetime.datetime.now()
 
     if player_data['hidden_profile'] is True:
         player.is_hidden = True
@@ -194,7 +197,7 @@ def populate_new_player(player: Player,
 def fetch_clan_data(clan_id: str) -> pd.DataFrame:
     players = Player.objects.filter(clan__clan_id=clan_id)
     prepared_data = {}
-    attribs = ['name', 'pvp_battles', 'pvp_ratio',]
+    attribs = ['name', 'pvp_battles', 'pvp_ratio', 'days_since_last_battle']
     for attrib in attribs:
         prepared_data[attrib] = []
 
@@ -202,26 +205,111 @@ def fetch_clan_data(clan_id: str) -> pd.DataFrame:
         prepared_data["name"].append(player.name)
         prepared_data["pvp_battles"].append(player.pvp_battles)
         prepared_data["pvp_ratio"].append(player.pvp_ratio)
+        prepared_data["days_since_last_battle"].append(
+            player.days_since_last_battle)
 
     return pd.DataFrame(prepared_data)
 
 
-def fetch_battle_data(player_id: str) -> pd.DataFrame:
+def update_snapshot_data(player: Player) -> None:
+    # dont update if we've already updated today
+    try:
+        last_snapshot = Snapshot.objects.filter(player=player).latest('date')
+        last_fetch_date = last_snapshot.last_fetch
+    except Snapshot.DoesNotExist:
+        last_fetch_date = datetime.datetime.now() - datetime.timedelta(days=50)
+        print(f'last_fetch_date: {last_fetch_date}')
+    if (datetime.datetime.now() - last_fetch_date).days < 1:
+        logging.info(
+            f'snapshot data already updated today at {last_fetch_date}')
+        return
 
+    logging.info('updating snapshot data')
+    dates = []
+    for i in range(29):
+        date = ((datetime.datetime.now() - datetime.timedelta(28)) +
+                datetime.timedelta(days=i)).date().strftime("%Y%m%d")
+
+        dates.append(date)
+
+    for n in range(0, 4):
+        week = []
+        # this gives us our 28 day distribution in 4 parts of 7 days
+        for x in range(1, 8):
+            day = x + (n * 7)
+            week.append(dates[day])
+        week_str = ','.join(week)
+        stats = _fetch_snapshot_data(player.player_id, week_str)
+
+        if stats is not None:
+            for date in stats:
+                outputDate = datetime.datetime.strptime(
+                    date, '%Y%m%d').date().strftime('%Y-%m-%d')
+                snapshot, created = Snapshot.objects.get_or_create(
+                    player=player, date=outputDate)
+                snapshot.battles = stats[date]['battles']
+                snapshot.wins = stats[date]['wins']
+                snapshot.survived_battles = stats[date]['survived_battles']
+                snapshot.battle_type = stats[date]['battle_type']
+                snapshot.date = outputDate
+                snapshot.last_fetch = datetime.datetime.now()
+                snapshot.save()
+
+    # update the interval battles and wins
+    start_date = datetime.datetime.now() - datetime.timedelta(28)
+    snapshots = Snapshot.objects.filter(
+        player=player, date__gte=start_date).order_by('date')
+
+    for i, snap in enumerate(snapshots):
+        if i == 0:
+            continue
+        else:
+            snap.interval_battles = snap.battles - snapshots[i-1].battles
+            snap.interval_wins = snap.wins - snapshots[i-1].wins
+
+        snap.save()
+
+
+def fetch_snapshot_data(player_id: str) -> pd.DataFrame:
     # fetch battle data for a given player and prepare it for display
     player = Player.objects.get(player_id=player_id)
+    update_snapshot_data(player)
 
-    # log player lookup
-    # lookup, created = RecentLookup.objects.get_or_create(player=player)
-    # lookup.last_updated = pd.Timestamp.now()
-    # lookup.save()
+    start_date = datetime.datetime.now() - datetime.timedelta(28)
 
+    # iterate through 28 days of snapshots and prepare data for display
+    data = {'date': [], 'battles': []}
+    for i in range(29):
+        date = ((datetime.datetime.now() - datetime.timedelta(28)) +
+                datetime.timedelta(days=i)).date().strftime("%Y-%m-%d")
+        data["date"].append(date)
+
+        if Snapshot.objects.filter(player=player, date=date).exists():
+            interval_battles = 0
+            try:
+                interval_battles = int(Snapshot.objects.get(
+                    player=player, date=date).interval_battles)
+            except TypeError:
+                logging.info(f'Snapshot error: {player.name} - {date}')
+
+            data["battles"].append(interval_battles)
+        else:
+            data["battles"].append(0)
+
+    df = pd.DataFrame(data, columns=["date", "battles"])
+
+    return df
+
+
+def fetch_battle_data(player_id: str) -> pd.DataFrame:
+    player = Player.objects.get(player_id=player_id)
     ship_data = {}
     prepared_data = {}
     attribs = ['ship_name', 'ship_tier', 'all_battles', 'distance', 'wins',
                'losses', 'ship_type', 'pve_battles', 'pvp_battles',
                'win_ratio', 'kdr']
     for attrib in attribs:
+
         prepared_data[attrib] = []
 
     if player.recent_games is None:
