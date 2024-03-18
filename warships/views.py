@@ -13,6 +13,7 @@ import random
 import pandas as pd
 import os
 import json
+import math
 
 
 def clan(request, clan_id: str = "1000057393") -> render:
@@ -152,10 +153,18 @@ def load_tier_data(request, player_id: str) -> HttpResponse:
     writer.writerow(["ship_tier", "pvp_battles", "wins", "win_ratio"])
 
     for index, row in df.iterrows():
+        pvp_battles = row['pvp_battles']
+        if math.isnan(pvp_battles):
+            pvp_battles = 0
+
+        wins = row['wins']
+        if math.isnan(wins):
+            wins = 0
+
         writer.writerow(
             [int(row['ship_tier']),
-             int(row['pvp_battles']),
-             int(row['wins']),
+             int(pvp_battles),
+             int(wins),
              row['win_ratio']])
 
     return response
@@ -206,9 +215,17 @@ def load_recent_data(request, player_id: str) -> HttpResponse:
     writer.writerow(["date", "battles", "wins"])
 
     for index, row in df.iterrows():
+        battles = row['battles']
+        if math.isnan(battles):
+            battles = 0
+
+        wins = row['wins']
+        if math.isnan(wins):
+            wins = 0
+
         writer.writerow(
             [row['date'],
-             row['battles'],
-             row['wins']])
+             int(battles),
+             int(wins)])
 
     return response

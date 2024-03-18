@@ -109,9 +109,6 @@ function showTierDetails(d) {
         .style("font-size", "12px")
         .attr("text-anchor", "end")
         .text("% Win Rate");
-
-
-
 }
 
 function hideTierDetails() {

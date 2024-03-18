@@ -260,8 +260,8 @@ def update_snapshot_data(player: Player) -> None:
         if i == 0:
             continue
         else:
-            snap.interval_battles = snap.battles - snapshots[i-1].battles
-            snap.interval_wins = snap.wins - snapshots[i-1].wins
+            snap.interval_battles = int(snap.battles - snapshots[i-1].battles)
+            snap.interval_wins = int(snap.wins - snapshots[i-1].wins)
 
         snap.save()
 

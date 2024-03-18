@@ -20,7 +20,7 @@ function drawActivityPlot() {
         loading_image.remove();
 
         var max_battles = d3.max(data, function (d) { return + d.battles; });
-        max_battles = Math.max(max_battles, 5);
+        max_battles = Math.max(max_battles, 2) + 1;
 
         const x = d3.scaleTime()
             .domain([start_date, Date.now()])
@@ -53,7 +53,13 @@ function drawActivityPlot() {
             .attr("y", d => y(d.battles))
             .attr("height", function (d) { return activity_svg_height - ((y(d.battles) === undefined) ? 0 : y(d.battles)) })
             .attr("width", "12")
-            .attr("fill", "#ccc");
+            .attr("fill", "#ccc")
+            .on('mouseover', function (event, d) {
+                showRecentDetails(d);
+            })
+            .on('mouseout', function (event, d) {
+                hideRecentDetails();
+            });
 
         nodes.append("rect")
             .attr("x", d => x(new Date(d.date)) + 1)
@@ -62,8 +68,48 @@ function drawActivityPlot() {
             .attr("width", "10")
             .style("stroke", "#444")
             .style("stroke-width", 0.5)
-            .attr("fill", "#74c476");
+            .attr("fill", "#74c476")
+            .on('mouseover', function (event, d) {
+                showRecentDetails(d);
+                d3.select(this).transition()
+                    .duration('50')
+                    .attr('fill', '#bcbddc')
+            })
+            .on('mouseout', function (event, d) {
+                hideRecentDetails();
+                d3.select(this).transition()
+                    .duration('50')
+                    .attr("fill", "#74c476")
+            });
     });
+}
+
+function showRecentDetails(d) {
+    const start_x = 395, start_y = 0;
+
+    detailGroup = activity_svg.append("g")
+        .classed('details', true);
+
+    detailGroup.append("text")
+        .attr("x", start_x)
+        .attr("y", start_y)
+        .style("font-size", "12px")
+        .style("font-weight", "700")
+        .attr("text-anchor", "end")
+        .text(d.date);
+
+    detailGroup.append("text")
+        .attr("x", start_x + 110)
+        .attr("y", start_y)
+        .style("font-size", "12px")
+        .attr("text-anchor", "end")
+        .text(d.wins + " W : " + d.battles + " Games");
+
+}
+
+function hideRecentDetails() {
+    detailGroup = activity_svg.select(".details");
+    detailGroup.remove();
 }
 
 drawActivityPlot();
