@@ -38,10 +38,19 @@
       <div class="ph2">
         <div class="pv2">
 
-          <div class="ui-widget">
-            <label for="player_query">Search Players: </label>
-            <input id="player_query">
-          </div>
+          <nav class="page-nav">
+            <div class="nav-content">
+              <div class="brand">
+
+                <div class="ui-widget">
+                  <a href="{% url 'splash' %}">Home</a> | 
+                  <label for="player_query">Search Players: </label>
+                  <input id="player_query">
+                </div>
+          
+              </div>
+            </div>
+          </nav>
 
           <div class="f6 lh-copy">
             <h1 class="f2 lh-solid">{{ context.clan.name }}<span class="ph3">[{{ context.clan.tag }}]</span></h1>
@@ -64,11 +73,7 @@
                 {% endif %}
               {% endfor %}
             </div>
-            <div class="f6 lh-copy pa3">groovy clans:
-              {% for clan in context.clan_list %}
-                <span class="pl0 pr0"><a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> &#9737;</span>&nbsp;
-              {% endfor %}
-            </div>
+
         </div>
       </div>
     </div>

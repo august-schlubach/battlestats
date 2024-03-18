@@ -1,10 +1,36 @@
 {% extends "base.html" %}
+{% load static %}
+
+{% block d3 %}
+  <script src="https://code.jquery.com/jquery-3.6.0.js"></script>
+  <script src="https://code.jquery.com/ui/1.13.2/jquery-ui.js"></script>
+  <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+  <script src="{% static 'search.js' %}"></script>
+{% endblock %}
 
 {% block content %} 
 <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
     <div class="fl w-100 pa0">
-{% for player in context.recent %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> {% endfor %}
+      <div>
+        <h1>Battlestats</h1>
+      </div>
+      <div>
+        <h3>World of Warships</h3>
+      </div>
+      <div class="ui-widget">
+        <label for="player_query">Search Players: </label>
+        <input id="player_query">
+      </div>
+
+      <div class="fl w-100 pa0">
+        <h2>Recent Players</h2>
+          {% for player in context.players %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> {% endfor %}
+      </div>
+      <div class="fl w-100 pa0">
+        <h2>Recent Clans</h2>
+          {% for clan in context.clans %}<a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> {% endfor %}
+      </div>
     </div>
   </div>
 </div>
