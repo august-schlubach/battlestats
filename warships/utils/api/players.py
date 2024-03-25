@@ -73,6 +73,7 @@ def _fetch_player_id_by_name(player_name: str) -> str:
         response = requests.get(url, params=params)
         if response.json()['status'] == "error":
             print('error in response')
+            print(response.json())
             return None
         # TODO: handle failed lookups
 

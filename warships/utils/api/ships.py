@@ -28,12 +28,15 @@ def _fetch_ship_stats_for_player(player_id: str) -> dict:
     return data
 
 
-def _fetch_ship_info(ship_id: str) -> Ship:
+def _fetch_ship_info(ship_id: str):
     """
     Get or create a specific ship model and populate with non-competitive
     data for a given ship_id
     """
-    ship, created = Ship.objects.get_or_create(ship_id=int(ship_id))
+    clean_ship_id = int(ship_id)
+    if clean_ship_id is None or clean_ship_id < 1:
+        return None
+    ship, created = Ship.objects.get_or_create(ship_id=clean_ship_id)
     if created:
         url = "https://api.worldofwarships.com/wows/encyclopedia/ships/"
         params = {

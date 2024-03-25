@@ -7,15 +7,15 @@ import django
 # beau 1003892077
 # lil_boots 1000057393
 
-sys.path.append("/home/x/Documents/battlestats")
-sys.path.append("/home/x/Documents/battlestats/warships/utils")
+sys.path.append("/home/django/battlestats")
+sys.path.append("/home/django/battlestats/warships/utils")
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "battlestats.settings")
 django.setup()
 
 # foil autopep8; will move these to the top otherwise
 if True:
-    from data import fetch_snapshot_data
+    from data import fetch_snapshot_data, get_player_by_name
 
 
-df = fetch_snapshot_data("1000269914")
-print(df.head(20))
+
+print(get_player_by_name('lil_boots'))

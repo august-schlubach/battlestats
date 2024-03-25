@@ -8,11 +8,10 @@ django = "*"
 requests = "*"
 python-dateutil = "*"
 pdbpp = "*"
-seaborn = "*"
-matplotlib = "*"
-asgiref = "*"
-grequests = "*"
-django-timezone-utils = "*"
+gunicorn = "*"
+psycopg2-binary = "*"
+pandas = "*"
+django-cors-headers = "*"
 
 [dev-packages]
 

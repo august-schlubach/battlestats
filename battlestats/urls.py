@@ -20,7 +20,7 @@ from warships import views
 
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path('xadminx/', admin.site.urls),
     path('', views.splash, name='splash'),
     path('warships/player/<str:name>', views.player, name='player'),
     path('warships/clan/plot/<str:clan_id>:<str:filter_type>',
