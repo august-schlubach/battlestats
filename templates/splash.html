@@ -9,29 +9,38 @@
 {% endblock %}
 
 {% block content %} 
-<div class="mw9 center ph2-ns">
+
+<section class="mw5 mw7-ns center pa3 ph5-ns">
+
+  <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
     <div class="fl w-100 pa0">
       <div>
-        <h1>Battlestats</h1>
-      </div>
-      <div>
-        <h3>World of Warships</h3>
-      </div>
-      <div class="ui-widget">
-        <label for="player_query">Search Players: </label>
-        <input id="player_query">
+        <h1>Battlestats Data Graphics API</h1>
       </div>
 
-      <div class="fl w-100 pa0">
-        <h2>Recent Players</h2>
-          {% for player in context.players %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> {% endfor %}
+      <div class="fl w-100 pt5">
+        <h3>Players:</h3>
+	<p class="code">/warships/player/&lt;player_name&gt;</p>
+	<p class="pt2">example players:</p>
+          {% for player in context.players %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> &#9737; {% endfor %}
       </div>
-      <div class="fl w-100 pa0">
-        <h2>Recent Clans</h2>
-          {% for clan in context.clans %}<a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> {% endfor %}
+
+      <p class="fl w-100 pt3">
+        <label for="player_query">Search Players: </label>
+        <input id="player_query">
+      </p>
+      <p>All players are available via search. Player names will pre-populate as you type.</p> 
+      
+      <div class="fl w-100 pt5">
+        <h3>Naval Clans:</h3>
+	<p class="code">/warships/clan/&lt;clan_id&gt;</p>
+	<p class="pt2"> example naval clans:</p>
+          {% for clan in context.clans %}<a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> &#9737; {% endfor %}
       </div>
     </div>
   </div>
 </div>
-{% endblock %} 
+
+</section>
+  {% endblock %} 

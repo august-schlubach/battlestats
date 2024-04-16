@@ -69,6 +69,7 @@ nav .brand {
 	overflow: hidden;
 }
 </style>
+<section class="mw5 mw7-ns center pa3 ph5-ns">
 
 <div class="mw9 center ph2-ns">
   <div class="cf ph2-ns">
@@ -76,21 +77,18 @@ nav .brand {
       <div class="ph2">
         <div class="pv2">
 
-          <nav class="page-nav">
             <div class="nav-content">
               <div class="brand">
-
                 <div class="ui-widget">
                   <a href="{% url 'splash' %}">Home</a> | 
                   <label for="player_query">Search Players: </label>
                   <input id="player_query">
                 </div>
-          
               </div>
             </div>
-          </nav>
 
-          <div class="f6 lh-copy">
+
+          <div class="f6 lh-copy pt2">
             <h1 class="f2 lh-solid">{{ context.player.name }}
               <span class="clan_tag v-top"><a href="{% url 'clan' context.player.clan.clan_id %}"> [{{ context.player.clan.tag }}]</a></span>
             </h1>
@@ -143,4 +141,5 @@ nav .brand {
     </div>
   </div>
 </div>
+</section>
 {% endblock %}
