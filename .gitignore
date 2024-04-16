@@ -2,3 +2,4 @@ migrations/
 *.sqlite3
 *.png
 __pycache__
+env
