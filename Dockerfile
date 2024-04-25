@@ -17,7 +17,7 @@ RUN set -ex \
     && apk add --virtual rundeps $runDeps \
     && apk del .build-deps
 
-ADD battlestats /app
+ADD . /app
 WORKDIR /app
 
 ENV VIRTUAL_ENV /env
