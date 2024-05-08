@@ -23,9 +23,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-ui(h^*b2_-jaj&eg*%-ztv*xrch&s-it7!6w!0!ki67x*t-)@7'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ['localhost', '159.89.242.69']
+ALLOWED_HOSTS = ['localhost', '159.89.242.69', 'battlestats.io']
 
 
 # Application definition
