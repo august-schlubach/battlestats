@@ -38,7 +38,7 @@
 	<p class="pt2"> example naval clans:</p>
           {% for clan in context.clans %}<a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> &#9737; {% endfor %}
       </div>
-  <p>
+  <p class="fl w-100 pt5">
   This data is accessed via publicly available API as part of the WG DPP program. 
   In order to be able to use all the functionalities of our platforms, you must agree to access the API. 
   Our platforms only access publicly available information. We do not collect private data.
