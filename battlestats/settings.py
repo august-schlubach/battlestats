@@ -28,7 +28,7 @@ DEBUG = False
 
 ALLOWED_HOSTS = ['localhost', 'battlestats.io', '159.89.242.69',]
 
-HOSTNAME = '159.89.242.69'
+
 
 # Application definition
 
