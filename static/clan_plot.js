@@ -14,6 +14,7 @@ const svg = d3.select("#svg_container")
 function drawClanPlot() {
     var filter_type = document.querySelector('input[name="filter_type"]:checked').value;
     var path = "https://battlestats.io/warships/clan/plot/" + clan_id + ":" + filter_type;
+
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; }) + 100;
         var ymax = d3.max(data, function (d) { return + d.pvp_ratio; }) + 5

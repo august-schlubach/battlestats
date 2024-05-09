@@ -15,10 +15,11 @@ function drawBattlePlot() {
     var filter_type = document.querySelector('input[name="filter_type"]:checked').value;
     var filter_tier = document.querySelector('input[name="filter_tier"]:checked').value;
     var path = ["https://battlestats.io/warships/fetch/load_activity_data/" + player_id, filter_type, filter_tier].join(":");
+
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; });
         max = Math.max(max, 15);
-        
+
         // remove the previous plot
         g.selectAll("*").remove();
 
