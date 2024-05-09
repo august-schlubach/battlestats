@@ -16,13 +16,13 @@
   <div class="cf ph2-ns">
     <div class="fl w-100 pa0">
       <div>
-        <h1>Battlestats.io: Charts for WoWs Players</h1>
+        <h1>Battlestats.io: Data Viz for WoWs Players</h1>
       </div>
 
       <div class="fl w-100 pt5">
         <h3>Players:</h3>
 	<p class="code">/warships/player/&lt;player_name&gt;</p>
-	<p class="pt2">example players:</p>
+	<p class="pt2">recently active players:</p>
           {% for player in context.players %}<a href="{% url 'player' player.name %}">{{ player.name }}</a> &#9737; {% endfor %}
       </div>
 
@@ -35,7 +35,7 @@
       <div class="fl w-100 pt5">
         <h3>Naval Clans:</h3>
 	<p class="code">/warships/clan/&lt;clan_id&gt;</p>
-	<p class="pt2"> example naval clans:</p>
+	<p class="pt2"> recently viewed naval clans:</p>
           {% for clan in context.clans %}<a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> &#9737; {% endfor %}
       </div>
   <p class="fl f7 lh-copy w-100 pt5">
