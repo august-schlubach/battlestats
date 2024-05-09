@@ -13,7 +13,8 @@ const svg = d3.select("#svg_container")
 
 function drawClanPlot() {
     var filter_type = document.querySelector('input[name="filter_type"]:checked').value;
-    var path = "http://localhost/warships/clan/plot/" + clan_id + ":" + filter_type;
+    var path = "https://battlestats.io/warships/clan/plot/" + clan_id + ":" + filter_type;
+
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; }) + 100;
         var ymax = d3.max(data, function (d) { return + d.pvp_ratio; }) + 5
@@ -73,7 +74,7 @@ function drawClanPlot() {
             .data(data)
             .enter()
             .append("a")
-            .attr("xlink:href", function (d) { return "http://localhost/warships/player/" + d.player_name })
+            .attr("xlink:href", function (d) { return "https://battlestats.io/warships/player/" + d.player_name })
             .append("circle")
             .attr("cx", function (d) { return x(d.pvp_battles); })
             .attr("cy", function (d) { return y(d.pvp_ratio); })

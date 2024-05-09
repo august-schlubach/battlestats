@@ -12,7 +12,9 @@ const type_svg = d3.select("#type_svg_container")
     .attr("transform", `translate(${type_svg_margin.left}, ${type_svg_margin.top})`);
 
 function drawTierPlot() {
-    var path = "http://localhost/warships/fetch/load_type_data/" + player_id;
+
+    var path = "https://battlestats.io/warships/fetch/load_type_data/" + player_id;
+
     d3.csv(path).then(function (data) {
         var max = d3.max(data, function (d) { return + d.pvp_battles; });
 

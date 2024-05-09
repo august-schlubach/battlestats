@@ -16,7 +16,7 @@
   <div class="cf ph2-ns">
     <div class="fl w-100 pa0">
       <div>
-        <h1>Battlestats Data Graphics API</h1>
+        <h1>Battlestats.io: Charts for WoWs Players</h1>
       </div>
 
       <div class="fl w-100 pt5">
@@ -38,6 +38,10 @@
 	<p class="pt2"> example naval clans:</p>
           {% for clan in context.clans %}<a href="{% url 'clan' clan.clan_id %}">{{ clan.name }}</a> &#9737; {% endfor %}
       </div>
+  <p class="fl f7 lh-copy w-100 pt5">
+  This data is accessed via publicly available API as part of the WG DPP program. 
+  Battlestats.io only accesses publicly available information. We do not collect private data.
+  </p>
     </div>
   </div>
   <div>

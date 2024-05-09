@@ -25,10 +25,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DJANGO_DEBUG', False)
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '159.89.242.69']
+
+ALLOWED_HOSTS = ['localhost', 'battlestats.io', '159.89.242.69',]
+
 
 
 # Application definition
