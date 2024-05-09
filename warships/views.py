@@ -33,7 +33,7 @@ def clan(request, clan_id: str = "1000057393") -> render:
 def splash(request) -> render:
     # render splash page, which gets recent lookups
     players = Player.objects.all().order_by('-last_battle_date')[:25]
-    clans = Clan.objects.all().order_by('-last_fetch')[:25]
+    clans = Clan.objects.all().order_by('-last_fetch')[:50]
     return render(request, 'splash.html', {"context": {"players": players, "clans": clans}})
 
 
