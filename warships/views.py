@@ -42,6 +42,7 @@ def player(request, name: str = "lil_boots") -> render:
     player = get_player_by_name(name)
     try:
         clan = Clan.objects.get(clan_id=player.clan.clan_id)
+        logging.info(f'Player has clan: fetching data for {clan.clan_id}')
         populate_clan.delay(clan.clan_id)
     except Clan.DoesNotExist:
         print('player has no clan')
