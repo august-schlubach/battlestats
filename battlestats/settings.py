@@ -109,6 +109,8 @@ LOGGING_CONFIG = None
 # Get loglevel from env
 LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'info').upper()
 
+BROKER_URL = os.environ.get('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672/')
+
 logging.config.dictConfig({
     'version': 1,
     'disable_existing_loggers': False,
