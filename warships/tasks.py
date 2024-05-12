@@ -9,6 +9,7 @@ logging.basicConfig(level=logging.INFO)
 @shared_task
 def populate_clan(clan_id: str) -> None:
     logging.info(f'Delayed task: Populating clan {clan_id}')
+    return 1
     clan = Clan.objects.get(clan_id=clan_id)
     if clan.last_fetch is None or (datetime.datetime.now() - clan.last_fetch).days > 1:
         clan_members = _fetch_clan_member_ids(str(clan_id))
