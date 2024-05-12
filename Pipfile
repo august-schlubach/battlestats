@@ -12,6 +12,8 @@ gunicorn = "*"
 psycopg2-binary = "*"
 pandas = "*"
 django-cors-headers = "*"
+tzdata = "*"
+celery = "*"
 
 [dev-packages]
 
