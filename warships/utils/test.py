@@ -14,8 +14,8 @@ django.setup()
 
 # foil autopep8; will move these to the top otherwise
 if True:
-    from data import fetch_snapshot_data, get_player_by_name
+    from data import fetch_battle_data, get_player_by_name
 
 
-
-print(get_player_by_name('lil_boots'))
+df = fetch_battle_data("1003892077")
+# breakpoint()

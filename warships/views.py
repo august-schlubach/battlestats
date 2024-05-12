@@ -4,9 +4,9 @@ from warships.utils.data import (
     fetch_battle_data,
     fetch_clan_data,
     get_player_by_name,
-    populate_clan,
     fetch_snapshot_data
 )
+from warships.tasks import populate_clan
 from warships.models import Clan, Player
 import csv
 import random

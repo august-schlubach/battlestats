@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     'django.contrib.humanize',
     'corsheaders',
     'warships',
+    'celery',
 ]
 
 MIDDLEWARE = [
