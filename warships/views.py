@@ -14,7 +14,9 @@ import pandas as pd
 import os
 import json
 import math
+import logging
 
+logging.basicConfig(level=logging.INFO)
 
 def clan(request, clan_id: str = "1000057393") -> render:
     # fetch clan data and render for template
