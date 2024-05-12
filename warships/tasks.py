@@ -1,12 +1,12 @@
 from warships.models import Clan, Player
 from warships.utils.data import _fetch_clan_member_ids, _fetch_player_data_from_list, populate_new_player
 import datetime
-from celery import task
+from celery import shared_task
 import logging
 
 logging.basicConfig(level=logging.INFO)
 
-@task
+@shared_task
 def populate_clan(clan_id: str) -> None:
     logging.info(f'Delayed task: Populating clan {clan_id}')
     clan = Clan.objects.get(clan_id=clan_id)
