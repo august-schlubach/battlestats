@@ -11,7 +11,7 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 DEBUG = os.getenv('DJANGO_DEBUG', False)
 
-ALLOWED_HOSTS = ['localhost', 'battlestats.io']
+ALLOWED_HOSTS = ['localhost', 'battlestats.io', '159.89.242.69']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
