@@ -3,3 +3,4 @@ migrations/
 *.png
 __pycache__
 env
+.env
