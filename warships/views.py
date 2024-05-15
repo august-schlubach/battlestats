@@ -4,9 +4,10 @@ from warships.utils.data import (
     fetch_battle_data,
     fetch_clan_data,
     get_player_by_name,
-    fetch_snapshot_data
+    fetch_snapshot_data,
+    populate_clan
 )
-from warships.tasks import populate_clan
+#from warships.tasks import populate_clan
 from warships.models import Clan, Player
 import csv
 import random
@@ -45,7 +46,7 @@ def player(request, name: str = "lil_boots") -> render:
     try:
         clan = Clan.objects.get(clan_id=player.clan.clan_id)
         logging.info(f'Player has clan: fetching data for {clan.clan_id}')
-        populate_clan.delay(clan.clan_id)
+        populate_clan(clan.clan_id)
     except Clan.DoesNotExist:
         print('player has no clan')
 
