@@ -1,17 +1,17 @@
 import logging
 import os
 import requests
+from typing import Dict, Optional
 from warships.models import Player
 
 logging.basicConfig(level=logging.INFO)
 
 
-def _fetch_snapshot_data(player_id: int, dates: str = '') -> dict:
+def _fetch_snapshot_data(player_id: int, dates: str = '') -> Dict:
     """
-    fetch json data containing recent battle stats for a given player_id. 
-    returns a dict of either player data or empty dict if player id not found
+    Fetch JSON data containing recent battle stats for a given player_id.
+    Returns a dict of either player data or an empty dict if player id not found.
     """
-    return_data = {}
     url = "https://api.worldofwarships.com/wows/account/statsbydate/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
@@ -19,45 +19,44 @@ def _fetch_snapshot_data(player_id: int, dates: str = '') -> dict:
         "dates": dates,
         "fields": "pvp.account_id,pvp.battles,pvp.wins,pvp.survived_battles,pvp.battle_type,pvp.date"
     }
-    logging.info(
-        f'--> remote fetching snapshot for player_id: {player_id}')
+
+    logging.info(f'--> Remote fetching snapshot for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
 
-    if data is None:
-        print(f"ERROR: No snapshot data found for player_id: {player_id}")
-    else:
-        return_data = data['data'][str(player_id)]['pvp']
+    if not data:
+        logging.error(
+            f"ERROR: No snapshot data found for player_id: {player_id}")
+        return {}
 
-    return return_data
+    return data.get('data', {}).get(str(player_id), {}).get('pvp', {})
 
 
-def _fetch_player_battle_data(player_id: int) -> dict:
+def _fetch_player_battle_data(player_id: int) -> Dict:
     """
-    fetch json data for a given player_id. returns a dict of 
-    either player data or empty dict if player id not found
+    Fetch JSON data for a given player_id. Returns a dict of
+    either player data or an empty dict if player id not found.
     """
-    return_data = {}
     url = "https://api.worldofwarships.com/wows/account/info/"
     params = {
         "application_id": os.environ.get('WG_APP_ID'),
         "account_id": player_id
     }
-    logging.info(f'--> remote fetching player data for player_id: {player_id}')
+
+    logging.info(f'--> Remote fetching player data for player_id: {player_id}')
     response = requests.get(url, params=params)
     data = response.json()
 
-    if data is None:
-        print(f"ERROR: No data found for player_id: {player_id}")
-    else:
-        return_data = data['data'][str(player_id)]
+    if not data:
+        logging.error(f"ERROR: No data found for player_id: {player_id}")
+        return {}
 
-    return return_data
+    return data.get('data', {}).get(str(player_id), {})
 
 
-def _fetch_player_id_by_name(player_name: str) -> str:
+def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
     """
-    get_or_create a Player object by player name and return it
+    Get or create a Player object by player name and return the player_id.
     """
     player, created = Player.objects.get_or_create(name__iexact=player_name)
     if created:
@@ -67,22 +66,20 @@ def _fetch_player_id_by_name(player_name: str) -> str:
             "search": player_name
         }
 
-        logging.info(
-            f'--> remote fetching player info for: {player_name}')
-
+        logging.info(f'--> Remote fetching player info for: {player_name}')
         response = requests.get(url, params=params)
-        if response.json()['status'] == "error":
-            print('error in response')
-            print(response.json())
+        response_data = response.json()
+
+        if response_data.get('status') == "error":
+            logging.error(f"Error in response: {response_data}")
             return None
-        # TODO: handle failed lookups
 
         try:
-            player_id = response.json()['data'][0]['account_id']
-        except KeyError:
-            print(f'ERROR: accessing player data by name: {player_name}')
-            player_id = ''
-
-        return player_id
+            player_id = response_data['data'][0]['account_id']
+            return player_id
+        except (KeyError, IndexError):
+            logging.error(
+                f"ERROR: Accessing player data by name: {player_name}")
+            return None
     else:
         return player.player_id
