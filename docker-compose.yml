@@ -1,0 +1,43 @@
+services:
+  orm:
+    build: .
+    container_name: django
+    command: >
+      bash -c "python manage.py makemigrations &&
+                  python manage.py migrate &&
+                  python manage.py runserver 0.0.0.0:8080"
+    volumes:
+      - .:/usr/src/app/
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+
+  task-runner:
+    build: .
+    command: celery -A mm worker -l INFO
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - .env
+    depends_on:
+      - orm
+
+  task-scheduler:
+    build: .
+    command: celery -A mm beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/usr/src/app
+    env_file:
+      - .env
+    depends_on:
+      - orm
+      - task-runner
+
+  redis:
+    image: "redis:alpine"
+
+volumes:
+  pgdata:

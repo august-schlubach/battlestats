@@ -13,8 +13,12 @@ psycopg2-binary = "*"
 pandas = "*"
 django-cors-headers = "*"
 tzdata = "*"
-celery = "*"
 django-dotenv = "*"
+celery = {extras = ["redis"], version = "*"}
+django-celery-beat = "*"
+pytest = "*"
+pytest-django = "*"
+model-bakery = "*"
 
 [dev-packages]
 
