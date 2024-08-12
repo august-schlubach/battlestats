@@ -1,43 +1,47 @@
 services:
-  orm:
-    build: .
-    container_name: django
+  server:
+    build:
+      context: server/
+      dockerfile: Dockerfile
+    container_name: django-battlestats
     command: >
       bash -c "python manage.py makemigrations &&
                   python manage.py migrate &&
                   python manage.py runserver 0.0.0.0:8080"
-    volumes:
-      - .:/usr/src/app/
     ports:
       - "8080:8080"
     env_file:
-      - .env
+      - server/.env
     depends_on:
       - redis
 
   task-runner:
-    build: .
-    command: celery -A mm worker -l INFO
-    volumes:
-      - .:/usr/src/app
+    container_name: celery-battlestats
+    build:
+      context: server/
+      dockerfile: Dockerfile
+    command: celery -A battlestats worker -l INFO
     env_file:
-      - .env
+      - server/.env
     depends_on:
-      - orm
+      - server
+      - redis
 
   task-scheduler:
-    build: .
-    command: celery -A mm beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
-    volumes:
-      - .:/usr/src/app
+    container_name: beat-battlestats
+    build:
+      context: server/
+      dockerfile: Dockerfile
+    command: celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
-      - .env
+      - server/.env
     depends_on:
-      - orm
+      - server
       - task-runner
+      - redis
 
   redis:
-    image: "redis:alpine"
-
-volumes:
-  pgdata:
+    container_name: redis-battlestats
+    image: redis:latest
+    ports:
+      - "6380:6379"

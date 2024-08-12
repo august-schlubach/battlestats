@@ -1,7 +1,7 @@
 -i https://pypi.org/simple
 amqp==5.2.0; python_version >= '3.6'
 asgiref==3.8.1; python_version >= '3.8'
-attrs==23.2.0; python_version >= '3.7'
+attrs==24.2.0; python_version >= '3.7'
 billiard==4.2.0; python_version >= '3.7'
 celery[redis]==5.4.0; python_version >= '3.8'
 certifi==2024.7.4; python_version >= '3.6'
@@ -11,17 +11,18 @@ click-didyoumean==0.3.1; python_full_version >= '3.6.2'
 click-plugins==1.1.1
 click-repl==0.3.0; python_version >= '3.6'
 cron-descriptor==1.4.3
-django==5.0.7; python_version >= '3.10'
+django==5.0.8; python_version >= '3.10'
 django-celery-beat==2.6.0
 django-cors-headers==4.4.0; python_version >= '3.8'
 django-dotenv==1.4.2
 django-timezone-field==7.0; python_version >= '3.8' and python_version < '4.0'
+djangorestframework==3.15.2; python_version >= '3.8'
 fancycompleter==0.9.1
-gunicorn==22.0.0; python_version >= '3.7'
+gunicorn==23.0.0; python_version >= '3.7'
 idna==3.7; python_version >= '3.5'
 iniconfig==2.0.0; python_version >= '3.7'
-kombu==5.3.7; python_version >= '3.8'
-model-bakery==1.18.2; python_version >= '3.8'
+kombu==5.4.0; python_version >= '3.8'
+model-bakery==1.19.1; python_version >= '3.8'
 numpy==2.0.1; python_version == '3.11'
 packaging==24.1; python_version >= '3.8'
 pandas==2.2.2; python_version >= '3.9'

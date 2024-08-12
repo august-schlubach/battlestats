@@ -11,7 +11,8 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
 DEBUG = os.getenv('DJANGO_DEBUG', False)
 
-ALLOWED_HOSTS = ['localhost', 'battlestats.io', '159.89.242.69', '138.197.75.47']
+ALLOWED_HOSTS = ['localhost', 'battlestats.io',
+                 '159.89.242.69', '138.197.75.47']
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -22,8 +23,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.humanize',
     'corsheaders',
-    'warships',
     'celery',
+    'django_celery_beat',
+    'rest_framework',
+    'warships',
 ]
 
 MIDDLEWARE = [
@@ -109,7 +112,8 @@ LOGGING_CONFIG = None
 # Get loglevel from env
 LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'info').upper()
 
-BROKER_URL = os.environ.get('RABBITMQ_URL', 'amqp://guest:guest@localhost:5672/')
+BROKER_URL = os.environ.get(
+    'RABBITMQ_URL', 'amqp://guest:guest@localhost:5672/')
 
 logging.config.dictConfig({
     'version': 1,
@@ -132,3 +136,11 @@ logging.config.dictConfig({
         },
     },
 })
+
+# Celery settings
+CELERY_BROKER_URL = 'redis://localhost:6380/0'  # Use Redis on port 6380
+CELERY_RESULT_BACKEND = 'redis://localhost:6380/0'  # Store results in Redis
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'

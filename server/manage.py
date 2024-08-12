@@ -6,9 +6,9 @@ import dotenv
 
 
 def main():
-    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+    path = '.env'
     print(f'Loading environment variables from {path}')
-    
+
     dotenv.read_dotenv(path)
     """Run administrative tasks."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'battlestats.settings')

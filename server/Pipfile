@@ -19,6 +19,7 @@ django-celery-beat = "*"
 pytest = "*"
 pytest-django = "*"
 model-bakery = "*"
+djangorestframework = "*"
 
 [dev-packages]
 
