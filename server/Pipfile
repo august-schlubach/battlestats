@@ -14,12 +14,14 @@ pandas = "*"
 django-cors-headers = "*"
 tzdata = "*"
 django-dotenv = "*"
-celery = {extras = ["redis"], version = "*"}
+celery = "*"
 django-celery-beat = "*"
 pytest = "*"
 pytest-django = "*"
 model-bakery = "*"
 djangorestframework = "*"
+kombu = "*"
+amqp = "*"
 
 [dev-packages]
 

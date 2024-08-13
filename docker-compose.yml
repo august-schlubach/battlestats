@@ -1,47 +1,69 @@
+version: "3.8"
+
 services:
   server:
     build:
       context: server/
       dockerfile: Dockerfile
-    container_name: django-battlestats
+    container_name: battlestats-django
     command: >
       bash -c "python manage.py makemigrations &&
                   python manage.py migrate &&
-                  python manage.py runserver 0.0.0.0:8080"
-    ports:
-      - "8080:8080"
+                  gunicorn --config gunicorn.conf.py battlestats.wsgi:application --bind 0.0.0.0:8888"
+    volumes:
+      - ./server:/usr/src/app
     env_file:
       - server/.env
     depends_on:
-      - redis
+      - rabbitmq
+    ports:
+      - "8888:8888" # Expose port 8888 for WSGI server
+
+  react-app:
+    build:
+      context: client/
+      dockerfile: Dockerfile
+    container_name: battlestats-react
+    environment:
+      - PORT=3001
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./client:/usr/src/app
+    command: npm start
 
   task-runner:
-    container_name: celery-battlestats
+    container_name: battlestats-celery
     build:
       context: server/
       dockerfile: Dockerfile
+    volumes:
+      - ./server:/usr/src/app
     command: celery -A battlestats worker -l INFO
     env_file:
       - server/.env
     depends_on:
       - server
-      - redis
+      - rabbitmq
 
   task-scheduler:
-    container_name: beat-battlestats
+    container_name: battlestats-beat
     build:
       context: server/
       dockerfile: Dockerfile
+    volumes:
+      - ./server:/usr/src/app
     command: celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
       - server/.env
     depends_on:
       - server
       - task-runner
-      - redis
+      - rabbitmq
 
-  redis:
-    container_name: redis-battlestats
-    image: redis:latest
+  rabbitmq:
+    container_name: battlestats-rabbitmq
+    image: "rabbitmq:3-management"
     ports:
-      - "6380:6379"
+      - "5672:5672"
+      - "15672:15672"

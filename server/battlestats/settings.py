@@ -112,9 +112,6 @@ LOGGING_CONFIG = None
 # Get loglevel from env
 LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'info').upper()
 
-BROKER_URL = os.environ.get(
-    'RABBITMQ_URL', 'amqp://guest:guest@localhost:5672/')
-
 logging.config.dictConfig({
     'version': 1,
     'disable_existing_loggers': False,
@@ -138,8 +135,8 @@ logging.config.dictConfig({
 })
 
 # Celery settings
-CELERY_BROKER_URL = 'redis://localhost:6380/0'  # Use Redis on port 6380
-CELERY_RESULT_BACKEND = 'redis://localhost:6380/0'  # Store results in Redis
+CELERY_BROKER_URL = 'amqp://guest:guest@rabbitmq:5672//'  # Use RabbitMQ
+CELERY_RESULT_BACKEND = 'rpc://'  # Use RPC backend for results
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
