@@ -1,4 +1,5 @@
 import React from 'react';
+import BattleActivity from './BattleActivity';
 
 interface PlayerDetailProps {
     player: {
@@ -28,27 +29,19 @@ interface PlayerDetailProps {
 const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
     return (
         <div>
-            <h2>Player Details</h2>
-            <p>ID: {player.id}</p>
-            <p>Name: {player.name}</p>
-            <p>Player ID: {player.player_id}</p>
-            <p>Total Battles: {player.total_battles}</p>
-            <p>PvP Battles: {player.pvp_battles}</p>
-            <p>PvP Wins: {player.pvp_wins}</p>
-            <p>PvP Losses: {player.pvp_losses}</p>
-            <p>PvP Ratio: {player.pvp_ratio}</p>
-            <p>PvP Survival Rate: {player.pvp_survival_rate}</p>
-            <p>Wins Survival Rate: {player.wins_survival_rate}</p>
-            <p>Creation Date: {player.creation_date}</p>
-            <p>Days Since Last Battle: {player.days_since_last_battle}</p>
-            <p>Last Battle Date: {player.last_battle_date}</p>
-            <p>Recent Games: {JSON.stringify(player.recent_games)}</p>
-            <p>Is Hidden: {player.is_hidden ? 'Yes' : 'No'}</p>
-            <p>Stats Updated At: {player.stats_updated_at}</p>
-            <p>Last Fetch: {player.last_fetch}</p>
-            <p>Last Lookup: {player.last_lookup}</p>
-            <p>Clan: {player.clan}</p>
-            <button onClick={onBack}>Back</button>
+            <table className="w-full border-collapse">
+                <tbody>
+                    {Object.entries(player).map(([key, value]) => (
+                        <tr key={key}>
+                            <td className="px-2 py-1 text-right">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</td>
+                            <td className="px-2 py-1 text-left">{typeof value === 'object' ? JSON.stringify(value) : value}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+            <div id="activity_svg_container"></div>
+            <BattleActivity playerId={player.player_id} />
+            <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>
         </div>
     );
 };
