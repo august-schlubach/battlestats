@@ -1,6 +1,6 @@
 from rest_framework import generics
-from warships.models import Player
-from warships.serializers import PlayerSerializer
+from warships.models import Player, Clan, Ship
+from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer
 import logging
 from rest_framework import viewsets
 from rest_framework import permissions
@@ -28,4 +28,28 @@ class PlayerDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Player.objects.all()
     serializer_class = PlayerSerializer
     lookup_field = 'name'
+    permission_classes = [permissions.AllowAny]
+
+
+class ClanViewSet(viewsets.ModelViewSet):
+    queryset = Clan.objects.all()
+    serializer_class = ClanSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class ClanDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Clan.objects.all()
+    serializer_class = ClanSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class ShipViewSet(viewsets.ModelViewSet):
+    queryset = Ship.objects.all()
+    serializer_class = ShipSerializer
+    permission_classes = [permissions.AllowAny]
+
+
+class ShipDetail(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Ship.objects.all()
+    serializer_class = ShipSerializer
     permission_classes = [permissions.AllowAny]

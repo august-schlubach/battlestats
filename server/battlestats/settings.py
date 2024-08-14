@@ -76,6 +76,13 @@ DATABASES = {
     }
 }
 
+# print the db name, user, host, and port
+print(f"DB_NAME: {DATABASES['default']['NAME']}")
+print(f"DB_USER: {DATABASES['default']['USER']}")
+print(f"DB_HOST: {DATABASES['default']['HOST']}")
+print(f"DB_PORT: {DATABASES['default']['PORT']}")
+
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
