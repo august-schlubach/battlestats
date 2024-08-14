@@ -1,10 +1,11 @@
-from rest_framework import generics
-from warships.models import Player, Clan, Ship
-from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer
 import logging
-from rest_framework import viewsets
-from rest_framework import permissions
-from django.http import Http404
+import math
+from django.http import Http404, JsonResponse
+from rest_framework import generics, permissions, viewsets
+from warships.models import Player, Clan, Ship
+from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, BattleDataSerializer
+from warships.utils.data import fetch_snapshot_data
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -53,3 +54,35 @@ class ShipDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = Ship.objects.all()
     serializer_class = ShipSerializer
     permission_classes = [permissions.AllowAny]
+
+
+def get_monthly_battle_data(request, player_id: str) -> JsonResponse:
+    # fetch battle data for a given player and prepare it for display
+    print(f'Fetching battle data for player_id: {player_id}')
+
+    try:
+        # Ensure the player exists
+        Player.objects.get(player_id=player_id)
+    except Player.DoesNotExist:
+        return JsonResponse({'error': 'Player not found'}, status=404)
+
+    df = fetch_snapshot_data(player_id)
+
+    battle_data = []
+    for index, row in df.iterrows():
+        battles = row['battles']
+        if math.isnan(battles):
+            battles = 0
+
+        wins = row['wins']
+        if math.isnan(wins):
+            wins = 0
+
+        battle_data.append({
+            'date': row['date'],
+            'battles': int(battles),
+            'wins': int(wins)
+        })
+
+    serializer = BattleDataSerializer(battle_data, many=True)
+    return JsonResponse(serializer.data, safe=False)
