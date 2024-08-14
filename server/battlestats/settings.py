@@ -7,12 +7,15 @@ import socket
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# print the BASE_DIR
+print(f"BASE_DIR: {BASE_DIR}")
+
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
-DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1', 't')
+DEBUG = os.getenv('DJANGO_DEBUG', 'True').lower() in ('true', '1', 't')
 
 ALLOWED_HOSTS = os.getenv(
-    'DJANGO_ALLOWED_HOSTS', 'localhost,battlestats.io,159.89.242.69,138.197.75.47').split(',')
+    'DJANGO_ALLOWED_HOSTS', '127.0.0.1,localhost,battlestats.io,159.89.242.69,138.197.75.47').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -106,22 +109,32 @@ STATICFILES_DIRS = [
 ]
 
 docker_id_pattern = r'^[a-fA-F0-9]{12}$'
-if re.match(docker_id_pattern, socket.gethostname()):
-    print("---> Using settings for Docker containers")
-    STATIC_ROOT = '/var/www/static/'
-else:
-    STATIC_ROOT = BASE_DIR / 'static'
+# if re.match(docker_id_pattern, socket.gethostname()):
+#     print("---> Using settings for Docker containers")
+#     STATIC_ROOT = '/var/www/static/'
+# else:
+STATIC_ROOT = BASE_DIR / 'static'
 
 STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-CORS_ALLOW_ALL_ORIGINS = True
-# CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
+CORS_ALLOWED_ORIGINS = [
+    'http://localhost:8888',
+    'http://localhost:8181',
+    'http://localhost:3001',
+]
 
 LOGGING_CONFIG = None
 
 # Get loglevel from env
 LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'info').upper()
+
+# Create logs directory if it doesn't exist
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
+# Determine if running in Docker
+is_docker = re.match(docker_id_pattern, socket.gethostname())
 
 logging.config.dictConfig({
     'version': 1,
@@ -130,17 +143,25 @@ logging.config.dictConfig({
         'console': {
             'format': '%(asctime)s %(levelname)s [%(name)s:%(lineno)s] %(module)s %(process)d %(thread)d %(message)s',
         },
+        'file': {
+            'format': '%(asctime)s %(levelname)s [%(name)s:%(lineno)s] %(message)s',
+        },
     },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
             'formatter': 'console',
         },
+        'file': {
+            'class': 'logging.FileHandler',
+            'formatter': 'file',
+            'filename': LOG_DIR / 'django.log',
+        },
     },
     'loggers': {
         '': {
             'level': LOGLEVEL,
-            'handlers': ['console'],
+            'handlers': ['console', 'file'] if not is_docker else ['console'],
         },
     },
 })
