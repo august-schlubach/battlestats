@@ -24,3 +24,10 @@ class BattleDataSerializer(serializers.Serializer):
     date = serializers.DateField()
     battles = serializers.IntegerField()
     wins = serializers.IntegerField()
+
+
+class TierDataSerializer(serializers.Serializer):
+    ship_tier = serializers.IntegerField()
+    pvp_battles = serializers.IntegerField()
+    wins = serializers.IntegerField()
+    win_ratio = serializers.FloatField()

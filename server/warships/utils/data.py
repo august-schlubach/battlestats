@@ -185,36 +185,57 @@ def fetch_snapshot_data(player_id: str) -> pd.DataFrame:
 
 def fetch_battle_data(player_id: str) -> pd.DataFrame:
     player = Player.objects.get(player_id=player_id)
-    prepared_data = {attrib: [] for attrib in ['ship_name', 'ship_tier', 'all_battles',
-                                               'distance', 'wins', 'losses', 'ship_type', 'pve_battles', 'pvp_battles', 'win_ratio', 'kdr']}
 
-    if player.recent_games is None:
+    if not player.recent_games:
         player.recent_games = _fetch_ship_stats_for_player(player_id)
         player.save()
+    else:
+        try:
+            ship_id = player.recent_games[0]['ship_id']
+        except IndexError:
+            player.recent_games = {}
+            player.save()
 
     ship_data = player.recent_games
 
-    for ship in ship_data['data'][player_id]:
-        ship_model = _fetch_ship_info(ship['ship_id'])
-        if ship_model and ship_model.name:
-            prepared_data['ship_name'].append(ship_model.name)
-            prepared_data['ship_tier'].append(ship_model.tier)
-            prepared_data['all_battles'].append(ship['battles'])
-            prepared_data['distance'].append(ship['distance'])
-            prepared_data['wins'].append(ship['pvp']['wins'])
-            prepared_data['losses'].append(ship['pvp']['losses'])
-            prepared_data['ship_type'].append(ship_model.ship_type)
-            prepared_data['pve_battles'].append(
-                ship['battles'] - (ship['pvp']['wins'] + ship['pvp']['losses']))
-            prepared_data['pvp_battles'].append(ship['pvp']['battles'])
+    prepared_data = {
+        'ship_name': [],
+        'ship_tier': [],
+        'all_battles': [],
+        'distance': [],
+        'wins': [],
+        'losses': [],
+        'ship_type': [],
+        'pve_battles': [],
+        'pvp_battles': [],
+        'win_ratio': [],
+        'kdr': []
+    }
 
-            if ship['pvp']['battles'] == 0:
-                prepared_data['win_ratio'].append(0)
-                prepared_data['kdr'].append(0)
-            else:
-                prepared_data['win_ratio'].append(
-                    round(ship['pvp']['wins'] / ship['pvp']['battles'], 2))
-                prepared_data['kdr'].append(
-                    round(ship['pvp']['frags'] / ship['pvp']['battles'], 2))
+    for ship in ship_data:
+        ship_model = _fetch_ship_info(ship['ship_id'])
+        if not ship_model or not ship_model.name:
+            continue
+
+        pvp_battles = ship['pvp']['battles']
+        wins = ship['pvp']['wins']
+        losses = ship['pvp']['losses']
+        frags = ship['pvp']['frags']
+        battles = ship['battles']
+        distance = ship['distance']
+
+        prepared_data['ship_name'].append(ship_model.name)
+        prepared_data['ship_tier'].append(ship_model.tier)
+        prepared_data['all_battles'].append(battles)
+        prepared_data['distance'].append(distance)
+        prepared_data['wins'].append(wins)
+        prepared_data['losses'].append(losses)
+        prepared_data['ship_type'].append(ship_model.ship_type)
+        prepared_data['pve_battles'].append(battles - (wins + losses))
+        prepared_data['pvp_battles'].append(pvp_battles)
+        prepared_data['win_ratio'].append(
+            round(wins / pvp_battles, 2) if pvp_battles > 0 else 0)
+        prepared_data['kdr'].append(
+            round(frags / pvp_battles, 2) if pvp_battles > 0 else 0)
 
     return pd.DataFrame(prepared_data).sort_values(by="pvp_battles", ascending=False)

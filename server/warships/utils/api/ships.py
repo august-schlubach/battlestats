@@ -22,11 +22,14 @@ def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     response = requests.get(url, params=params)
     data = response.json()
 
+    if data.get('status') == 'ok':
+        return data.get('data', {}).get(player_id, {})
+
     if not data:
         logging.error(f"ERROR: No ship data found for player: {player_id}")
         return {}
 
-    return data.get('data', {})
+    return data.get('data', {}).get(player_id, {})
 
 
 def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
@@ -56,7 +59,13 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
 
         if data and data.get('data') and data['data'].get(str(ship_id)):
             ship_data = data['data'][str(ship_id)]
-            ship.name = ship_data.get('name')
+            ship_name = ship_data.get('name')
+            if not ship_name:
+                logging.error(
+                    f"ERROR: Ship name is empty for ship_id: {ship_id}")
+                return None
+
+            ship.name = ship_name
             ship.nation = ship_data.get('nation')
             ship.is_premium = ship_data.get('is_premium')
             ship.ship_type = ship_data.get('type')

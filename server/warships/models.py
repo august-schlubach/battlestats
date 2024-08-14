@@ -30,7 +30,7 @@ class Player(models.Model):
 class Ship(models.Model):
     name = models.CharField(max_length=200)
     nation = models.CharField(max_length=200)
-    ship_id = models.IntegerField(unique=True)
+    ship_id = models.BigIntegerField(unique=True)
     ship_type = models.CharField(max_length=200)
     tier = models.IntegerField(null=True, blank=True)
     is_premium = models.BooleanField(default=False)
