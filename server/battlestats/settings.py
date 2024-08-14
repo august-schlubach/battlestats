@@ -1,18 +1,18 @@
+import re
 from pathlib import Path
 import os
 import logging.config
 import socket
-
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
 
-DEBUG = os.getenv('DJANGO_DEBUG', False)
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1', 't')
 
-ALLOWED_HOSTS = ['localhost', 'battlestats.io',
-                 '159.89.242.69', '138.197.75.47']
+ALLOWED_HOSTS = os.getenv(
+    'DJANGO_ALLOWED_HOSTS', 'localhost,battlestats.io,159.89.242.69,138.197.75.47').split(',')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -65,11 +65,11 @@ DATABASES = {
         'ENGINE': 'django.db.backends.{}'.format(
             os.getenv('DB_ENGINE', 'sqlite3')
         ),
-        'NAME': os.getenv('DB_NAME', 'django'),
+        'NAME': os.getenv('DB_NAME', BASE_DIR / 'db.sqlite3'),
         'USER': os.getenv('DB_USERNAME', 'django'),
         'PASSWORD': os.getenv('DB_PASSWORD', 'django'),
         'HOST': os.getenv('DB_HOST', '127.0.0.1'),
-        'PORT': os.getenv('DB_PORT', 5432),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 
@@ -88,7 +88,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/
 
@@ -97,15 +96,27 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 
 USE_I18N = True
-
 USE_TZ = False
 
-STATIC_URL = 'static/'
-STATIC_ROOT = '/var/www/static/'
+STATIC_URL = '/static/'
+
+# STATICFILES_DIRS should not include STATIC_ROOT
+STATICFILES_DIRS = [
+    BASE_DIR / "staticfiles",
+]
+
+docker_id_pattern = r'^[a-fA-F0-9]{12}$'
+if re.match(docker_id_pattern, socket.gethostname()):
+    print("---> Using settings for Docker containers")
+    STATIC_ROOT = '/var/www/static/'
+else:
+    STATIC_ROOT = BASE_DIR / 'static'
+
+STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', '').split(',')
 
 LOGGING_CONFIG = None
 
@@ -129,7 +140,7 @@ logging.config.dictConfig({
     'loggers': {
         '': {
             'level': LOGLEVEL,
-            'handlers': ['console',],
+            'handlers': ['console'],
         },
     },
 })
@@ -141,3 +152,10 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
+
+REST_FRAMEWORK = {
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+        'rest_framework.renderers.BrowsableAPIRenderer',
+    ]
+}
