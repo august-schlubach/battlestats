@@ -31,12 +31,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
         <div>
             <table className="w-full border-collapse">
                 <tbody>
-                    {Object.entries(player).map(([key, value]) => (
-                        <tr key={key}>
-                            <td className="px-2 py-1 text-right">{key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:</td>
-                            <td className="px-2 py-1 text-left">{typeof value === 'object' ? JSON.stringify(value) : value}</td>
-                        </tr>
-                    ))}
+                    {Object.entries(player)
+                        .filter(([key]) => key !== 'recent_games')
+                        .map(([key, value]) => (
+                            <tr key={key}>
+                                <td className="px-2 py-1 text-right">
+                                    {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
+                                </td>
+                                <td className="px-2 py-1 text-left">
+                                    {typeof value === 'object' ? JSON.stringify(value) : value}
+                                </td>
+                            </tr>
+                        ))}
                 </tbody>
             </table>
             <div id="activity_svg_container"></div>
