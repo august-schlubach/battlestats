@@ -1,14 +1,19 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import * as d3 from 'd3';
 
 interface BattleActivityProps {
     playerId: number;
 }
 
-const BattleActivity: React.FC<BattleActivityProps> = ({ playerId }) => {
+const ActivitySVG: React.FC<BattleActivityProps> = ({ playerId }) => {
+    const [dataFetched, setDataFetched] = useState(false);
+
     useEffect(() => {
-        drawActivityPlot(playerId);
-    }, [playerId]);
+        if (!dataFetched) {
+            drawActivityPlot(playerId);
+            setDataFetched(true);
+        }
+    }, [playerId, dataFetched]);
 
     const drawActivityPlot = (playerId: number) => {
         const container = document.getElementById("activity_svg_container");
@@ -17,9 +22,9 @@ const BattleActivity: React.FC<BattleActivityProps> = ({ playerId }) => {
                 container.removeChild(container.firstChild);
             }
 
-            const activity_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
+            const activity_svg_margin = { top: 20, right: 20, bottom: 50, left: 70 },
                 activity_svg_width = 600 - activity_svg_margin.left - activity_svg_margin.right,
-                activity_svg_height = 170 - activity_svg_margin.top - activity_svg_margin.bottom;
+                activity_svg_height = 230 - activity_svg_margin.top - activity_svg_margin.bottom;
 
             const activity_svg = d3.select("#activity_svg_container")
                 .append("svg")
@@ -28,7 +33,7 @@ const BattleActivity: React.FC<BattleActivityProps> = ({ playerId }) => {
                 .append("g")
                 .attr("transform", `translate(${activity_svg_margin.left}, ${activity_svg_margin.top})`);
 
-            const path = `http://localhost:8888/api/player/get_monthly_battle_data/${playerId}`;
+            const path = `http://localhost:8888/api/fetch/monthly_activity_data/${playerId}`;
             const start_date = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
 
             fetch(path)
@@ -101,7 +106,7 @@ const BattleActivity: React.FC<BattleActivityProps> = ({ playerId }) => {
         };
 
         const showRecentDetails = (d) => {
-            const start_x = 395, start_y = 0;
+            const start_x = 470, start_y = 30;
 
             const detailGroup = d3.select("#activity_svg_container").select("svg").append("g")
                 .classed('details', true);
@@ -131,4 +136,4 @@ const BattleActivity: React.FC<BattleActivityProps> = ({ playerId }) => {
     return <div id="activity_svg_container"></div>;
 };
 
-export default BattleActivity;
+export default ActivitySVG;

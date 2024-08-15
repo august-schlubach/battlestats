@@ -1,5 +1,6 @@
 import React from 'react';
-import BattleActivity from './BattleActivity';
+import ActivitySVG from './BattleActivitySVG';
+import TierSVG from './BattleTierSVG';
 
 interface PlayerDetailProps {
     player: {
@@ -29,24 +30,21 @@ interface PlayerDetailProps {
 const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
     return (
         <div>
-            <table className="w-full border-collapse">
-                <tbody>
-                    {Object.entries(player)
-                        .filter(([key]) => key !== 'recent_games')
-                        .map(([key, value]) => (
-                            <tr key={key}>
-                                <td className="px-2 py-1 text-right">
-                                    {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
-                                </td>
-                                <td className="px-2 py-1 text-left">
-                                    {typeof value === 'object' ? JSON.stringify(value) : value}
-                                </td>
-                            </tr>
-                        ))}
-                </tbody>
-            </table>
+            <div className="text-left">
+                <h1 className="text-2xl font-bold">{player.name} ({player.player_id})</h1>
+                <p>total battles: {player.total_battles}</p>
+                <p>pvp battles: {player.pvp_battles}</p>
+                <p>pvp wins: {player.pvp_wins}</p>
+                <p>pvp losses: {player.pvp_losses}</p>
+                <p>pvp ratio: {player.pvp_ratio}</p>
+                <p>pvp survival rate: {player.pvp_survival_rate}</p>
+                <p>days since last battle: {player.days_since_last_battle}</p>
+                <p>last battle date: {player.last_battle_date}</p>
+            </div>
             <div id="activity_svg_container"></div>
-            <BattleActivity playerId={player.player_id} />
+            <ActivitySVG playerId={player.player_id} />
+            <div id="tier_svg_container"></div>
+            <TierSVG playerId={player.player_id} />
             <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>
         </div>
     );

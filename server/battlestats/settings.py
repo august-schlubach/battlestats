@@ -82,7 +82,6 @@ print(f"DB_USER: {DATABASES['default']['USER']}")
 print(f"DB_HOST: {DATABASES['default']['HOST']}")
 print(f"DB_PORT: {DATABASES['default']['PORT']}")
 
-
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -134,7 +133,7 @@ CORS_ALLOWED_ORIGINS = [
 LOGGING_CONFIG = None
 
 # Get loglevel from env
-LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'info').upper()
+LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'INFO').upper()
 
 # Create logs directory if it doesn't exist
 LOG_DIR = BASE_DIR / 'logs'
