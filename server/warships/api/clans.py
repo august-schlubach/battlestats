@@ -17,7 +17,7 @@ def _fetch_clan_data(player_id: str) -> Dict:
         "extra": "clan",
         "fields": "clan.members_count,clan.tag,clan.name,clan.clan_id"
     }
-    logging.info(f'--> Remote fetching clan info for player_id: {player_id}')
+    logging.info(f' ---> Remote fetching clan info for player_id: {player_id}')
     data = _make_api_request("clans/accountinfo/", params)
     return data.get(player_id, {}) if data else {}
 
@@ -29,7 +29,7 @@ def _fetch_clan_member_ids(clan_id: str) -> List[str]:
         "clan_id": clan_id,
         "fields": "members_ids"
     }
-    logging.info(f'--> Remote fetching clan members for clan_id: {clan_id}')
+    logging.info(f' ---> Remote fetching clan members for clan_id: {clan_id}')
     data = _make_api_request("clans/info/", params)
     return data.get(str(clan_id), {}).get('members_ids', []) if data else []
 
@@ -41,7 +41,8 @@ def _fetch_player_data_from_list(players: List[int]) -> Dict:
         "application_id": APP_ID,
         "account_id": member_list
     }
-    logging.info(f'--> Remote fetching player data for members: {member_list}')
+    logging.info(
+        f' ---> Remote fetching player data for members: {member_list}')
     data = _make_api_request("account/info/", params)
     return data if data else {}
 

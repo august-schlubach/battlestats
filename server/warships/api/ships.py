@@ -39,7 +39,8 @@ def _fetch_ship_stats_for_player(player_id: str) -> Dict:
         "application_id": APP_ID,
         "account_id": player_id
     }
-    logging.info(f'--> Remote fetching ship stats for player_id: {player_id}')
+    logging.info(
+        f' ---> Remote fetching ship stats for player_id: {player_id}')
     data = _make_api_request("ships/stats/", params)
     return data[player_id] if data else {}
 
@@ -60,7 +61,7 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
             "application_id": APP_ID,
             "ship_id": ship_id
         }
-        logging.info(f'--> Remote fetching ship info for id: {ship_id}')
+        logging.info(f' ---> Remote fetching ship info for id: {ship_id}')
         data = _make_api_request("encyclopedia/ships/", params)
 
         if data and data.get(str(ship_id)):

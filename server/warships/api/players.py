@@ -18,7 +18,7 @@ def _fetch_snapshot_data(player_id: int, dates: str = '') -> Dict:
         "dates": dates,
         "fields": "pvp.account_id,pvp.battles,pvp.wins,pvp.survived_battles,pvp.battle_type,pvp.date"
     }
-    logging.info(f'--> Remote fetching snapshot for player_id: {player_id}')
+    logging.info(f' ---> Remote fetching snapshot for player_id: {player_id}')
     data = _make_api_request("account/statsbydate/", params)
 
     return data.get(str(player_id), {}).get('pvp', {}) if data else {}
@@ -30,7 +30,8 @@ def _fetch_player_battle_data(player_id: int) -> Dict:
         "application_id": APP_ID,
         "account_id": player_id
     }
-    logging.info(f'--> Remote fetching player data for player_id: {player_id}')
+    logging.info(
+        f' ---> Remote fetching player data for player_id: {player_id}')
     data = _make_api_request("account/info/", params)
     return data.get(str(player_id), {}) if data else {}
 
@@ -43,7 +44,7 @@ def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
             "application_id": APP_ID,
             "search": player_name
         }
-        logging.info(f'--> Remote fetching player info for: {player_name}')
+        logging.info(f' ---> Remote fetching player info for: {player_name}')
         data = _make_api_request("account/list/", params)
 
         if data:

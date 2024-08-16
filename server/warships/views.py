@@ -57,8 +57,10 @@ class ShipDetail(generics.RetrieveUpdateDestroyAPIView):
 
 def tier_data(request, player_id: str) -> JsonResponse:
     data = fetch_tier_data(player_id)
-    serializer = TierDataSerializer(data, many=True)
-    return JsonResponse(serializer.data, safe=False)
+    serializer = TierDataSerializer(data=data, many=True)
+    if serializer.is_valid():
+        return JsonResponse(serializer.data, safe=False)
+    return JsonResponse(serializer.errors, status=400)
 
 
 def activity_data(request, player_id: str) -> JsonResponse:
