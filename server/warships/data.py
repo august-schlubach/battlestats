@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from warships.models import Player, Snapshot
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
 from warships.api.players import _fetch_snapshot_data
-import math
 
 
 def update_battle_data(player_id: str) -> None:
@@ -116,10 +115,20 @@ def fetch_tier_data(player_id: str) -> list:
 
     return data
 
-# -----------------------------------------
-
 
 def update_snapshot_data(player_id: int) -> None:
+    """
+    Updates the snapshot data for a given player.
+
+    This function fetches the latest snapshot data for a player from an external API if the cached data is older than a day.
+    The fetched data is then processed and saved back to the player's record in the database.
+
+    Args:
+        player_id (int): The ID of the player whose snapshot data needs to be updated.
+
+    Returns:
+        None
+    """
     player = Player.objects.get(player_id=player_id)
     player.last_lookup = datetime.now()
     player.save()
@@ -192,6 +201,18 @@ def update_snapshot_data(player_id: int) -> None:
 
 
 def fetch_activity_data(player_id: str) -> list:
+    """
+    Fetches and processes activity data for a given player.
+
+    This function updates the snapshot data for a player and then processes it to calculate the number of battles
+    and wins for each day in the past 29 days. The processed data is returned as a list of dictionaries.
+
+    Args:
+        player_id (str): The ID of the player whose activity data needs to be fetched.
+
+    Returns:
+        list: A list of dictionaries containing the processed activity data for the past 29 days.
+    """
     player = Player.objects.get(player_id=player_id)
     update_snapshot_data(player_id)
 
