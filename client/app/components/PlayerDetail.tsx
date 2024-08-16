@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import ActivitySVG from './BattleActivitySVG';
 import TierSVG from './BattleTierSVG';
+import { SpinnerCircular } from 'spinners-react';
 
 interface PlayerDetailProps {
     player: {
@@ -28,6 +29,17 @@ interface PlayerDetailProps {
 }
 
 const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        // Simulate loading time for SVGs
+        const timer = setTimeout(() => {
+            setLoading(false);
+        }, 2000); // Adjust time as needed
+
+        return () => clearTimeout(timer);
+    }, []);
+
     return (
         <div>
             <div className="text-left">
@@ -41,10 +53,21 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                 <p>days since last battle: {player.days_since_last_battle}</p>
                 <p>last battle date: {player.last_battle_date}</p>
             </div>
-            <div id="activity_svg_container"></div>
-            <ActivitySVG playerId={player.player_id} />
-            <div id="tier_svg_container"></div>
-            <TierSVG playerId={player.player_id} />
+            {loading ? (
+                <div className="flex justify-center items-center">
+                    <SpinnerCircular size={50} thickness={100} color="#38ad48" />
+                    <p>Loading...</p>
+                </div>
+            ) : (
+                <>
+                    <div id="activity_svg_container">
+                        <ActivitySVG playerId={player.player_id} />
+                    </div>
+                    <div id="tier_svg_container">
+                        <TierSVG playerId={player.player_id} />
+                    </div>
+                </>
+            )}
             <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>
         </div>
     );
