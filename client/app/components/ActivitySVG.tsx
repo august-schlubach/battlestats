@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import * as d3 from 'd3';
 
-interface BattleActivityProps {
+interface ActivityProps {
     playerId: number;
 }
 
-const ActivitySVG: React.FC<BattleActivityProps> = ({ playerId }) => {
+const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
     const [dataFetched, setDataFetched] = useState(false);
 
     useEffect(() => {
@@ -42,7 +42,7 @@ const ActivitySVG: React.FC<BattleActivityProps> = ({ playerId }) => {
                     const loading_image = document.getElementById("activity_loading_image");
                     if (loading_image) loading_image.remove();
 
-                    let max_battles = d3.max(data, d => +d.battles);
+                    let max_battles = d3.max(data, (d: any) => +d.battles);
                     max_battles = Math.max(max_battles, 2) + 1;
 
                     const x = d3.scaleTime()
@@ -70,33 +70,33 @@ const ActivitySVG: React.FC<BattleActivityProps> = ({ playerId }) => {
                         .classed('rect', true);
 
                     nodes.append("rect")
-                        .attr("x", d => x(new Date(d.date)))
-                        .attr("y", d => y(d.battles))
-                        .attr("height", d => activity_svg_height - (y(d.battles) ?? 0))
+                        .attr("x", (d: any) => x(new Date(d.date)))
+                        .attr("y", (d: any) => y(d.battles))
+                        .attr("height", (d: any) => activity_svg_height - (y(d.battles) ?? 0))
                         .attr("width", "12")
                         .attr("fill", "#ccc")
-                        .on('mouseover', function (event, d) {
+                        .on('mouseover', function (event: any, d: any) {
                             showRecentDetails(d);
                         })
-                        .on('mouseout', function (event, d) {
+                        .on('mouseout', function (event: any, d: any) {
                             hideRecentDetails();
                         });
 
                     nodes.append("rect")
-                        .attr("x", d => x(new Date(d.date)) + 1)
-                        .attr("y", d => y(d.wins))
-                        .attr("height", d => activity_svg_height - (y(d.wins) ?? 0))
+                        .attr("x", (d: any) => x(new Date(d.date)) + 1)
+                        .attr("y", (d: any) => y(d.wins))
+                        .attr("height", (d: any) => activity_svg_height - (y(d.wins) ?? 0))
                         .attr("width", "10")
                         .style("stroke", "#444")
                         .style("stroke-width", 0.5)
                         .attr("fill", "#74c476")
-                        .on('mouseover', function (event, d) {
+                        .on('mouseover', function (this: any, event: any, d: any) {
                             showRecentDetails(d);
                             d3.select(this).transition()
                                 .duration('50')
                                 .attr('fill', '#bcbddc');
                         })
-                        .on('mouseout', function (event, d) {
+                        .on('mouseout', function (this: any, event: any, d: any) {
                             hideRecentDetails();
                             d3.select(this).transition()
                                 .duration('50')
@@ -105,7 +105,7 @@ const ActivitySVG: React.FC<BattleActivityProps> = ({ playerId }) => {
                 });
         };
 
-        const showRecentDetails = (d) => {
+        const showRecentDetails = (d: any) => {
             const start_x = 470, start_y = 30;
 
             const detailGroup = d3.select("#activity_svg_container").select("svg").append("g")

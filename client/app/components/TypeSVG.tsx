@@ -1,60 +1,60 @@
 import React, { useEffect } from 'react';
 import * as d3 from 'd3';
 
-interface TierSVGProps {
+interface TypeSVGProps {
     playerId: number;
 }
 
-const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
+const TypeSVG: React.FC<TypeSVGProps> = ({ playerId }) => {
     useEffect(() => {
-        drawTierPlot(playerId);
+        drawTypePlot(playerId);
     }, [playerId]);
 
-    const drawTierPlot = (playerId: number) => {
-        const container = document.getElementById("tier_activity_container");
+    const drawTypePlot = (playerId: number) => {
+        const container = document.getElementById("type_svg_container");
         if (container) {
             while (container.firstChild) {
                 container.removeChild(container.firstChild);
             }
 
-            const tier_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
-                svg_width = 600 - tier_svg_margin.left - tier_svg_margin.right,
-                svg_height = 300 - tier_svg_margin.top - tier_svg_margin.bottom;
+            const type_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
+                type_svg_width = 600 - type_svg_margin.left - type_svg_margin.right,
+                type_svg_height = 170 - type_svg_margin.top - type_svg_margin.bottom;
 
-            const svg = d3.select("#tier_activity_container")
+            const type_svg = d3.select("#type_svg_container")
                 .append("svg")
-                .attr("width", svg_width + tier_svg_margin.left + tier_svg_margin.right)
-                .attr("height", svg_height + tier_svg_margin.top + tier_svg_margin.bottom)
+                .attr("width", type_svg_width + type_svg_margin.left + type_svg_margin.right)
+                .attr("height", type_svg_height + type_svg_margin.top + type_svg_margin.bottom)
                 .append("g")
-                .attr("transform", `translate(${tier_svg_margin.left}, ${tier_svg_margin.top})`);
+                .attr("transform", `translate(${type_svg_margin.left}, ${type_svg_margin.top})`);
 
-            const path = `http://localhost:8888/api/fetch/tier_data/${playerId}`;
+            const path = `http://localhost:8888/api/fetch/type_data/${playerId}`;
 
             fetch(path)
                 .then(response => response.json())
                 .then(data => {
-                    const max = d3.max(data, d => +d.pvp_battles);
+                    const max = d3.max(data, (d: any) => +d.pvp_battles);
 
-                    svg.selectAll("*").remove();
+                    type_svg.selectAll("*").remove();
 
                     const x = d3.scaleLinear()
                         .domain([0, max])
-                        .range([1, svg_width]);
-                    svg.append("g")
-                        .attr("transform", `translate(0, ${svg_height})`)
+                        .range([1, type_svg_width]);
+                    type_svg.append("g")
+                        .attr("transform", `translate(0, ${type_svg_height})`)
                         .call(d3.axisBottom(x))
                         .selectAll("text")
                         .attr("transform", "translate(-10,0)rotate(-45)")
                         .style("text-anchor", "end");
 
                     const y = d3.scaleBand()
-                        .range([0, svg_height])
-                        .domain(data.map(d => d.ship_tier))
+                        .range([0, type_svg_height])
+                        .domain(data.map((d: any) => d.ship_type))
                         .padding(.1);
-                    svg.append("g")
+                    type_svg.append("g")
                         .call(d3.axisLeft(y));
 
-                    const rect_nodes = svg.selectAll(".rect")
+                    const rect_nodes = type_svg.selectAll(".rect")
                         .data(data)
                         .enter()
                         .append("g")
@@ -62,40 +62,40 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
 
                     rect_nodes.append("rect")
                         .attr("x", x(0))
-                        .attr("y", d => y(d.ship_tier) + 3)
-                        .attr("width", d => x(d.pvp_battles))
+                        .attr("y", (d: any) => y(d.ship_type) + 3)
+                        .attr("width", (d: any) => x(d.pvp_battles))
                         .attr("height", y.bandwidth() * .7)
                         .attr("fill", "#d9d9d9");
 
                     rect_nodes.append("rect")
                         .attr("x", x(0))
-                        .attr("y", d => y(d.ship_tier))
-                        .attr("width", d => x(d.wins))
+                        .attr("y", (d: any) => y(d.ship_type))
+                        .attr("width", (d: any) => x(d.wins))
                         .attr("height", y.bandwidth())
                         .style("stroke", "#444")
                         .style("stroke-width", 0.75)
-                        .attr("fill", d => select_color_by_wr(d.win_ratio))
-                        .on('mouseover', function (event, d) {
-                            showTierDetails(d);
+                        .attr("fill", (d: any) => select_color_by_wr(d.win_ratio))
+                        .on('mouseover', (event: any, d: any) => {
+                            showTypeDetails(d);
                             d3.select(this).transition()
                                 .duration('50')
                                 .attr('fill', '#bcbddc');
                         })
-                        .on('mouseout', function (event, d) {
-                            hideTierDetails();
+                        .on('mouseout', (event: any, d: any) => {
+                            hideTypeDetails();
                             d3.select(this).transition()
                                 .duration('50')
-                                .attr("fill", d => select_color_by_wr(d.win_ratio));
+                                .attr("fill", (d: any) => select_color_by_wr(d.win_ratio));
                         });
                 });
         }
     };
 
-    const showTierDetails = (d) => {
-        const start_x = 400, start_y = 240;
+    const showTypeDetails = (d: any) => {
+        const start_x = 400, start_y = 110;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
-        const detailGroup = d3.select("#tier_activity_container").select("svg").append("g")
+        const detailGroup = d3.select("#type_svg_container").select("svg").append("g")
             .classed('details', true);
 
         detailGroup.append("text")
@@ -127,8 +127,8 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
             .text("% Win Rate");
     };
 
-    const hideTierDetails = () => {
-        const detailGroup = d3.select("#tier_activity_container").select(".details");
+    const hideTypeDetails = () => {
+        const detailGroup = d3.select("#type_svg_container").select(".details");
         detailGroup.remove();
     };
 
@@ -144,7 +144,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
         return "#a50f15"; // super bad
     };
 
-    return <div id="tier_activity_container"></div>;
+    return <div id="type_svg_container"></div>;
 };
 
-export default TierSVG;
+export default TypeSVG;

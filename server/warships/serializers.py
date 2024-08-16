@@ -52,3 +52,9 @@ class RandomsDataSerializer(serializers.Serializer):
     ship_name = serializers.CharField()
     win_ratio = serializers.FloatField()
     wins = serializers.IntegerField()
+
+
+class ClanDataSerializer(serializers.Serializer):
+    player_name = serializers.CharField()
+    pvp_battles = serializers.IntegerField()
+    win_ratio = serializers.FloatField()

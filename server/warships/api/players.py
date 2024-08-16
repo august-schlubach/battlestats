@@ -24,15 +24,16 @@ def _fetch_snapshot_data(player_id: int, dates: str = '') -> Dict:
     return data.get(str(player_id), {}).get('pvp', {}) if data else {}
 
 
-def _fetch_player_battle_data(player_id: int) -> Dict:
+def _fetch_player_personal_data(player_id: int) -> Dict:
     """Fetch JSON data for a given player_id."""
     params = {
         "application_id": APP_ID,
         "account_id": player_id
     }
     logging.info(
-        f' ---> Remote fetching player data for player_id: {player_id}')
+        f' ---> Remote fetching player personal (account) data for player_id: {player_id}')
     data = _make_api_request("account/info/", params)
+    breakpoint()
     return data.get(str(player_id), {}) if data else {}
 
 

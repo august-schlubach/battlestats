@@ -29,7 +29,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
         }
     }, [data]);
 
-    const drawBattlePlot = (data) => {
+    const drawBattlePlot = (data: any) => {
         const margin = { top: 10, right: 20, bottom: 30, left: 140 };
         const width = 600 - margin.left - margin.right;
         const height = 500 - margin.top - margin.bottom;
@@ -41,7 +41,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
             .append("g")
             .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
-        const max = Math.max(d3.max(data, d => +d.pvp_battles), 15);
+        const max = Math.max(d3.max(data, (d: any) => +d.pvp_battles), 15);
 
         // X axis
         const x = d3.scaleLinear()
@@ -57,7 +57,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
         // Y axis
         const y = d3.scaleBand()
             .range([0, height])
-            .domain(data.map(d => d.ship_name))
+            .domain(data.map((d: any) => d.ship_name))
             .padding(.1);
         svg.append("g")
             .call(d3.axisLeft(y));
@@ -77,34 +77,34 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
 
         nodes.append("rect")
             .attr("x", x(0))
-            .attr("y", d => y(d.ship_name) + 3)
-            .attr("width", d => x(d.pvp_battles))
+            .attr("y", (d: any) => y(d.ship_name) + 3)
+            .attr("width", (d: any) => x(d.pvp_battles))
             .attr("height", (y.bandwidth() * .7))
             .attr("fill", "#d9d9d9");
 
         nodes.append("rect")
             .attr("x", x(0))
-            .attr("y", d => y(d.ship_name))
-            .attr("width", d => x(d.wins))
+            .attr("y", (d: { ship_name: string }) => y(d.ship_name))
+            .attr("width", (d: { wins: number }) => x(d.wins))
             .attr("height", y.bandwidth())
             .style("stroke", "#444")
             .style("stroke-width", 0.75)
-            .attr("fill", d => selectColorByWr(d.win_ratio))
-            .on('mouseover', function (event, d) {
+            .attr("fill", (d: { win_ratio: number }) => selectColorByWr(d.win_ratio))
+            .on('mouseover', (event: MouseEvent, d: { win_ratio: number }) => {
                 showDetails(d, svg);
                 d3.select(this).transition()
-                    .duration('50')
+                    .duration(50)
                     .attr('fill', '#bcbddc');
             })
-            .on('mouseout', function (event, d) {
+            .on('mouseout', (event: MouseEvent, d: { win_ratio: number }) => {
                 hideDetails(svg);
                 d3.select(this).transition()
-                    .duration('50')
-                    .attr("fill", d => selectColorByWr(d.win_ratio));
+                    .duration(50)
+                    .attr("fill", (d: { win_ratio: number }) => selectColorByWr(d.win_ratio));
             });
     };
 
-    const showDetails = (d, svg) => {
+    const showDetails = (d: any, svg: any) => {
         const start_x = 300, start_y = 320, x_offset = 10;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
@@ -134,7 +134,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
             .text(d.pvp_battles);
     };
 
-    const hideDetails = (svg) => {
+    const hideDetails = (svg: any) => {
         svg.selectAll('.details').remove();
     };
 

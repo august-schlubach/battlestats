@@ -1,10 +1,13 @@
+from django.utils import timezone
+from typing import Dict, Any, Optional
+from datetime import datetime
 import pandas as pd
 import logging
 from django.http import JsonResponse
 from datetime import datetime, timedelta
 from warships.models import Player, Snapshot
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
-from warships.api.players import _fetch_snapshot_data
+from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
 
 
 def update_battle_data(player_id: str) -> None:
@@ -313,3 +316,56 @@ def fetch_randoms_data(player_id: str) -> list:
     df = df.filter(['pvp_battles', 'ship_name', 'win_ratio', 'wins'])
     df = df.sort_values(by='pvp_battles', ascending=False).head(20)
     return df.to_dict(orient='records')
+
+
+# ----------------------------------------
+
+def populate_new_player(player: Player) -> Player:
+    player_data = _fetch_player_personal_data(player.player_id)
+    breakpoint()
+    # Check if the player's profile is hidden
+    if player_data.get('hidden_profile'):
+        player.is_hidden = True
+
+    # Map basic fields
+    player.name = player_data.get("nickname", "")
+    player.player_id = player_data.get("account_id", player.player_id)
+    player.creation_date = datetime.fromtimestamp(
+        player_data.get("created_at", 0), tz=timezone.utc)
+    player.last_battle_date = datetime.fromtimestamp(
+        player_data.get("last_battle_time", 0), tz=timezone.utc).date()
+
+    # Calculate days since last battle
+    if player.last_battle_date:
+        player.days_since_last_battle = (datetime.now(
+            timezone.utc).date() - player.last_battle_date).days
+
+    # If the player is not hidden, map additional statistics
+    if not player.is_hidden:
+        player.battles_updated_at = datetime.fromtimestamp(
+            player_data.get("stats_updated_at", 0), tz=timezone.utc)
+        stats = player_data.get("statistics", {})
+        player.total_battles = stats.get("battles", 0)
+        pvp_stats = stats.get("pvp", {})
+        player.pvp_battles = pvp_stats.get("battles", 0)
+        player.pvp_wins = pvp_stats.get("wins", 0)
+        player.pvp_losses = pvp_stats.get("losses", 0)
+
+        # Calculate PvP ratios
+        player.pvp_ratio = round(
+            (player.pvp_wins / player.pvp_battles * 100), 2) if player.pvp_battles else 0
+        player.pvp_survival_rate = round((pvp_stats.get(
+            "survived_battles", 0) / player.pvp_battles) * 100, 2) if player.pvp_battles else 0
+        player.wins_survival_rate = round((pvp_stats.get(
+            "survived_wins", 0) / player.pvp_wins) * 100, 2) if player.pvp_wins else 0
+
+    # Handle clan association
+    clan_id = player_data.get("clan_id")
+
+    # Save the player instance
+    player.save()
+    return player
+
+
+def fetch_clan_data():
+    pass

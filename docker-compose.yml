@@ -1,6 +1,12 @@
 version: "3.8"
 
 services:
+  rabbitmq:
+    container_name: battlestats-rabbitmq
+    image: "rabbitmq:3-management"
+    ports:
+      - "5672:5672"
+      - "15672:15672"
   server:
     build:
       context: server/
@@ -60,10 +66,3 @@ services:
       - server
       - task-runner
       - rabbitmq
-
-  rabbitmq:
-    container_name: battlestats-rabbitmq
-    image: "rabbitmq:3-management"
-    ports:
-      - "5672:5672"
-      - "15672:15672"

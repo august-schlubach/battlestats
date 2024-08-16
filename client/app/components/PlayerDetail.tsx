@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import ActivitySVG from './BattleActivitySVG';
-import TierSVG from './BattleTierSVG';
-import TypeSVG from './BattleTypeSVG';
-import RandomsSVG from './BattleRandomsSVG';
+import ActivitySVG from './ActivitySVG';
+import TierSVG from './TierSVG';
+import TypeSVG from './TypeSVG';
+import RandomsSVG from './RandomsSVG';
 import { SpinnerCircular } from 'spinners-react';
 
 interface PlayerDetailProps {
@@ -45,41 +45,58 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
 
     return (
         <div>
-            <div className="text-left">
-                <h1 className="text-2xl font-bold">{player.name} ({player.player_id})</h1>
-                <p>total battles: {player.total_battles}</p>
-                <p>pvp battles: {player.pvp_battles}</p>
-                <p>pvp wins: {player.pvp_wins}</p>
-                <p>pvp losses: {player.pvp_losses}</p>
-                <p>pvp ratio: {player.pvp_ratio}</p>
-                <p>pvp survival rate: {player.pvp_survival_rate}</p>
-                <p>days since last battle: {player.days_since_last_battle}</p>
-                <p>last battle date: {player.last_battle_date}</p>
-                <p>clan name: {player.clan_name}</p>
-            </div>
-            {loading ? (
-                <div className="flex justify-center items-center">
-                    <SpinnerCircular size={50} thickness={100} color="#38ad48" />
-                    <p>Loading...</p>
+            <div className="text-left p-4">
+                <h1 className="text-2xl font-bold">
+                    {player.name}
+                    <span className="ml-2 text-lg font-normal">[{player.clan_name}]</span>
+                </h1>
+                <div className="mt-2">
+                    <span className="block text-lg font-semibold">
+                        <span className="text-3xl">{player.pvp_ratio}</span>% Win Rate
+                    </span>
+                    <span className="block text-lg">
+                        <span className="text-3xl">{player.pvp_battles.toLocaleString()}</span> PvP Battles
+                    </span>
+                    <span className="block text-lg">
+                        <span className="text-3xl">{player.pvp_survival_rate}</span>% Survival
+                    </span>
                 </div>
-            ) : (
-                <>
-                    <div id="randoms_svg_container">
-                        <RandomsSVG playerId={player.player_id} />
+                <div className="mt-2 text-gray-600">
+                    <span className="block">Last Played: {player.days_since_last_battle} days ago</span>
+                </div>
+                <div className="mt-2">
+                    <p>Total Battles: {player.total_battles}</p>
+                    <p>PvP Wins: {player.pvp_wins}</p>
+                    <p>PvP Losses: {player.pvp_losses}</p>
+                    <p>Last Battle Date: {player.last_battle_date}</p>
+                    <p>Clan Name: {player.clan_name}</p>
+                </div>
+            </div>
+            {
+                loading ? (
+                    <div className="flex justify-center items-center">
+                        <SpinnerCircular size={50} thickness={100} color="#38ad48" />
+                        <p>Loading...</p>
                     </div>
-                    <div id="activity_svg_container">
-                        <ActivitySVG playerId={player.player_id} />
-                    </div>
-                    <div id="tier_svg_container">
-                        <TierSVG playerId={player.player_id} />
-                    </div>
-                    <div id="type_svg_container">
-                        <TypeSVG playerId={player.player_id} />
-                    </div>
-                </>
-            )}
+                ) : (
+                    <>
+                        <div id="randoms_svg_container">
+                            <RandomsSVG playerId={player.player_id} />
+                        </div>
+                        <div id="activity_svg_container">
+                            <ActivitySVG playerId={player.player_id} />
+                        </div>
+                        <div id="tier_svg_container">
+                            <TierSVG playerId={player.player_id} />
+                        </div>
+                        <div id="type_svg_container">
+                            <TypeSVG playerId={player.player_id} />
+                        </div>
+                    </>
+                )
+            }
             <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>
-        </div>
+        </div >
     );
 };
 
