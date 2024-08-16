@@ -33,7 +33,7 @@ const ActivitySVG: React.FC<BattleActivityProps> = ({ playerId }) => {
                 .append("g")
                 .attr("transform", `translate(${activity_svg_margin.left}, ${activity_svg_margin.top})`);
 
-            const path = `http://localhost:8888/api/fetch/monthly_activity_data/${playerId}`;
+            const path = `http://localhost:8888/api/fetch/activity_data/${playerId}`;
             const start_date = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
 
             fetch(path)

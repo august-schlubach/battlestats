@@ -133,7 +133,7 @@ def update_snapshot_data(player_id: int) -> None:
         hours, remainder = divmod(time_since_last_fetch.seconds, 3600)
         minutes, _ = divmod(remainder, 60)
         logging.info(
-            f'Fresh fetch {hours:02}:{minutes:02} ago')
+            f'Fresh fetch {hours:02}h {minutes:02}m ago')
         return
     else:
         logging.info(
@@ -153,7 +153,7 @@ def update_snapshot_data(player_id: int) -> None:
         if stats:
             # this means that the player has battles during this week
             logging.info(
-                f'-----------> Fetched {len(stats)} snapshots for {player.name}')
+                f' ---> Fetched {len(stats)} snapshots for {player.name}')
             for date_str, stat in stats.items():
                 output_date = datetime.strptime(
                     date_str, '%Y%m%d').strftime('%Y-%m-%d')
@@ -168,7 +168,7 @@ def update_snapshot_data(player_id: int) -> None:
         else:
             # create a snapshot with 0 battles for this week
             logging.info(
-                f'-----------> No battles found for {player.name} in week {n+1}')
+                f' ---> No battles found for {player.name} in week {n+1}')
             # make an empty snapshot for the player
             snapshot, created = Snapshot.objects.get_or_create(
                 player=player, date=(today - timedelta(days=7 * n)).date())
