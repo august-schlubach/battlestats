@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ActivitySVG from './BattleActivitySVG';
 import TierSVG from './BattleTierSVG';
+import TypeSVG from './BattleTypeSVG';
 import { SpinnerCircular } from 'spinners-react';
 
 interface PlayerDetailProps {
@@ -65,6 +66,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                     </div>
                     <div id="tier_svg_container">
                         <TierSVG playerId={player.player_id} />
+                    </div>
+                    <div id="type_svg_container">
+                        <TypeSVG playerId={player.player_id} />
                     </div>
                 </>
             )}

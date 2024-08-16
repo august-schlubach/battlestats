@@ -25,7 +25,7 @@ def update_battle_data(player_id: str) -> None:
     # Check if the cached data is less than 15 minutes old
     if player.battles_json and player.battles_updated_at and datetime.now() - player.battles_updated_at < timedelta(minutes=15):
         logging.info(
-            f'  --> Cache exists and is less than 15 minutes old: returning cached data')
+            f'Cache exists and is fresh: returning cached data')
         return player.battles_json
 
     logging.info(
@@ -237,3 +237,51 @@ def fetch_activity_data(player_id: str) -> list:
         month.extend([data.copy()])
 
     return month
+
+
+def fetch_type_data(player_id: str) -> list:
+    """
+    Fetches and processes ship type data for a given player.
+
+    This function updates the battle data for a player and then processes it to calculate the number of battles,
+    wins, and win ratio for each ship type. The processed data is returned as a list of dictionaries.
+
+    Args:
+        player_id (str): The ID of the player whose ship type data needs to be fetched.
+
+    Returns:
+        list: A list of dictionaries containing the processed ship type data, sorted by the number of PvP battles in descending order.
+              Each dictionary contains the following keys:
+              - 'ship_type': The type of the ship.
+              - 'pvp_battles': The total number of PvP battles for the ship type.
+              - 'wins': The total number of wins for the ship type.
+              - 'win_ratio': The win ratio for the ship type, rounded to two decimal places.
+
+    Raises:
+        JsonResponse: If the player with the given ID does not exist, a JSON response with an error message and a 404 status code is returned.
+    """
+    update_battle_data(player_id)
+
+    try:
+        player = Player.objects.get(player_id=player_id)
+    except Player.DoesNotExist:
+        return JsonResponse({'error': 'Player not found'}, status=404)
+
+    # fetch battle data for a given player and prepare it for display
+    df = pd.DataFrame(player.battles_json)
+    df = df.filter(['ship_type', 'pvp_battles', 'wins', 'win_ratio'])
+
+    data = {'ship_type': [], 'pvp_battles': [], 'wins': [], 'win_ratio': []}
+    for ship_type in df['ship_type'].unique():
+        battles = int(df.loc[df['ship_type'] ==
+                      ship_type, 'pvp_battles'].sum())
+        wins = int(df.loc[df['ship_type'] == ship_type, 'wins'].sum())
+        wr = round(wins/battles if battles > 0 else 0, 2)
+        data["pvp_battles"].append(battles)
+        data["ship_type"].append(ship_type)
+        data["wins"].append(wins)
+        data["win_ratio"].append(wr)
+
+    df = pd.DataFrame(data).sort_values(by='pvp_battles', ascending=False)
+
+    return df.to_dict(orient='records')

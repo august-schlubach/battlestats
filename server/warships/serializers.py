@@ -31,3 +31,10 @@ class TierDataSerializer(serializers.Serializer):
     pvp_battles = serializers.IntegerField()
     wins = serializers.IntegerField()
     win_ratio = serializers.FloatField()
+
+
+class TypeDataSerializer(serializers.Serializer):
+    ship_type = serializers.CharField()
+    pvp_battles = serializers.IntegerField()
+    wins = serializers.IntegerField()
+    win_ratio = serializers.FloatField()
