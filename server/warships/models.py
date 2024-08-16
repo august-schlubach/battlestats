@@ -64,3 +64,7 @@ class Snapshot(models.Model):
 
     def __str__(self):
         return self.player.name + " - " + str(self.date) + " - " + str(self.battles)
+
+    # player and date should be unique together
+    class Meta:
+        unique_together = ('player', 'date')

@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
-from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet, tier_data
+from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
+from warships.views import tier_data, activity_data
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -15,7 +16,9 @@ urlpatterns = [
     path('api/', include(router.urls)),  # Include the router URLs
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
     path('api/fetch/tier_data/<str:player_id>/',
-         tier_data, name='fetch_tier_data')
+         tier_data, name='fetch_tier_data'),
+    path('api/fetch/activity_data/<str:player_id>/',
+         activity_data, name='fetch_activity_data'),
 ]
 
 if settings.DEBUG:

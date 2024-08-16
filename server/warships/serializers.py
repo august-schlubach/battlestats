@@ -20,7 +20,7 @@ class ShipSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
-class BattleDataSerializer(serializers.Serializer):
+class ActivityDataSerializer(serializers.Serializer):
     date = serializers.DateField()
     battles = serializers.IntegerField()
     wins = serializers.IntegerField()

@@ -2,8 +2,8 @@ import logging
 from django.http import Http404, JsonResponse
 from rest_framework import generics, permissions, viewsets
 from warships.models import Player, Clan, Ship
-from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, BattleDataSerializer, TierDataSerializer
-from warships.data import fetch_tier_data
+from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, TierDataSerializer
+from warships.data import fetch_tier_data, fetch_activity_data
 
 
 logging.basicConfig(level=logging.INFO)
@@ -59,3 +59,11 @@ def tier_data(request, player_id: str) -> JsonResponse:
     data = fetch_tier_data(player_id)
     serializer = TierDataSerializer(data, many=True)
     return JsonResponse(serializer.data, safe=False)
+
+
+def activity_data(request, player_id: str) -> JsonResponse:
+    data = fetch_activity_data(player_id)
+    serializer = ActivityDataSerializer(data=data, many=True)
+    if serializer.is_valid():
+        return JsonResponse(serializer.data, safe=False)
+    return JsonResponse(serializer.errors, status=400)
