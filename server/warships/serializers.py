@@ -38,3 +38,10 @@ class TypeDataSerializer(serializers.Serializer):
     pvp_battles = serializers.IntegerField()
     wins = serializers.IntegerField()
     win_ratio = serializers.FloatField()
+
+
+class RandomsDataSerializer(serializers.Serializer):
+    pvp_battles = serializers.IntegerField()
+    ship_name = serializers.CharField()
+    win_ratio = serializers.FloatField()
+    wins = serializers.IntegerField()

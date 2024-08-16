@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data
+from warships.views import tier_data, activity_data, type_data, randoms_data
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -21,6 +21,8 @@ urlpatterns = [
          activity_data, name='fetch_activity_data'),
     path('api/fetch/type_data/<str:player_id>/',
          type_data, name='fetch_type_data'),
+    path('api/fetch/randoms_data/<str:player_id>/',
+         randoms_data, name='fetch_randoms_data'),
 ]
 
 if settings.DEBUG:

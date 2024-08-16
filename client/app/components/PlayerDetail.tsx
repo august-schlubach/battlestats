@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ActivitySVG from './BattleActivitySVG';
 import TierSVG from './BattleTierSVG';
 import TypeSVG from './BattleTypeSVG';
+import RandomsSVG from './BattleRandomsSVG';
 import { SpinnerCircular } from 'spinners-react';
 
 interface PlayerDetailProps {
@@ -61,6 +62,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                 </div>
             ) : (
                 <>
+                    <div id="randoms_svg_container">
+                        <RandomsSVG playerId={player.player_id} />
+                    </div>
                     <div id="activity_svg_container">
                         <ActivitySVG playerId={player.player_id} />
                     </div>

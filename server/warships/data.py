@@ -285,3 +285,31 @@ def fetch_type_data(player_id: str) -> list:
     df = pd.DataFrame(data).sort_values(by='pvp_battles', ascending=False)
 
     return df.to_dict(orient='records')
+
+
+def fetch_randoms_data(player_id: str) -> list:
+    """
+    Fetches and processes random battle data for a given player.
+
+    This function updates the snapshot data for a player and then processes it to extract the top 20 ships
+    based on the number of PvP battles. The processed data includes the ship name, number of PvP battles,
+    win ratio, and wins for each ship.
+
+    Args:
+        player_id (str): The ID of the player whose random battle data needs to be fetched.
+
+    Returns:
+        list: A list of dictionaries containing the processed random battle data for the top 20 ships.
+              Each dictionary contains the following keys:
+              - 'pvp_battles': The total number of PvP battles for the ship.
+              - 'ship_name': The name of the ship.
+              - 'win_ratio': The win ratio for the ship, rounded to two decimal places.
+              - 'wins': The total number of wins for the ship.
+    """
+    update_snapshot_data(player_id)
+    player = Player.objects.get(player_id=player_id)
+
+    df = pd.DataFrame(player.battles_json)
+    df = df.filter(['pvp_battles', 'ship_name', 'win_ratio', 'wins'])
+    df = df.sort_values(by='pvp_battles', ascending=False).head(20)
+    return df.to_dict(orient='records')

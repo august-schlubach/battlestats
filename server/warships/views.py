@@ -2,8 +2,8 @@ import logging
 from django.http import Http404, JsonResponse
 from rest_framework import generics, permissions, viewsets
 from warships.models import Player, Clan, Ship
-from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, TierDataSerializer, TypeDataSerializer
-from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data
+from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, TierDataSerializer, TypeDataSerializer, RandomsDataSerializer
+from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data
 
 
 logging.basicConfig(level=logging.INFO)
@@ -77,3 +77,11 @@ def type_data(request, player_id: str) -> JsonResponse:
     if serializer.is_valid():
         return JsonResponse(serializer.data, safe=False)
     return JsonResponse(serializer.errors, status=400)
+
+
+def randoms_data(request, player_id: str) -> JsonResponse:
+    data = fetch_randoms_data(player_id)
+    serializer = RandomsDataSerializer(data=data, many=True)
+    if serializer.is_valid():
+        return JsonResponse(serializer.data, safe=False)
+    return JsonResponse(serializer.errors, safe=False, status=400)

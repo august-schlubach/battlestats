@@ -2,7 +2,7 @@
 
 visit live site: [battlestats.io](https://battlestats.io)
 
-this repo contains a D3 and django-based back end service designed to deliver interactive data charts (SVG) for a given player or naval clan.
+this repo contains a D3/React/Django service designed to deliver interactive data charts (SVG) for a given player or naval clan.
 
 Charts:
 
