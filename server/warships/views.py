@@ -34,6 +34,7 @@ class PlayerDetail(generics.RetrieveUpdateDestroyAPIView):
 class ClanViewSet(viewsets.ModelViewSet):
     queryset = Clan.objects.all()
     serializer_class = ClanSerializer
+    lookup_field = 'clan_id'
     permission_classes = [permissions.AllowAny]
 
 

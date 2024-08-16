@@ -26,6 +26,7 @@ interface PlayerDetailProps {
         last_fetch: string;
         last_lookup: string | null;
         clan: number;
+        clan_name: string;
     };
     onBack: () => void;
 }
@@ -54,6 +55,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                 <p>pvp survival rate: {player.pvp_survival_rate}</p>
                 <p>days since last battle: {player.days_since_last_battle}</p>
                 <p>last battle date: {player.last_battle_date}</p>
+                <p>clan name: {player.clan_name}</p>
             </div>
             {loading ? (
                 <div className="flex justify-center items-center">

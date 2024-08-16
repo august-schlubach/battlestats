@@ -3,18 +3,25 @@ from .models import Player, Clan, Ship
 
 
 class PlayerSerializer(serializers.ModelSerializer):
+    clan_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Player
         fields = '__all__'
 
+    def get_clan_name(self, obj):
+        return obj.clan.name if obj.clan else None
+
 
 class ClanSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = Clan
         fields = '__all__'
 
 
 class ShipSerializer(serializers.ModelSerializer):
+
     class Meta:
         model = Ship
         fields = '__all__'
