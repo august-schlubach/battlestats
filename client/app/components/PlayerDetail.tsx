@@ -42,7 +42,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                 <p>last battle date: {player.last_battle_date}</p>
             </div>
             <div id="activity_svg_container"></div>
-            <ActivitySVG playerId={player.player_id} />
+
             <div id="tier_svg_container"></div>
             <TierSVG playerId={player.player_id} />
             <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>

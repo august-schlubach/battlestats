@@ -92,7 +92,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
     };
 
     const showTierDetails = (d) => {
-        const start_x = 350, start_y = 235;
+        const start_x = 400, start_y = 240;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
         const detailGroup = d3.select("#tier_activity_container").select("svg").append("g")
@@ -132,10 +132,16 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
         detailGroup.remove();
     };
 
-    const select_color_by_wr = (win_ratio) => {
-        if (win_ratio >= 0.6) return "#4caf50";
-        if (win_ratio >= 0.5) return "#ffeb3b";
-        return "#f44336";
+    const select_color_by_wr = (win_ratio: number): string => {
+        if (win_ratio > 0.65) return "#810c9e"; // super unicum
+        if (win_ratio >= 0.60) return "#D042F3"; // regular ol unicorn
+        if (win_ratio >= 0.56) return "#3182bd"; // great
+        if (win_ratio >= 0.54) return "#74c476"; // very good
+        if (win_ratio >= 0.52) return "#a1d99b"; // good
+        if (win_ratio >= 0.50) return "#fed976"; // average
+        if (win_ratio >= 0.45) return "#fd8d3c"; // below average
+        if (win_ratio >= 0.40 && win_ratio < 0.35) return "#e6550d"; // bad
+        return "#a50f15"; // super bad
     };
 
     return <div id="tier_activity_container"></div>;
