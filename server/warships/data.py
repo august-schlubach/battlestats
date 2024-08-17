@@ -296,7 +296,7 @@ def fetch_randoms_data(player_id: str) -> list:
     """
     Fetches and processes random battle data for a given player.
 
-    This function updates the snapshot data for a player and then processes it to extract the top 20 ships
+    This function updates the battle data for a player and then processes it to extract the top 20 ships
     based on the number of PvP battles. The processed data includes the ship name, number of PvP battles,
     win ratio, and wins for each ship.
 
@@ -311,12 +311,20 @@ def fetch_randoms_data(player_id: str) -> list:
               - 'win_ratio': The win ratio for the ship, rounded to two decimal places.
               - 'wins': The total number of wins for the ship.
     """
-    update_snapshot_data(player_id)
+    update_battle_data(player_id)
     player = Player.objects.get(player_id=player_id)
 
     df = pd.DataFrame(player.battles_json)
     df = df.filter(['pvp_battles', 'ship_name', 'win_ratio', 'wins'])
-    df = df.sort_values(by='pvp_battles', ascending=False).head(20)
+
+    try:
+
+        df = df.sort_values(by='pvp_battles', ascending=False).head(20)
+    except KeyError:
+        logging.error(
+            f'\n\nBattles data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
+        return []
+
     return df.to_dict(orient='records')
 
 
@@ -326,9 +334,20 @@ def update_clan_data(clan_id: str) -> None:
     # return if no clan_id is provided
     if not clan_id:
         return
-    data = _fetch_clan_data(clan_id)
 
-    clan = Clan.objects.get(clan_id=clan_id)
+    try:
+        clan = Clan.objects.get(clan_id=clan_id)
+    except Clan.DoesNotExist:
+        logging.info(
+            f"Clan {clan_id} not found\n")
+        return
+
+    if clan.last_fetch and datetime.now() - clan.last_fetch < timedelta(minutes=1440):
+        logging.info(
+            f'{clan.name}: Clan data is fresh')
+        return
+
+    data = _fetch_clan_data(clan_id)
     clan.members_count = data.get('members_count', 0)
     clan.tag = data.get('tag', '')
     clan.name = data.get('name', '')
@@ -352,6 +371,25 @@ def update_clan_data(clan_id: str) -> None:
             if player.clan != clan:
                 player.clan = clan
                 player.save()
+
+
+def update_clan_members(clan_id: str) -> None:
+    clan = Clan.objects.get(clan_id=clan_id)
+    member_ids = _fetch_clan_member_ids(clan_id)
+
+    for member_id in member_ids:
+        player, created = Player.objects.get_or_create(player_id=member_id)
+        if created:
+            player.player_id = member_id
+            player.save()
+            logging.info(
+                f"Created new player: {player.player_id}\nPopulating data...")
+        else:
+            if player.clan != clan:
+                player.clan = clan
+                player.save()
+
+        update_player_data(player)
 
 
 def update_player_data(player: Player) -> None:
@@ -397,16 +435,6 @@ def update_player_data(player: Player) -> None:
             "survived_battles", 0) / player.pvp_battles) * 100, 2) if player.pvp_battles else 0
         player.wins_survival_rate = round((pvp_stats.get(
             "survived_wins", 0) / player.pvp_wins) * 100, 2) if player.pvp_wins else 0
-
-    # Handle clan association
-    clan_id = player_data.get("clan_id")
-    if clan_id:
-        try:
-            clan = Clan.objects.get(clan_id=clan_id)
-            player.clan = clan
-        except Clan.DoesNotExist:
-            logging.info(
-                f"Clan {clan_id} not found for player {player.name}")
 
     player.last_fetch = datetime.now()
     player.save()

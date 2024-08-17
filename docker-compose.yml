@@ -43,7 +43,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./server:/usr/src/app
-    command: celery -A battlestats worker -l INFO --timeout=600
+    command: celery -A battlestats worker -l INFO --time-limit=600
     env_file:
       - server/.env
     depends_on:

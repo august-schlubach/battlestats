@@ -4,7 +4,7 @@ from rest_framework import generics, permissions, viewsets
 from warships.models import Player, Clan, Ship
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_data
-from .tasks import update_clan_data_task
+from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -23,12 +23,14 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
         self.check_object_permissions(self.request, obj)
 
+        update_player_data_task.delay(player_id=obj.player_id)
+
         if obj.clan:
             clan = obj.clan
             logging.info(
                 f'Updating clan data: {obj.name} : {clan.name} {obj.player_id}')
             update_clan_data_task.delay(clan_id=clan.clan_id)
-
+            update_clan_members_task.delay(clan_id=clan.clan_id)
         return obj
 
 

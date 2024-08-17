@@ -3,8 +3,6 @@ import os
 import requests
 from typing import Dict, Optional
 from warships.models import Ship
-from datetime import datetime, timedelta, timezone
-from functools import lru_cache, wraps
 
 
 logging.basicConfig(level=logging.INFO)
@@ -13,26 +11,6 @@ BASE_URL = "https://api.worldofwarships.com/wows/"
 APP_ID = os.environ.get('WG_APP_ID')
 
 
-def timed_lru_cache(seconds: int, maxsize: int = 128):
-    def wrapper_cache(func):
-        func = lru_cache(maxsize=maxsize)(func)
-        func.lifetime = timedelta(seconds=seconds)
-        func.expiration = datetime.now(timezone.utc) + func.lifetime
-
-        @wraps(func)
-        def wrapped_func(*args, **kwargs):
-            if datetime.now(timezone.utc) >= func.expiration:
-                func.cache_clear()
-                func.expiration = datetime.now(timezone.utc) + func.lifetime
-
-            return func(*args, **kwargs)
-
-        return wrapped_func
-
-    return wrapper_cache
-
-
-# @timed_lru_cache(seconds=300)
 def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     """Fetch all competitive data for all ships for a given player_id."""
     params = {
