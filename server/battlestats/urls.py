@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, clan_data
+from warships.views import tier_data, activity_data, type_data, randoms_data, clan_members
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -23,8 +23,8 @@ urlpatterns = [
          type_data, name='fetch_type_data'),
     path('api/fetch/randoms_data/<str:player_id>/',
          randoms_data, name='fetch_randoms_data'),
-    path('api/fetch/clan_data/<str:player_id>/',
-         clan_data, name='fetch_clan_data'),
+    path('api/fetch/clan_members/<str:clan_id>/',
+         clan_members, name='fetch_clan_members'),
 
 ]
 

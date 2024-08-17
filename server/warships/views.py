@@ -2,8 +2,9 @@ import logging
 from django.http import Http404, JsonResponse
 from rest_framework import generics, permissions, viewsets
 from warships.models import Player, Clan, Ship
-from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer
-from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_data
+from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
+    TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer
+from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
@@ -98,9 +99,8 @@ def randoms_data(request, player_id: str) -> JsonResponse:
     return JsonResponse(serializer.errors, safe=False, status=400)
 
 
-def clan_data(request, clan_id: str) -> JsonResponse:
-    data = fetch_clan_data(clan_id)
-    serializer = ClanDataSerializer(data=data, many=True)
-    if serializer.is_valid():
-        return JsonResponse(serializer.data, safe=False)
-    return JsonResponse(serializer.errors, safe=False, status=400)
+def clan_members(request, clan_id: str) -> JsonResponse:
+    clan = Clan.objects.get(clan_id=clan_id)
+    members = clan.player_set.all()
+    serializer = ClanMemberSerializer(members, many=True)
+    return JsonResponse(serializer.data, safe=False)

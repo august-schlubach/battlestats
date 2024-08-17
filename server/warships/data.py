@@ -328,7 +328,6 @@ def fetch_randoms_data(player_id: str) -> list:
     return df.to_dict(orient='records')
 
 
-# ----------------------------------------
 def update_clan_data(clan_id: str) -> None:
 
     # return if no clan_id is provided
@@ -439,7 +438,3 @@ def update_player_data(player: Player) -> None:
     player.last_fetch = datetime.now()
     player.save()
     logging.info(f"Updated player data: {player.name}")
-
-
-def fetch_clan_data():
-    pass

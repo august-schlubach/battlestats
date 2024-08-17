@@ -58,3 +58,7 @@ class ClanDataSerializer(serializers.Serializer):
     player_name = serializers.CharField()
     pvp_battles = serializers.IntegerField()
     win_ratio = serializers.FloatField()
+
+
+class ClanMemberSerializer(serializers.Serializer):
+    name = serializers.CharField()
