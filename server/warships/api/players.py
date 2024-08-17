@@ -33,7 +33,6 @@ def _fetch_player_personal_data(player_id: int) -> Dict:
     logging.info(
         f' ---> Remote fetching player personal (account) data for player_id: {player_id}')
     data = _make_api_request("account/info/", params)
-    breakpoint()
     return data.get(str(player_id), {}) if data else {}
 
 

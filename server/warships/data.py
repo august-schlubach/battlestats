@@ -1,6 +1,5 @@
-from django.utils import timezone
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import pandas as pd
 import logging
 from django.http import JsonResponse
@@ -329,33 +328,39 @@ def update_clan_data(clan_id: str) -> None:
         return
     data = _fetch_clan_data(clan_id)
 
-    '''
-    {'members_count': 46, 
-    'description': "So, Have fun!", 
-      'tag': '-N-', 
-      'leader_name': 'Gerphan', 
-      'members_ids': [1004174517, 1005576737, 1019829113, 1026634454, 1028456857, 1034755841, 1038946881, 1039126105, 1041334455, 1045441034], 
-      'clan_id': 1000055908, 
-      'leader_id': 1004174517, 
-      'name': 'Naumachia'
-      }
-    '''
     clan = Clan.objects.get(clan_id=clan_id)
-    clan.members_count = clan_data.get('members_count', 0)
-    clan.tag = clan_data.get('tag', '')
-    clan.name = clan_data.get('name', '')
+    clan.members_count = data.get('members_count', 0)
+    clan.tag = data.get('tag', '')
+    clan.name = data.get('name', '')
+    clan.description = data.get('description', '')
+    clan.leader_id = data.get('leader_id', None)
+    clan.leader_name = data.get('leader_name', '')
+    clan.last_fetch = datetime.now()
     clan.save()
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
-    # member_ids = _fetch_clan_members(clan_id)
+
+    for member_id in _fetch_clan_member_ids(clan_id):
+        player, created = Player.objects.get_or_create(player_id=member_id)
+        if created:
+            player.player_id = member_id
+            player.save()
+            logging.info(
+                f"Created new player: {player.player_id}\nPopulating data...")
+            update_player_data(player)
+        else:
+            if player.clan != clan:
+                player.clan = clan
+                player.save()
 
 
-def update_player_data(player: Player) -> Player:
+def update_player_data(player: Player) -> None:
+    if player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=15):
+        logging.info(
+            f'Player data is fresh')
+        return
+
     player_data = _fetch_player_personal_data(player.player_id)
-    breakpoint()
-    # Check if the player's profile is hidden
-    if player_data.get('hidden_profile'):
-        player.is_hidden = True
 
     # Map basic fields
     player.name = player_data.get("nickname", "")
@@ -369,6 +374,10 @@ def update_player_data(player: Player) -> Player:
     if player.last_battle_date:
         player.days_since_last_battle = (datetime.now(
             timezone.utc).date() - player.last_battle_date).days
+
+    # Check if the player's profile is hidden
+    if player_data.get('hidden_profile'):
+        player.is_hidden = True
 
     # If the player is not hidden, map additional statistics
     if not player.is_hidden:
@@ -391,10 +400,17 @@ def update_player_data(player: Player) -> Player:
 
     # Handle clan association
     clan_id = player_data.get("clan_id")
+    if clan_id:
+        try:
+            clan = Clan.objects.get(clan_id=clan_id)
+            player.clan = clan
+        except Clan.DoesNotExist:
+            logging.info(
+                f"Clan {clan_id} not found for player {player.name}")
 
-    # Save the player instance
+    player.last_fetch = datetime.now()
     player.save()
-    return player
+    logging.info(f"Updated player data: {player.name}")
 
 
 def fetch_clan_data():

@@ -21,6 +21,7 @@ class Player(models.Model):
         'Clan', on_delete=models.CASCADE, null=True, blank=True)
     is_hidden = models.BooleanField(default=False)
     last_lookup = models.DateTimeField(null=True, blank=True)
+    last_fetch = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.name + " (" + str(self.player_id) + ")"
@@ -40,13 +41,13 @@ class Ship(models.Model):
 
 class Clan(models.Model):
     clan_id = models.IntegerField(unique=True)
-    last_fetch = models.DateTimeField(null=True, blank=True)
+    description = models.TextField(null=True, blank=True)
     leader_id = models.IntegerField(null=True, blank=True)
     leader_name = models.CharField(max_length=200, null=True, blank=True)
     members_count = models.IntegerField(default=0)
     name = models.CharField(max_length=200, null=True, blank=True)
     tag = models.CharField(max_length=200, null=True, blank=True)
-    description = models.TextField(null=True, blank=True)
+    last_fetch = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return str(self.clan_id) + '-' + self.name

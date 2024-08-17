@@ -8,6 +8,6 @@ def hello_world():
     print('Hello World!')
 
 
-@app.task
+@app.task(time_limit=600)
 def update_clan_data_task(clan_id):
     update_clan_data(clan_id=clan_id)

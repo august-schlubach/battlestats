@@ -14,7 +14,7 @@ def _fetch_clan_data(clan_id: str) -> Dict:
     params = {
         "application_id": APP_ID,
         "clan_id": clan_id,
-        "fields": "members_count,tag,name,clan_id,members_ids,description,leader_id,leader_name"
+        "fields": "members_count,tag,name,clan_id,description,leader_id,leader_name"
     }
     logging.info(f' ---> Remote fetching clan info for clan_id: {clan_id}')
     data = _make_api_request("clans/info/", params)

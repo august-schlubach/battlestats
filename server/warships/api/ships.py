@@ -40,7 +40,7 @@ def _fetch_ship_stats_for_player(player_id: str) -> Dict:
         "account_id": player_id
     }
     logging.info(
-        f' ---> Remote fetching ship stats for player_id: {player_id}')
+        f' ---> EXPENSIVE: Remote fetching all battle stats for player_id: {player_id}')
     data = _make_api_request("ships/stats/", params)
     return data[player_id] if data else {}
 
