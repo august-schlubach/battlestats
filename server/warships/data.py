@@ -392,7 +392,7 @@ def update_clan_members(clan_id: str) -> None:
 
 
 def update_player_data(player: Player) -> None:
-    if player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=15):
+    if player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=1400):
         logging.info(
             f'Player data is fresh')
         return

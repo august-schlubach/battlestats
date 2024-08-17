@@ -31,3 +31,14 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Add this CSS to constrain the content */
+.container {
+  max-width: 800px;
+  margin: 0 auto; /* Center the container */
+}
+
+.clan_members_container {
+  max-width: 800px;
+  margin: 0 auto; /* Center the container */
+}

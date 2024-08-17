@@ -3,6 +3,7 @@ import ActivitySVG from './ActivitySVG';
 import TierSVG from './TierSVG';
 import TypeSVG from './TypeSVG';
 import RandomsSVG from './RandomsSVG';
+import ClanMembers from './ClanMembers';
 import { SpinnerCircular } from 'spinners-react';
 
 interface PlayerDetailProps {
@@ -27,6 +28,7 @@ interface PlayerDetailProps {
         last_lookup: string | null;
         clan: number;
         clan_name: string;
+        clan_id: number;
     };
     onBack: () => void;
 }
@@ -91,6 +93,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                         </div>
                         <div id="type_svg_container">
                             <TypeSVG playerId={player.player_id} />
+                        </div>
+                        <div id="clan_members_container">
+                            <ClanMembers clanId={player.clan_id} />
                         </div>
                     </>
                 )
