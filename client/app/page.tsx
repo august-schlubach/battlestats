@@ -4,10 +4,10 @@ import React from 'react';
 import PlayerSearch from './components/PlayerSearch';
 
 const Page: React.FC = () => {
-  // Define styles as JavaScript objects
+
   const containerStyle: React.CSSProperties = {
     maxWidth: '600px',
-    margin: '0 auto', // Center the container
+    margin: '0 auto',
     textAlign: 'center',
     color: 'black',
   };
@@ -16,7 +16,7 @@ const Page: React.FC = () => {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: '100vh', // Full viewport height
+    minHeight: '100vh',
     backgroundColor: 'white',
   };
 

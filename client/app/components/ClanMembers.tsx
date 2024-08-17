@@ -19,7 +19,7 @@ const ClanMembers = ({ clanId }: { clanId: number }) => {
     }, [clanId]);
 
     // Create a single string of member names separated by " | "
-    const memberNames = members.map(member => member.name).join(' | ');
+    const memberNames = members.map(member => member.name).join(' ');
 
     return (
         <div>
