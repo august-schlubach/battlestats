@@ -136,7 +136,8 @@ LOGGING_CONFIG = None
 LOGLEVEL = os.getenv('DJANGO_LOGLEVEL', 'INFO').upper()
 
 # Create logs directory if it doesn't exist
-LOG_DIR = BASE_DIR / 'logs'
+BASE_LOG_DIR = Path(__file__).resolve().parent.parent
+LOG_DIR = BASE_LOG_DIR / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
 # Determine if running in Docker
@@ -167,10 +168,11 @@ logging.config.dictConfig({
     'loggers': {
         '': {
             'level': LOGLEVEL,
-            'handlers': ['console', 'file'] if not is_docker else ['console'],
+            'handlers': ['console'] if is_docker else ['console', 'file'],
         },
     },
 })
+
 
 # Celery settings
 CELERY_BROKER_URL = 'amqp://guest:guest@rabbitmq:5672//'  # Use RabbitMQ

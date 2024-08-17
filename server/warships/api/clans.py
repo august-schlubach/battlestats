@@ -9,17 +9,16 @@ BASE_URL = "https://api.worldofwarships.com/wows/"
 APP_ID = os.environ.get('WG_APP_ID')
 
 
-def _fetch_clan_data(player_id: str) -> Dict:
+def _fetch_clan_data(clan_id: str) -> Dict:
     """Fetch clan info for a given player_id."""
     params = {
         "application_id": APP_ID,
-        "account_id": player_id,
-        "extra": "clan",
-        "fields": "clan.members_count,clan.tag,clan.name,clan.clan_id"
+        "clan_id": clan_id,
+        "fields": "members_count,tag,name,clan_id,members_ids,description,leader_id,leader_name"
     }
-    logging.info(f' ---> Remote fetching clan info for player_id: {player_id}')
-    data = _make_api_request("clans/accountinfo/", params)
-    return data.get(player_id, {}) if data else {}
+    logging.info(f' ---> Remote fetching clan info for clan_id: {clan_id}')
+    data = _make_api_request("clans/info/", params)
+    return data.get(str(clan_id), {}) if data else {}
 
 
 def _fetch_clan_member_ids(clan_id: str) -> List[str]:

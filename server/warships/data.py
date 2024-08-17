@@ -5,9 +5,12 @@ import pandas as pd
 import logging
 from django.http import JsonResponse
 from datetime import datetime, timedelta
-from warships.models import Player, Snapshot
+from warships.models import Player, Snapshot, Clan
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
+from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids
+
+logging.basicConfig(level=logging.INFO)
 
 
 def update_battle_data(player_id: str) -> None:
@@ -319,8 +322,35 @@ def fetch_randoms_data(player_id: str) -> list:
 
 
 # ----------------------------------------
+def update_clan_data(clan_id: str) -> None:
 
-def populate_new_player(player: Player) -> Player:
+    # return if no clan_id is provided
+    if not clan_id:
+        return
+    data = _fetch_clan_data(clan_id)
+
+    '''
+    {'members_count': 46, 
+    'description': "So, Have fun!", 
+      'tag': '-N-', 
+      'leader_name': 'Gerphan', 
+      'members_ids': [1004174517, 1005576737, 1019829113, 1026634454, 1028456857, 1034755841, 1038946881, 1039126105, 1041334455, 1045441034], 
+      'clan_id': 1000055908, 
+      'leader_id': 1004174517, 
+      'name': 'Naumachia'
+      }
+    '''
+    clan = Clan.objects.get(clan_id=clan_id)
+    clan.members_count = clan_data.get('members_count', 0)
+    clan.tag = clan_data.get('tag', '')
+    clan.name = clan_data.get('name', '')
+    clan.save()
+    logging.info(
+        f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
+    # member_ids = _fetch_clan_members(clan_id)
+
+
+def update_player_data(player: Player) -> Player:
     player_data = _fetch_player_personal_data(player.player_id)
     breakpoint()
     # Check if the player's profile is hidden
