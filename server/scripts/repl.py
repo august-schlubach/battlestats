@@ -17,5 +17,5 @@ Player.objects.filter(name='').delete()
 Clan.objects.filter(name='').delete()
 
 
-# clear the battls_json field for all players
-Player.objects.update(battles_json=None)
+# set battles_json and tier_json to null for all players
+Player.objects.update(battles_json=None, tiers_json=None)

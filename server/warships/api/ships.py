@@ -1,7 +1,7 @@
 import logging
 import os
 import requests
-from typing import Optional
+from typing import Optional, Dict
 from warships.models import Ship
 
 

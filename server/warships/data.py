@@ -29,7 +29,7 @@ def update_battle_data(player_id: str) -> None:
 
     # Check if the cached data is less than 15 minutes old
     if player.battles_json and player.battles_updated_at and datetime.now() - player.battles_updated_at < timedelta(minutes=15):
-        logging.info(
+        logging.debug(
             f'Cache exists and is fresh: returning cached data')
         return player.battles_json
 
@@ -76,7 +76,7 @@ def update_battle_data(player_id: str) -> None:
     player.battles_updated_at = datetime.now()
     player.battles_json = sorted_data
     player.save()
-    logging.info(f"Updated player data: {player.name}")
+    logging.info(f"Updated battles_json data: {player.name}")
 
 
 def fetch_tier_data(player_id: str) -> list:
@@ -92,14 +92,16 @@ def fetch_tier_data(player_id: str) -> list:
     Returns:
         str: A JSON response containing the processed tier data.
     """
-    update_battle_data(player_id)
-
     try:
         player = Player.objects.get(player_id=player_id)
+        if not player.battles_json:
+            update_battle_data(player_id)
     except Player.DoesNotExist:
         return JsonResponse({'error': 'Player not found'}, status=404)
 
+    player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
+    logging.info(f'Player {player.name} battles data:\n{df}\n{df.shape}')
     df = df.filter(['ship_tier', 'pvp_battles', 'wins'])
 
     data = []
@@ -148,7 +150,7 @@ def update_snapshot_data(player_id: int) -> None:
     if time_since_last_fetch.days < 1:
         hours, remainder = divmod(time_since_last_fetch.seconds, 3600)
         minutes, _ = divmod(remainder, 60)
-        logging.info(
+        logging.debug(
             f'Fresh snapshot fetched {hours:02}h {minutes:02}m ago')
         return
     else:
@@ -265,14 +267,14 @@ def fetch_type_data(player_id: str) -> list:
     Raises:
         JsonResponse: If the player with the given ID does not exist, a JSON response with an error message and a 404 status code is returned.
     """
-    update_battle_data(player_id)
-
     try:
         player = Player.objects.get(player_id=player_id)
+        if not player.battles_json:
+            update_battle_data(player_id)
     except Player.DoesNotExist:
         return JsonResponse({'error': 'Player not found'}, status=404)
 
-    # fetch battle data for a given player and prepare it for display
+    player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
     df = df.filter(['ship_type', 'pvp_battles', 'wins', 'win_ratio'])
 
@@ -311,9 +313,14 @@ def fetch_randoms_data(player_id: str) -> list:
               - 'win_ratio': The win ratio for the ship, rounded to two decimal places.
               - 'wins': The total number of wins for the ship.
     """
-    update_battle_data(player_id)
-    player = Player.objects.get(player_id=player_id)
+    try:
+        player = Player.objects.get(player_id=player_id)
+        if not player.battles_json:
+            update_battle_data(player_id)
+    except Player.DoesNotExist:
+        return JsonResponse({'error': 'Player not found'}, status=404)
 
+    player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
     df = df.filter(['pvp_battles', 'ship_name', 'win_ratio', 'wins'])
 
@@ -342,7 +349,7 @@ def update_clan_data(clan_id: str) -> None:
         return
 
     if clan.last_fetch and datetime.now() - clan.last_fetch < timedelta(minutes=1440):
-        logging.info(
+        logging.debug(
             f'{clan.name}: Clan data is fresh')
         return
 
@@ -393,7 +400,7 @@ def update_clan_members(clan_id: str) -> None:
 
 def update_player_data(player: Player) -> None:
     if player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=1400):
-        logging.info(
+        logging.debug(
             f'Player data is fresh')
         return
 
@@ -437,4 +444,4 @@ def update_player_data(player: Player) -> None:
 
     player.last_fetch = datetime.now()
     player.save()
-    logging.info(f"Updated player data: {player.name}")
+    logging.info(f"Updated player personal data: {player.name}")

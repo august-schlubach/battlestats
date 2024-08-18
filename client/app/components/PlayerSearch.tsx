@@ -29,10 +29,20 @@ const PlayerSearch: React.FC = () => {
         setError('');
     };
 
+    const handleSelectMember = async (memberName: string) => {
+        try {
+            const response = await axios.get(`http://localhost:8888/api/player/${memberName}`);
+            setPlayerData(response.data);
+            setError('');
+        } catch (err) {
+            setError('Player not found');
+        }
+    };
+
     return (
         <div className="p-4">
             {playerData ? (
-                <PlayerDetail player={playerData} onBack={handleBack} />
+                <PlayerDetail player={playerData} onBack={handleBack} onSelectMember={handleSelectMember} />
             ) : (
                 <div>
                     <form onSubmit={handleSubmit} className="space-y-4">

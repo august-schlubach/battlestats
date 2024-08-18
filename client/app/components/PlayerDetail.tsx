@@ -31,26 +31,36 @@ interface PlayerDetailProps {
         clan_id: number;
     };
     onBack: () => void;
+    onSelectMember: (memberName: string) => void;
 }
 
-const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
+const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack, onSelectMember }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Simulate loading time for SVGs
         const timer = setTimeout(() => {
             setLoading(false);
-        }, 2000); // Adjust time as needed
+        }, 2000);
 
         return () => clearTimeout(timer);
     }, []);
 
     return (
-        <div>
-            <div className="text-left p-4">
+        <div className="grid grid-cols-2 gap-4 p-4">
+            {/* First Column */}
+            <div className="w-[300px] relative left-0">
+                <h1 className="text-2xl font-bold">
+                    <span className="ml-2 text-lg font-normal">{player.clan_name}</span>
+                </h1>
+                <div id="clan_members_container" className="mt-4">
+                    <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} />
+                </div>
+            </div>
+
+            {/* Second Column */}
+            <div className="text-left w-[600px]">
                 <h1 className="text-2xl font-bold">
                     {player.name}
-                    <span className="ml-2 text-lg font-normal">[{player.clan_name}]</span>
                 </h1>
                 <div className="mt-2">
                     <span className="block text-lg font-semibold">
@@ -71,38 +81,35 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({ player, onBack }) => {
                     <p>PvP Wins: {player.pvp_wins}</p>
                     <p>PvP Losses: {player.pvp_losses}</p>
                     <p>Last Battle Date: {player.last_battle_date}</p>
-                    <p>Clan Name: {player.clan_name}</p>
                 </div>
-            </div>
-            {
-                loading ? (
-                    <div className="flex justify-center items-center">
+
+                {loading ? (
+                    <div className="flex justify-center items-center mt-4">
                         <SpinnerCircular size={50} thickness={100} color="#38ad48" />
-                        <p>Loading...</p>
+                        <p className="ml-2">Loading...</p>
                     </div>
                 ) : (
                     <>
-                        <div id="randoms_svg_container">
+                        <div id="randoms_svg_container" className="mt-4">
                             <RandomsSVG playerId={player.player_id} />
                         </div>
-                        <div id="activity_svg_container">
+                        <div id="activity_svg_container" className="mt-4">
                             <ActivitySVG playerId={player.player_id} />
                         </div>
-                        <div id="tier_svg_container">
+                        <div id="tier_svg_container" className="mt-4">
                             <TierSVG playerId={player.player_id} />
                         </div>
-                        <div id="type_svg_container">
+                        <div id="type_svg_container" className="mt-4">
                             <TypeSVG playerId={player.player_id} />
                         </div>
-                        <div id="clan_members_container">
-                            <ClanMembers clanId={player.clan_id} />
-                        </div>
                     </>
-                )
-            }
-            <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>
-        </div >
+                )}
+
+                <button onClick={onBack} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded">Back</button>
+            </div>
+        </div>
     );
+
 };
 
 export default PlayerDetail;

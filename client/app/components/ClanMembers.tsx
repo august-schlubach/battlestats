@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
 
-const ClanMembers = ({ clanId }: { clanId: number }) => {
+interface ClanMembersProps {
+    clanId: number;
+    onSelectMember: (memberName: string) => void;
+}
+
+const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => {
     const [members, setMembers] = useState<{ name: string }[]>([]);
 
     useEffect(() => {
@@ -18,13 +22,20 @@ const ClanMembers = ({ clanId }: { clanId: number }) => {
         fetchMembers();
     }, [clanId]);
 
-    // Create a single string of member names separated by " | "
-    const memberNames = members.map(member => member.name).join(' ');
-
     return (
         <div>
             <h1>Clan Members</h1>
-            <p className="text-sm">{memberNames}</p>
+            <ul className="text-sm">
+                {members.map((member, index) => (
+                    <li key={index}>
+                        <button
+                            onClick={() => onSelectMember(member.name)}
+                            className="text-blue-500 underline">
+                            {member.name}
+                        </button>
+                    </li>
+                ))}
+            </ul>
         </div>
     );
 };

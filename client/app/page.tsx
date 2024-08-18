@@ -6,7 +6,7 @@ import PlayerSearch from './components/PlayerSearch';
 const Page: React.FC = () => {
 
   const containerStyle: React.CSSProperties = {
-    maxWidth: '600px',
+    maxWidth: '1000px',
     margin: '0 auto',
     textAlign: 'center',
     color: 'black',
