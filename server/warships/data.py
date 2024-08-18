@@ -8,6 +8,7 @@ from warships.models import Player, Snapshot, Clan
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids
+from warships.tasks import update_randoms_data_task, update_tiers_data_task, update_snapshot_data_task, update_activity_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -100,27 +101,44 @@ def fetch_tier_data(player_id: str) -> list:
         return JsonResponse({'error': 'Player not found'}, status=404)
 
     player = Player.objects.get(player_id=player_id)
+
+    if player.tiers_json:
+        if not player.tiers_updated_at or datetime.now() - player.tiers_updated_at > timedelta(days=1):
+            update_tiers_data_task.delay(player_id)
+        return player.tiers_json
+    else:
+        update_tiers_data(player_id)
+        player = Player.objects.get(player_id=player_id)
+        return player.tiers_json
+
+
+def update_tiers_data(player_id: str) -> list:
+    player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
     logging.info(f'Player {player.name} battles data:\n{df}\n{df.shape}')
     df = df.filter(['ship_tier', 'pvp_battles', 'wins'])
 
     data = []
-    for i in range(1, 12):
-        j = 12 - i  # reverse the tier order
-        battles = int(df.loc[df['ship_tier'] == 12 - i, 'pvp_battles'].sum())
-        wins = int(df.loc[df['ship_tier'] == 12 - i, 'wins'].sum())
-        wr = round(wins / battles if battles > 0 else 0, 2)
-        data.append({
-            'ship_tier': int(12 - i),
-            'pvp_battles': battles,
-            'wins': wins,
-            'win_ratio': wr
-        })
+    try:
+        for i in range(1, 12):
+            j = 12 - i  # reverse the tier order
+            battles = int(df.loc[df['ship_tier'] ==
+                          12 - i, 'pvp_battles'].sum())
+            wins = int(df.loc[df['ship_tier'] == 12 - i, 'wins'].sum())
+            wr = round(wins / battles if battles > 0 else 0, 2)
+            data.append({
+                'ship_tier': int(12 - i),
+                'pvp_battles': battles,
+                'wins': wins,
+                'win_ratio': wr
+            })
+    except KeyError:
+        logging.error(
+            f'\n\nTiers data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
 
     player.tiers_json = data
+    player.tiers_updated_at = datetime.now()
     player.save()
-
-    return data
 
 
 def update_snapshot_data(player_id: int) -> None:
@@ -206,23 +224,24 @@ def update_snapshot_data(player_id: int) -> None:
         snapshots[i].interval_wins = snapshots[i].wins - snapshots[i-1].wins
         snapshots[i].save()
 
+    logging.info(f'Updated snapshot data for player {player.name}')
+
 
 def fetch_activity_data(player_id: str) -> list:
-    """
-    Fetches and processes activity data for a given player.
-
-    This function updates the snapshot data for a player and then processes it to calculate the number of battles
-    and wins for each day in the past 29 days. The processed data is returned as a list of dictionaries.
-
-    Args:
-        player_id (str): The ID of the player whose activity data needs to be fetched.
-
-    Returns:
-        list: A list of dictionaries containing the processed activity data for the past 29 days.
-    """
     player = Player.objects.get(player_id=player_id)
-    update_snapshot_data(player_id)
+    if player.activity_json:
+        if not player.activity_updated_at or datetime.now() - player.activity_updated_at > timedelta(minutes=15):
+            update_snapshot_data_task.delay(player_id)
+            update_activity_data_task.delay(player_id)
+        return player.activity_json
+    else:
+        update_snapshot_data(player_id)
+        update_activity_data(player)
+        player = Player.objects.get(player_id=player_id)
+        return player.activity_json
 
+
+def update_activity_data(player: Player) -> list:
     month = []
     data = {
         "date": datetime.now().date().strftime("%Y-%m-%d"),
@@ -243,30 +262,14 @@ def fetch_activity_data(player_id: str) -> list:
             data["wins"] = 0
         month.extend([data.copy()])
 
-    return month
+    player.activity_json = month
+    player.activity_updated_at = datetime.now()
+    player.save()
+
+    logging.info(f'Updated activity data for player {player.name}')
 
 
 def fetch_type_data(player_id: str) -> list:
-    """
-    Fetches and processes ship type data for a given player.
-
-    This function updates the battle data for a player and then processes it to calculate the number of battles,
-    wins, and win ratio for each ship type. The processed data is returned as a list of dictionaries.
-
-    Args:
-        player_id (str): The ID of the player whose ship type data needs to be fetched.
-
-    Returns:
-        list: A list of dictionaries containing the processed ship type data, sorted by the number of PvP battles in descending order.
-              Each dictionary contains the following keys:
-              - 'ship_type': The type of the ship.
-              - 'pvp_battles': The total number of PvP battles for the ship type.
-              - 'wins': The total number of wins for the ship type.
-              - 'win_ratio': The win ratio for the ship type, rounded to two decimal places.
-
-    Raises:
-        JsonResponse: If the player with the given ID does not exist, a JSON response with an error message and a 404 status code is returned.
-    """
     try:
         player = Player.objects.get(player_id=player_id)
         if not player.battles_json:
@@ -274,45 +277,46 @@ def fetch_type_data(player_id: str) -> list:
     except Player.DoesNotExist:
         return JsonResponse({'error': 'Player not found'}, status=404)
 
+    if player.type_json:
+        if not player.type_updated_at or datetime.now() - player.type_updated_at > timedelta(days=1):
+            update_type_data_task.delay(player_id)
+        return player.type_json
+    else:
+        update_type_data(player_id)
+        player = Player.objects.get(player_id=player_id)
+        return player.type_json
+
+
+def update_type_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
     df = df.filter(['ship_type', 'pvp_battles', 'wins', 'win_ratio'])
 
     data = {'ship_type': [], 'pvp_battles': [], 'wins': [], 'win_ratio': []}
-    for ship_type in df['ship_type'].unique():
-        battles = int(df.loc[df['ship_type'] ==
-                      ship_type, 'pvp_battles'].sum())
-        wins = int(df.loc[df['ship_type'] == ship_type, 'wins'].sum())
-        wr = round(wins/battles if battles > 0 else 0, 2)
-        data["pvp_battles"].append(battles)
-        data["ship_type"].append(ship_type)
-        data["wins"].append(wins)
-        data["win_ratio"].append(wr)
+    try:
+        for ship_type in df['ship_type'].unique():
+            battles = int(df.loc[df['ship_type'] ==
+                                 ship_type, 'pvp_battles'].sum())
+            wins = int(df.loc[df['ship_type'] == ship_type, 'wins'].sum())
+            wr = round(wins/battles if battles > 0 else 0, 2)
+            data["pvp_battles"].append(battles)
+            data["ship_type"].append(ship_type)
+            data["wins"].append(wins)
+            data["win_ratio"].append(wr)
+    except KeyError:
+        logging.error(
+            f'\n\nType data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
 
     df = pd.DataFrame(data).sort_values(by='pvp_battles', ascending=False)
 
-    return df.to_dict(orient='records')
+    player.type_json = df.to_dict(orient='records')
+    player.type_updated_at = datetime.now()
+    player.save()
+
+    logging.info(f'Updated type data for player {player.name}')
 
 
 def fetch_randoms_data(player_id: str) -> list:
-    """
-    Fetches and processes random battle data for a given player.
-
-    This function updates the battle data for a player and then processes it to extract the top 20 ships
-    based on the number of PvP battles. The processed data includes the ship name, number of PvP battles,
-    win ratio, and wins for each ship.
-
-    Args:
-        player_id (str): The ID of the player whose random battle data needs to be fetched.
-
-    Returns:
-        list: A list of dictionaries containing the processed random battle data for the top 20 ships.
-              Each dictionary contains the following keys:
-              - 'pvp_battles': The total number of PvP battles for the ship.
-              - 'ship_name': The name of the ship.
-              - 'win_ratio': The win ratio for the ship, rounded to two decimal places.
-              - 'wins': The total number of wins for the ship.
-    """
     try:
         player = Player.objects.get(player_id=player_id)
         if not player.battles_json:
@@ -320,19 +324,33 @@ def fetch_randoms_data(player_id: str) -> list:
     except Player.DoesNotExist:
         return JsonResponse({'error': 'Player not found'}, status=404)
 
+    if player.randoms_json:
+        if not player.randoms_updated_at or datetime.now() - player.randoms_updated_at > timedelta(days=1):
+            update_randoms_data_task.delay(player_id)
+        return player.randoms_json
+    else:
+        update_randoms_data(player_id)
+        player = Player.objects.get(player_id=player_id)
+        return player.randoms_json
+
+
+def update_randoms_data(player_id: str) -> None:
     player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
     df = df.filter(['pvp_battles', 'ship_name', 'win_ratio', 'wins'])
 
     try:
-
         df = df.sort_values(by='pvp_battles', ascending=False).head(20)
     except KeyError:
         logging.error(
             f'\n\nBattles data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
         return []
 
-    return df.to_dict(orient='records')
+    player.randoms_json = df.to_dict(orient='records')
+    player.randoms_updated_at = datetime.now()
+    player.save()
+
+    logging.info(f'Updated randoms data for player {player.name}')
 
 
 def update_clan_data(clan_id: str) -> None:
@@ -389,7 +407,10 @@ def update_clan_members(clan_id: str) -> None:
             player.player_id = member_id
             player.save()
             logging.info(
-                f"Created new player: {player.player_id}\nPopulating data...")
+                f"Created new player: {player.player_id}")
+            update_player_data(player)
+            update_battle_data(player.player_id)
+
         else:
             if player.clan != clan:
                 player.clan = clan
@@ -445,3 +466,26 @@ def update_player_data(player: Player) -> None:
     player.last_fetch = datetime.now()
     player.save()
     logging.info(f"Updated player personal data: {player.name}")
+
+
+def preload_battles_json() -> None:
+    logging.info("Preloading battles_json data for all players")
+    players = Player.objects.all()
+    for player in players:
+        if not player.battles_json:
+            update_battle_data(player.player_id)
+        logging.info(f"Preloaded battles json for player: {player.name}")
+    logging.info("Preloading complete")
+
+
+def preload_activity_data() -> None:
+    # because this function isn't calling update_snapshot_data, it's just creating
+    # an empty data structure for the player's activity_json field, which helps the
+    # front end to render the activity faster, while it loads the actual data in the background
+    logging.info("Preloading activity data for all players")
+    players = Player.objects.all()
+    for player in players:
+        if not player.activity_json:
+            update_activity_data(player)
+        logging.info(f"Preloaded activity data for player: {player.name}")
+    logging.info("Preloading complete")

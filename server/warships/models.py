@@ -4,6 +4,7 @@ from django.db import models
 class Player(models.Model):
     name = models.CharField(max_length=200)
     player_id = models.IntegerField(null=False, blank=False)
+    is_hidden = models.BooleanField(default=False)
     total_battles = models.IntegerField(default=0)
     pvp_battles = models.IntegerField(default=0)
     pvp_wins = models.IntegerField(default=0)
@@ -14,17 +15,29 @@ class Player(models.Model):
     creation_date = models.DateTimeField(null=True, blank=True)
     days_since_last_battle = models.IntegerField(default=0)
     last_battle_date = models.DateField(null=True, blank=True)
-    battles_json = models.JSONField(null=True, blank=True)
-    battles_updated_at = models.DateTimeField(null=True, blank=True)
-    tiers_json = models.JSONField(null=True, blank=True)
     clan = models.ForeignKey(
         'Clan', on_delete=models.CASCADE, null=True, blank=True)
-    is_hidden = models.BooleanField(default=False)
     last_lookup = models.DateTimeField(null=True, blank=True)
     last_fetch = models.DateTimeField(null=True, blank=True)
 
+    # TODO: consider refactoring these fields into a separate model
+    battles_json = models.JSONField(null=True, blank=True)
+    battles_updated_at = models.DateTimeField(null=True, blank=True)
+
+    tiers_json = models.JSONField(null=True, blank=True)
+    tiers_updated_at = models.DateTimeField(null=True, blank=True)
+
+    activity_json = models.JSONField(null=True, blank=True)
+    activity_updated_at = models.DateTimeField(null=True, blank=True)
+
+    type_json = models.JSONField(null=True, blank=True)
+    type_updated_at = models.DateTimeField(null=True, blank=True)
+
+    randoms_json = models.JSONField(null=True, blank=True)
+    randoms_updated_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
-        return self.name + " (" + str(self.player_id) + ")"
+        return self.name + " (" + str(self.player_id) + ") " + str(self.clan.name)
 
 
 class Ship(models.Model):

@@ -20,7 +20,16 @@ def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     logging.info(
         f' ---> EXPENSIVE: Remote fetching all battle stats for player_id: {player_id}')
     data = _make_api_request("ships/stats/", params)
-    return data[player_id] if data else {}
+
+    data_dict = {}
+    try:
+        data_dict = data[str(player_id)]
+    except KeyError:
+        keys_to_print = list(data.keys())[:10]
+        logging.error(
+            f'Unexpected response while loading ship data: {keys_to_print}')
+
+    return data_dict
 
 
 def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
