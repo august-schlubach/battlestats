@@ -18,4 +18,4 @@ Clan.objects.filter(name='').delete()
 
 
 # set battles_json and tier_json to null for all players
-Player.objects.update(battles_json=None, tiers_json=None)
+Player.objects.update(activity_updated_at=None)

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import * as d3 from 'd3';
 
 interface ActivityProps {
@@ -6,131 +6,125 @@ interface ActivityProps {
 }
 
 const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
-    const [dataFetched, setDataFetched] = useState(false);
-
     useEffect(() => {
-        if (!dataFetched) {
-            drawActivityPlot(playerId);
-            setDataFetched(true);
-        }
-    }, [playerId, dataFetched]);
+        drawActivityPlot(playerId);
+    }, [playerId]);
 
     const drawActivityPlot = (playerId: number) => {
+
         const container = document.getElementById("activity_svg_container");
         if (container) {
-            while (container.firstChild) {
-                container.removeChild(container.firstChild);
-            }
+            // Clear the container before drawing a new SVG
+            d3.select(container).selectAll("*").remove();
+        }
 
-            const activity_svg_margin = { top: 20, right: 20, bottom: 50, left: 70 },
-                activity_svg_width = 600 - activity_svg_margin.left - activity_svg_margin.right,
-                activity_svg_height = 230 - activity_svg_margin.top - activity_svg_margin.bottom;
+        const margin = { top: 20, right: 20, bottom: 50, left: 70 };
+        const width = 600 - margin.left - margin.right;
+        const height = 230 - margin.top - margin.bottom;
 
-            const activity_svg = d3.select("#activity_svg_container")
-                .append("svg")
-                .attr("width", activity_svg_width + activity_svg_margin.left + activity_svg_margin.right)
-                .attr("height", activity_svg_height + activity_svg_margin.top + activity_svg_margin.bottom)
-                .append("g")
-                .attr("transform", `translate(${activity_svg_margin.left}, ${activity_svg_margin.top})`);
+        const svg = d3.select("#activity_svg_container")
+            .append("svg")
+            .attr("width", width + margin.left + margin.right)
+            .attr("height", height + margin.top + margin.bottom)
+            .append("g")
+            .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
-            const path = `http://localhost:8888/api/fetch/activity_data/${playerId}`;
-            const start_date = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
+        const path = `http://localhost:8888/api/fetch/activity_data/${playerId}`;
+        const startDate = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
 
-            fetch(path)
-                .then(response => response.json())
-                .then(data => {
-                    const loading_image = document.getElementById("activity_loading_image");
-                    if (loading_image) loading_image.remove();
+        fetch(path)
+            .then(response => response.json())
+            .then(data => {
+                svg.selectAll("*").remove();
 
-                    let max_battles = d3.max(data, (d: any) => +d.battles);
-                    max_battles = Math.max(max_battles, 2) + 1;
+                let maxBattles = d3.max(data, (d: any) => +d.battles);
+                maxBattles = Math.max(maxBattles, 2) + 1;
 
-                    const x = d3.scaleTime()
-                        .domain([start_date, Date.now()])
-                        .range([6, activity_svg_width]);
+                const x = d3.scaleTime()
+                    .domain([startDate, new Date()])
+                    .range([6, width]);
 
-                    activity_svg.append("g")
-                        .attr("transform", `translate(0, ${activity_svg_height})`)
-                        .call(d3.axisBottom(x).ticks(8))
-                        .selectAll("text")
-                        .attr("transform", "translate(-10,0)rotate(-45)")
-                        .style("text-anchor", "end");
+                svg.append("g")
+                    .attr("transform", `translate(0, ${height})`)
+                    .call(d3.axisBottom(x).ticks(8))
+                    .selectAll("text")
+                    .attr("transform", "translate(-10,0)rotate(-45)")
+                    .style("text-anchor", "end");
 
-                    const y = d3.scaleLinear()
-                        .domain([max_battles, 0])
-                        .range([1, activity_svg_height]);
+                const y = d3.scaleLinear()
+                    .domain([maxBattles, 0])
+                    .range([1, height]);
 
-                    activity_svg.append("g")
-                        .call(d3.axisLeft(y).ticks(5));
+                svg.append("g")
+                    .call(d3.axisLeft(y).ticks(5));
 
-                    const nodes = activity_svg.selectAll(".rect")
-                        .data(data)
-                        .enter()
-                        .append("g")
-                        .classed('rect', true);
+                const nodes = svg.selectAll(".rect")
+                    .data(data)
+                    .enter()
+                    .append("g")
+                    .classed('rect', true);
 
-                    nodes.append("rect")
-                        .attr("x", (d: any) => x(new Date(d.date)))
-                        .attr("y", (d: any) => y(d.battles))
-                        .attr("height", (d: any) => activity_svg_height - (y(d.battles) ?? 0))
-                        .attr("width", "12")
-                        .attr("fill", "#ccc")
-                        .on('mouseover', function (event: any, d: any) {
-                            showRecentDetails(d);
-                        })
-                        .on('mouseout', function (event: any, d: any) {
-                            hideRecentDetails();
-                        });
+                nodes.append("rect")
+                    .attr("x", (d: any) => x(new Date(d.date)))
+                    .attr("y", (d: any) => y(d.battles))
+                    .attr("height", (d: any) => height - (y(d.battles) ?? 0))
+                    .attr("width", "12")
+                    .attr("fill", "#ccc")
+                    .on('mouseover', function (event: any, d: any) {
+                        showRecentDetails(d);
+                    })
+                    .on('mouseout', function (event: any, d: any) {
+                        hideRecentDetails();
+                    });
 
-                    nodes.append("rect")
-                        .attr("x", (d: any) => x(new Date(d.date)) + 1)
-                        .attr("y", (d: any) => y(d.wins))
-                        .attr("height", (d: any) => activity_svg_height - (y(d.wins) ?? 0))
-                        .attr("width", "10")
-                        .style("stroke", "#444")
-                        .style("stroke-width", 0.5)
-                        .attr("fill", "#74c476")
-                        .on('mouseover', function (this: any, event: any, d: any) {
-                            showRecentDetails(d);
-                            d3.select(this).transition()
-                                .duration('50')
-                                .attr('fill', '#bcbddc');
-                        })
-                        .on('mouseout', function (this: any, event: any, d: any) {
-                            hideRecentDetails();
-                            d3.select(this).transition()
-                                .duration('50')
-                                .attr("fill", "#74c476");
-                        });
-                });
-        };
+                nodes.append("rect")
+                    .attr("x", (d: any) => x(new Date(d.date)) + 1)
+                    .attr("y", (d: any) => y(d.wins))
+                    .attr("height", (d: any) => height - (y(d.wins) ?? 0))
+                    .attr("width", "10")
+                    .style("stroke", "#444")
+                    .style("stroke-width", 0.5)
+                    .attr("fill", "#74c476")
+                    .on('mouseover', function (this: any, event: any, d: any) {
+                        showRecentDetails(d);
+                        d3.select(this).transition()
+                            .duration(50)
+                            .attr('fill', '#bcbddc');
+                    })
+                    .on('mouseout', function (this: any, event: any, d: any) {
+                        hideRecentDetails();
+                        d3.select(this).transition()
+                            .duration(50)
+                            .attr("fill", "#74c476");
+                    });
+            });
+    };
 
-        const showRecentDetails = (d: any) => {
-            const start_x = 470, start_y = 30;
+    const showRecentDetails = (d: any) => {
+        const startX = 470, startY = 30;
 
-            const detailGroup = d3.select("#activity_svg_container").select("svg").append("g")
-                .classed('details', true);
+        const detailGroup = d3.select("#activity_svg_container").select("svg").append("g")
+            .classed('details', true);
 
-            detailGroup.append("text")
-                .attr("x", start_x)
-                .attr("y", start_y)
-                .style("font-size", "12px")
-                .style("font-weight", "700")
-                .attr("text-anchor", "end")
-                .text(d.date);
+        detailGroup.append("text")
+            .attr("x", startX)
+            .attr("y", startY)
+            .style("font-size", "12px")
+            .style("font-weight", "700")
+            .attr("text-anchor", "end")
+            .text(d.date);
 
-            detailGroup.append("text")
-                .attr("x", start_x + 110)
-                .attr("y", start_y)
-                .style("font-size", "12px")
-                .attr("text-anchor", "end")
-                .text(`${d.wins} W : ${d.battles} Games`);
-        };
+        detailGroup.append("text")
+            .attr("x", startX + 110)
+            .attr("y", startY)
+            .style("font-size", "12px")
+            .attr("text-anchor", "end")
+            .text(`${d.wins} W : ${d.battles} Games`);
+    };
 
-        const hideRecentDetails = () => {
-            const detailGroup = d3.select("#activity_svg_container").select(".details");
-            detailGroup.remove();
-        };
+    const hideRecentDetails = () => {
+        const detailGroup = d3.select("#activity_svg_container").select(".details");
+        detailGroup.remove();
     };
 
     return <div id="activity_svg_container"></div>;

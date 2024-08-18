@@ -11,17 +11,16 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
     }, [playerId]);
 
     const drawTierPlot = (playerId: number) => {
-        const container = document.getElementById("tier_activity_container");
+        const container = document.getElementById("tier_svg_container");
         if (container) {
-            while (container.firstChild) {
-                container.removeChild(container.firstChild);
-            }
+            // Clear the container before drawing a new SVG
+            d3.select(container).selectAll("*").remove();
 
             const tier_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
                 svg_width = 600 - tier_svg_margin.left - tier_svg_margin.right,
                 svg_height = 300 - tier_svg_margin.top - tier_svg_margin.bottom;
 
-            const svg = d3.select("#tier_activity_container")
+            const svg = d3.select("#tier_svg_container")
                 .append("svg")
                 .attr("width", svg_width + tier_svg_margin.left + tier_svg_margin.right)
                 .attr("height", svg_height + tier_svg_margin.top + tier_svg_margin.bottom)
@@ -95,7 +94,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
         const start_x = 400, start_y = 240;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
-        const detailGroup = d3.select("#tier_activity_container").select("svg").append("g")
+        const detailGroup = d3.select("#tier_svg_container").select("svg").append("g")
             .classed('details', true);
 
         detailGroup.append("text")
@@ -128,7 +127,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
     };
 
     const hideTierDetails = () => {
-        const detailGroup = d3.select("#tier_activity_container").select(".details");
+        const detailGroup = d3.select("#tier_svg_container").select(".details");
         detailGroup.remove();
     };
 
@@ -144,7 +143,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
         return "#a50f15"; // super bad
     };
 
-    return <div id="tier_activity_container"></div>;
+    return <div id="tier_svg_container"></div>;
 };
 
 export default TierSVG;

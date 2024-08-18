@@ -1,3 +1,4 @@
+from celery import chain
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import pandas as pd
@@ -168,7 +169,7 @@ def update_snapshot_data(player_id: int) -> None:
     if time_since_last_fetch.days < 1:
         hours, remainder = divmod(time_since_last_fetch.seconds, 3600)
         minutes, _ = divmod(remainder, 60)
-        logging.debug(
+        logging.info(
             f'Fresh snapshot fetched {hours:02}h {minutes:02}m ago')
         return
     else:
@@ -230,18 +231,27 @@ def update_snapshot_data(player_id: int) -> None:
 def fetch_activity_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
     if player.activity_json:
+        logging.info(f'Activity data exists for player {player.name}')
         if not player.activity_updated_at or datetime.now() - player.activity_updated_at > timedelta(minutes=15):
-            update_snapshot_data_task.delay(player_id)
-            update_activity_data_task.delay(player_id)
+            logging.info(
+                f'Activity data exists but fetch datetime is empty or outdated: ASYNC update started for {player.name} : {player.player_id}')
+            chain(
+                update_snapshot_data_task.s(player.player_id) |
+                update_activity_data_task.s(player.player_id)
+            ).apply_async()
+        else:
+            logging.info(
+                f'Activity fetch datetime is fresh: returning cached data for player {player.name}')
         return player.activity_json
     else:
         update_snapshot_data(player_id)
-        update_activity_data(player)
+        update_activity_data(player_id)
         player = Player.objects.get(player_id=player_id)
         return player.activity_json
 
 
-def update_activity_data(player: Player) -> list:
+def update_activity_data(player_id: int) -> None:
+    player = Player.objects.get(player_id=player_id)
     month = []
     data = {
         "date": datetime.now().date().strftime("%Y-%m-%d"),
@@ -486,6 +496,6 @@ def preload_activity_data() -> None:
     players = Player.objects.all()
     for player in players:
         if not player.activity_json:
-            update_activity_data(player)
+            update_activity_data(player.player_id)
         logging.info(f"Preloaded activity data for player: {player.name}")
     logging.info("Preloading complete")
