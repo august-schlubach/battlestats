@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from django.core.cache import cache
 from django.http import Http404
 from rest_framework import generics, permissions, viewsets
 from rest_framework import status
@@ -189,10 +190,11 @@ def clan_members(request, clan_id: str) -> Response:
         update_clan_data(clan_id=clan_id)
         clan.refresh_from_db()
 
-    members = clan.player_set.exclude(name='').all()
+    members = clan.player_set.exclude(name='').order_by('-last_battle_date')
     if not members.exists() or (clan.members_count and members.count() < clan.members_count):
         update_clan_members(clan_id=clan_id)
-        members = clan.player_set.exclude(name='').all()
+        members = clan.player_set.exclude(
+            name='').order_by('-last_battle_date')
 
     serializer = ClanMemberSerializer(members, many=True)
     return Response(serializer.data)
@@ -217,15 +219,25 @@ def clan_data(request, clan_filter: str) -> Response:
 
 @api_view(["GET"])
 def landing_clans(request) -> Response:
-    clans = Clan.objects.exclude(name__isnull=True).exclude(name='').values(
-        'clan_id', 'name', 'tag', 'members_count'
-    ).order_by('name')
-    return Response(list(clans))
+    def _fetch_landing_clans():
+        return list(
+            Clan.objects.exclude(name__isnull=True).exclude(name='').values(
+                'clan_id', 'name', 'tag', 'members_count'
+            ).order_by('name')
+        )
+
+    data = cache.get_or_set('landing:clans', _fetch_landing_clans, 60)
+    return Response(data)
 
 
 @api_view(["GET"])
 def landing_players(request) -> Response:
-    players = Player.objects.exclude(name='').values(
-        'name'
-    ).order_by('name')
-    return Response(list(players))
+    def _fetch_landing_players():
+        return list(
+            Player.objects.exclude(name='').exclude(
+                last_battle_date__isnull=True
+            ).values('name').order_by('-last_battle_date')
+        )
+
+    data = cache.get_or_set('landing:players', _fetch_landing_players, 60)
+    return Response(data)

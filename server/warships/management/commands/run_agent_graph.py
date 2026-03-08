@@ -40,7 +40,8 @@ class Command(BaseCommand):
             self.stdout.write(json.dumps(result, indent=2))
             return
 
-        self.stdout.write(self.style.SUCCESS(f"Workflow: {result.get('workflow_id')}"))
+        self.stdout.write(self.style.SUCCESS(
+            f"Workflow: {result.get('workflow_id')}"))
         self.stdout.write(self.style.SUCCESS(f"Status: {result['status']}"))
         self.stdout.write("Plan:")
         for step in result.get("plan", []):

@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 import pandas as pd
 import logging
+from django.core.cache import cache
 from warships.models import Player, Snapshot, Clan
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
@@ -266,31 +267,27 @@ def update_activity_data(player_id: int) -> None:
 #  Ranked Battles data
 # ──────────────────────────────────────────────────────────
 
-# Module-level cache for ranked season metadata (names/dates)
-_ranked_seasons_cache: dict = {}
-_ranked_seasons_cache_time: Optional[datetime] = None
-RANKED_SEASONS_CACHE_TTL = timedelta(hours=24)
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
+RANKED_SEASONS_CACHE_KEY = 'ranked:seasons:metadata'
+RANKED_SEASONS_CACHE_TTL = 86400  # 24 hours in seconds
 
 
 def _get_ranked_seasons_metadata() -> dict:
-    """Return season_id → {name, label, start_date, end_date}. Cached for 24h."""
-    global _ranked_seasons_cache, _ranked_seasons_cache_time
+    """Return season_id → {name, label, start_date, end_date}. Cached for 24h in Redis."""
     from warships.api.players import _fetch_ranked_seasons_info
 
-    if _ranked_seasons_cache and _ranked_seasons_cache_time and \
-            datetime.now() - _ranked_seasons_cache_time < RANKED_SEASONS_CACHE_TTL:
-        return _ranked_seasons_cache
+    cached = cache.get(RANKED_SEASONS_CACHE_KEY)
+    if cached is not None:
+        return cached
 
     raw = _fetch_ranked_seasons_info()
     if not raw:
-        return _ranked_seasons_cache  # return stale if fetch fails
+        return {}  # nothing to cache
 
     result = {}
     for sid, info in raw.items():
         sid_int = int(sid)
         season_name = info.get('season_name', f'Season {sid_int - 1000}')
-        # Short label: "S24" for season_id 1024
         label = f'S{sid_int - 1000}'
         start_ts = info.get('start_at')
         close_ts = info.get('close_at')
@@ -301,8 +298,7 @@ def _get_ranked_seasons_metadata() -> dict:
             'end_date': datetime.fromtimestamp(close_ts).strftime('%Y-%m-%d') if close_ts else None,
         }
 
-    _ranked_seasons_cache = result
-    _ranked_seasons_cache_time = datetime.now()
+    cache.set(RANKED_SEASONS_CACHE_KEY, result, RANKED_SEASONS_CACHE_TTL)
     return result
 
 

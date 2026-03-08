@@ -202,7 +202,8 @@ def _run_verification_commands(state: AgentState) -> dict:
     notes = list(state.get("verification_notes", []))
 
     if not commands:
-        notes.append("No verification_commands provided; using caller-supplied verification flags.")
+        notes.append(
+            "No verification_commands provided; using caller-supplied verification flags.")
         return {
             "command_results": results,
             "verification_notes": notes,
@@ -311,7 +312,8 @@ def _summarize(state: AgentState) -> dict:
     if state.get("issues"):
         summary.append("Issues: " + " | ".join(state.get("issues", [])))
 
-    final_status = "completed" if state.get("boundary_ok") and state.get("checks_passed") else "needs_attention"
+    final_status = "completed" if state.get("boundary_ok") and state.get(
+        "checks_passed") else "needs_attention"
     return {
         "summary": summary,
         "status": final_status,
@@ -346,7 +348,8 @@ def build_graph():
     graph_builder.add_node("plan_task", _plan_task)
     graph_builder.add_node("implement_task", _implement_task)
     graph_builder.add_node("enforce_tool_boundaries", _enforce_tool_boundaries)
-    graph_builder.add_node("run_verification_commands", _run_verification_commands)
+    graph_builder.add_node("run_verification_commands",
+                           _run_verification_commands)
     graph_builder.add_node("verify_changes", _verify_changes)
     graph_builder.add_node("retry_verification", _retry_verification)
     graph_builder.add_node("summarize", _summarize)
@@ -373,7 +376,8 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
     """Run the graph from an incoming task string and optional context."""
 
     context = context or {}
-    workflow_id = context.get("workflow_id") or f"run-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
+    workflow_id = context.get(
+        "workflow_id") or f"run-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
     compiled = build_graph()
     initial_state: AgentState = {
         "workflow_id": workflow_id,

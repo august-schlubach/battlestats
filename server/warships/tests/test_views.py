@@ -156,7 +156,7 @@ class ClanMembersEndpointTests(TestCase):
         response = self.client.get("/api/fetch/clan_members/42/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{"name": "MemberOne"}])
+        self.assertEqual(response.json(), [{"name": "MemberOne", "is_hidden": False}])
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 

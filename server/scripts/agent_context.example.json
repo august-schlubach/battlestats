@@ -1,24 +1,24 @@
 {
-  "workflow_id": "demo-clan-hydration-run",
-  "max_retries": 1,
-  "allowed_paths": [
-    "server/",
-    "client/",
-    "README.md",
-    "agents/"
-  ],
-  "touched_files": [
-    "client/app/components/PlayerSearch.tsx",
-    "server/warships/views.py",
-    "server/warships/tasks.py",
-    "server/warships/tests/test_views.py"
-  ],
-  "verification_cwd": "server",
-  "verification_commands": [
-    "python -m pytest warships/tests/test_agentic_graph.py -q"
-  ],
-  "verification": {
-    "tests_passed": true,
-    "lint_passed": true
-  }
+    "workflow_id": "demo-clan-hydration-run",
+    "max_retries": 1,
+    "allowed_paths": [
+        "server/",
+        "client/",
+        "README.md",
+        "agents/"
+    ],
+    "touched_files": [
+        "client/app/components/PlayerSearch.tsx",
+        "server/warships/views.py",
+        "server/warships/tasks.py",
+        "server/warships/tests/test_views.py"
+    ],
+    "verification_cwd": "server",
+    "verification_commands": [
+        "python -m pytest warships/tests/test_agentic_graph.py -q"
+    ],
+    "verification": {
+        "tests_passed": true,
+        "lint_passed": true
+    }
 }

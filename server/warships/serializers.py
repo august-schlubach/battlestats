@@ -5,6 +5,7 @@ from .models import Player, Clan, Ship
 class PlayerSerializer(serializers.ModelSerializer):
     clan_name = serializers.SerializerMethodField()
     clan_id = serializers.SerializerMethodField()
+    clan_tag = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -15,6 +16,9 @@ class PlayerSerializer(serializers.ModelSerializer):
 
     def get_clan_id(self, obj):
         return obj.clan.clan_id if obj.clan else None
+
+    def get_clan_tag(self, obj):
+        return obj.clan.tag if obj.clan else None
 
 
 class ClanSerializer(serializers.ModelSerializer):
@@ -94,3 +98,4 @@ class ClanDataSerializer(serializers.Serializer):
 
 class ClanMemberSerializer(serializers.Serializer):
     name = serializers.CharField()
+    is_hidden = serializers.BooleanField()

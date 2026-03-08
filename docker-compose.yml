@@ -11,6 +11,12 @@ services:
     ports:
       - "5432:5432"
 
+  redis:
+    container_name: battlestats-redis
+    image: "redis:7-alpine"
+    ports:
+      - "6379:6379"
+
   rabbitmq:
     container_name: battlestats-rabbitmq
     image: "rabbitmq:3-management"
@@ -30,9 +36,12 @@ services:
       - ./server:/usr/src/app
     env_file:
       - server/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
       - rabbitmq
+      - redis
     ports:
       - "8888:8888" # Expose port 8888 for WSGI server
 
@@ -59,9 +68,12 @@ services:
     command: celery -A battlestats worker -l INFO --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle
     env_file:
       - server/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
       - rabbitmq
+      - redis
 
   task-scheduler:
     container_name: battlestats-beat
@@ -73,6 +85,8 @@ services:
     command: celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
       - server/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       - task-runner
       - rabbitmq

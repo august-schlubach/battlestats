@@ -2,6 +2,7 @@ import logging
 import os
 import requests
 from typing import Optional, Dict
+from django.core.cache import cache
 from warships.models import Ship
 
 
@@ -44,8 +45,17 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
         logging.error(f"ERROR: Invalid ship_id: {ship_id}")
         return None
 
+    cache_key = f'ship:{clean_ship_id}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     ship, created = Ship.objects.get_or_create(ship_id=clean_ship_id)
     needs_refresh = created or not ship.name or not ship.ship_type or ship.tier is None
+    if not needs_refresh:
+        # Cache the fully-populated ship for future lookups
+        cache.set(cache_key, ship, 86400)
+        return ship
     if needs_refresh:
         params = {
             "application_id": APP_ID,
@@ -62,6 +72,7 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
             ship.ship_type = ship_data.get('type')
             ship.tier = ship_data.get('tier')
             ship.save()
+            cache.set(cache_key, ship, 86400)
             if created:
                 logging.info(f'Created ship {ship.name}')
             else:

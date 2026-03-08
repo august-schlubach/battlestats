@@ -130,6 +130,25 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3001',
 ]
 
+# ── Caching ──────────────────────────────────────────────
+REDIS_URL = os.getenv('REDIS_URL', '')
+
+if REDIS_URL:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'TIMEOUT': 60,
+        }
+    }
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'TIMEOUT': 60,
+        }
+    }
+
 CORS_EXPOSE_HEADERS = [
     'X-Randoms-Updated-At',
     'X-Battles-Updated-At',

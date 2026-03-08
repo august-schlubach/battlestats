@@ -3,6 +3,7 @@ import * as d3 from 'd3';
 
 interface RandomsSVGProps {
     playerId: number;
+    isLoading?: boolean;
 }
 
 interface RandomsRow {
@@ -16,10 +17,11 @@ interface RandomsRow {
 
 const TOP_N = 20;
 
-const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
+const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId, isLoading = false }) => {
     const [allShips, setAllShips] = useState<RandomsRow[]>([]);
     const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
     const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
+    const [isChartLoading, setIsChartLoading] = useState(false);
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
     const [battlesUpdatedAt, setBattlesUpdatedAt] = useState<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -27,6 +29,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
     // Fetch ALL ships once
     useEffect(() => {
         const fetchData = async () => {
+            setIsChartLoading(true);
             try {
                 const response = await fetch(`http://localhost:8888/api/fetch/randoms_data/${playerId}/?all=true`);
                 const result: RandomsRow[] = await response.json();
@@ -40,6 +43,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
                 setSelectedTiers(tiers);
             } catch (error) {
                 console.error('Error fetching data:', error);
+            } finally {
+                setIsChartLoading(false);
             }
         };
         fetchData();
@@ -233,6 +238,8 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
 
     const randomsFreshness = getFreshnessStatus(randomsUpdatedAt);
 
+    const shouldGrayOut = isLoading || isChartLoading;
+
     return (
         <div>
             <div className="mb-2 text-xs text-gray-600">
@@ -276,7 +283,21 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
                 <p className="text-sm text-gray-500">No ships match the selected filters.</p>
             ) : null}
 
-            <div ref={containerRef}></div>
+            <div className="relative">
+                <div
+                    className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'}
+                    aria-busy={shouldGrayOut}
+                >
+                    <div ref={containerRef}></div>
+                </div>
+                {shouldGrayOut ? (
+                    <div className="absolute inset-0 flex items-center justify-center rounded bg-gray-100/65">
+                        <span className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600">
+                            Loading random battles...
+                        </span>
+                    </div>
+                ) : null}
+            </div>
         </div>
     );
 };

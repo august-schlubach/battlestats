@@ -27,6 +27,7 @@ interface PlayerDetailProps {
         last_lookup: string | null;
         clan: number;
         clan_name: string;
+        clan_tag: string | null;
         clan_id: number;
     };
     onBack: () => void;
@@ -34,6 +35,17 @@ interface PlayerDetailProps {
     onSelectClan: (clanId: number, clanName: string) => void;
     isLoading?: boolean;
 }
+
+const selectColorByWR = (winRatio: number): string => {
+    if (winRatio > 65) return "#810c9e";  // super unicum
+    if (winRatio >= 60) return "#D042F3";  // unicum
+    if (winRatio >= 56) return "#3182bd";  // great
+    if (winRatio >= 54) return "#74c476";  // very good
+    if (winRatio >= 52) return "#a1d99b";  // good
+    if (winRatio >= 50) return "#fed976";  // average
+    if (winRatio >= 45) return "#fd8d3c";  // below average
+    return "#a50f15";                       // bad
+};
 
 const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
@@ -54,18 +66,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
             <div className="grid grid-cols-[340px_1fr] gap-4">
                 {/* First Column */}
                 <div>
-                    <div className="mb-3 border-b border-gray-100 pb-3">
+                    <div className="mb-3 border-b border-[#c6dbef] pb-3">
                         {player.clan_id ? (
                             <button
                                 type="button"
                                 onClick={() => onSelectClan(player.clan_id, player.clan_name || "Clan")}
-                                className="mt-1 text-xl font-semibold text-gray-900 underline-offset-4 hover:underline"
+                                className="mt-1 text-xl font-semibold text-[#2171b5] underline-offset-4 hover:underline"
                                 aria-label={`Open clan page for ${player.clan_name || "clan"}`}
                             >
-                                {player.clan_name || 'Clan'}
+                                {player.clan_tag ? `[${player.clan_tag}] ` : ''}{player.clan_name || 'Clan'}
                             </button>
                         ) : (
-                            <h2 className="mt-1 text-xl font-semibold text-gray-900">No Clan</h2>
+                            <h2 className="mt-1 text-xl font-semibold text-[#2171b5]">No Clan</h2>
                         )}
                     </div>
                     {player.clan_id ? (
@@ -83,12 +95,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 </div>
 
                 {/* Second Column */}
-                <div className="min-w-0 text-left border-l border-gray-100 pl-4">
-                    <div className="mb-3 border-b border-gray-100 pb-3">
-                        <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
+                <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
+                    <div className="mb-3 border-b border-[#c6dbef] pb-3">
+                        <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
                             {player.name}
                         </h1>
-                        <p className="mt-1 text-sm text-gray-500">
+                        <p className="mt-1 text-sm text-[#4292c6]">
                             Last played {player.days_since_last_battle} days ago
                         </p>
                     </div>
@@ -105,46 +117,47 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     ) : (
                         <>
                             <div className="mt-4 grid grid-cols-3 gap-3">
-                                <div className="rounded-md bg-gray-50 p-3">
-                                    <p className="text-xs uppercase tracking-wide text-gray-500">Win Rate</p>
-                                    <p className="mt-1 text-2xl font-semibold text-gray-900">{player.pvp_ratio}%</p>
+                                <div
+                                    className="rounded-md bg-[#eff3ff] p-3"
+                                    style={{ border: `1px solid ${selectColorByWR(player.pvp_ratio)}` }}
+                                >
+                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">Win Rate</p>
+                                    <p className="mt-1 text-2xl font-semibold text-[#084594]">{player.pvp_ratio}%</p>
                                 </div>
-                                <div className="rounded-md bg-gray-50 p-3">
-                                    <p className="text-xs uppercase tracking-wide text-gray-500">PvP Battles</p>
-                                    <p className="mt-1 text-2xl font-semibold text-gray-900">{player.pvp_battles.toLocaleString()}</p>
+                                <div className="rounded-md bg-[#eff3ff] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">PvP Battles</p>
+                                    <p className="mt-1 text-2xl font-semibold text-[#084594]">{player.pvp_battles.toLocaleString()}</p>
                                 </div>
-                                <div className="rounded-md bg-gray-50 p-3">
-                                    <p className="text-xs uppercase tracking-wide text-gray-500">Survival</p>
-                                    <p className="mt-1 text-2xl font-semibold text-gray-900">{player.pvp_survival_rate}%</p>
+                                <div className="rounded-md bg-[#eff3ff] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">Survival</p>
+                                    <p className="mt-1 text-2xl font-semibold text-[#084594]">{player.pvp_survival_rate}%</p>
                                 </div>
                             </div>
 
-                            <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-gray-600">
-                                <p>Total Battles: <span className="font-medium text-gray-900">{player.total_battles}</span></p>
-                                <p>PvP Wins: <span className="font-medium text-gray-900">{player.pvp_wins}</span></p>
-                                <p>PvP Losses: <span className="font-medium text-gray-900">{player.pvp_losses}</span></p>
-                                <p>Last Battle Date: <span className="font-medium text-gray-900">{player.last_battle_date}</span></p>
+                            <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-[#4292c6]">
+                                <p>Total Battles: <span className="font-medium text-[#2171b5]">{player.total_battles}</span></p>
+                                <p>PvP Wins: <span className="font-medium text-[#2171b5]">{player.pvp_wins}</span></p>
+                                <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses}</span></p>
+                                <p>Last Battle Date: <span className="font-medium text-[#2171b5]">{player.last_battle_date}</span></p>
                             </div>
 
-                            <div className="mt-5 border-t border-gray-100 pt-5">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Top Ships (Random Battles)</h3>
-                                <p className="mb-2 text-xs text-gray-500">Compares wins and total battles for the most-played ships.</p>
-                                <RandomsSVG playerId={player.player_id} />
+                            <div className="mt-5 border-t border-[#c6dbef] pt-5">
+                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>
+                                <p className="mb-2 text-xs text-[#6baed6]">Compares wins and total battles for the most-played ships.</p>
+                                <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <div className="mt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Performance by Tier</h3>
-                                <p className="mb-2 text-xs text-gray-500">Battle volume and win rate grouped by ship tier.</p>
+                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Tier</h3>
+                                <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate grouped by ship tier.</p>
                                 <TierSVG playerId={player.player_id} />
                             </div>
                             <div className="mt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Performance by Ship Type</h3>
-                                <p className="mb-2 text-xs text-gray-500">Battle volume and win rate across classes.</p>
+                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Ship Type</h3>
+                                <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate across classes.</p>
                                 <TypeSVG playerId={player.player_id} />
                             </div>
                         </>
                     )}
-
-                    <button onClick={onBack} className="mt-5 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Back</button>
                 </div>
             </div>
         </div>

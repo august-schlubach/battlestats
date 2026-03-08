@@ -18,10 +18,11 @@ interface PlayerData {
     name: string;
     clan_id: number | null;
     clan_name: string | null;
+    clan_tag: string | null;
     [key: string]: any;
 }
 
-const LANDING_LIMIT = 20;
+const LANDING_LIMIT = 40;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 
@@ -144,7 +145,14 @@ const PlayerSearch: React.FC = () => {
     };
 
     useEffect(() => {
-        if (!playerData?.name || playerData.clan_id) {
+        if (!playerData?.name) {
+            return;
+        }
+
+        // Poll when clan data is incomplete: no clan_id yet, or clan_id present
+        // but clan_name still missing (clan record being hydrated in background).
+        const needsHydration = !playerData.clan_id || (playerData.clan_id && !playerData.clan_name);
+        if (!needsHydration) {
             return;
         }
 
@@ -171,7 +179,7 @@ const PlayerSearch: React.FC = () => {
 
                 setPlayerData(refreshed);
 
-                if (refreshed.clan_id) {
+                if (refreshed.clan_id && refreshed.clan_name) {
                     clearInterval(interval);
                 }
             } catch (err) {
@@ -182,7 +190,7 @@ const PlayerSearch: React.FC = () => {
         }, CLAN_HYDRATION_POLL_INTERVAL_MS);
 
         return () => clearInterval(interval);
-    }, [playerData?.name, playerData?.clan_id]);
+    }, [playerData?.name, playerData?.clan_id, playerData?.clan_name]);
 
     return (
         <div className="p-4">
@@ -199,32 +207,32 @@ const PlayerSearch: React.FC = () => {
             ) : (
                 <div>
                     <form onSubmit={handleSubmit} className="space-y-4">
-                        <label htmlFor="search" className="block text-sm font-medium text-gray-700">Search:</label>
+                        <label htmlFor="search" className="block text-sm font-medium text-[#2171b5]">Search:</label>
                         <input
                             type="text"
                             id="search"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
-                            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            className="mt-1 block w-full px-3 py-2 border border-[#c6dbef] rounded-md shadow-sm focus:outline-none focus:ring-[#4292c6] focus:border-[#4292c6] sm:text-sm"
                         />
-                        <button type="submit" className="mt-2 px-4 py-2 bg-blue-500 text-white rounded">Go</button>
+                        <button type="submit" className="mt-2 px-4 py-2 bg-[#2171b5] hover:bg-[#084594] text-white rounded transition-colors">Go</button>
                     </form>
                     {error && <p className="mt-2 text-red-600">{error}</p>}
 
                     {clans.length > 0 && (
-                        <div className="mt-8 border-t border-gray-100 pt-6">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clans</h3>
-                            <p className="mt-2 text-sm leading-7 text-gray-700">
+                        <div className="mt-8 border-t border-[#c6dbef] pt-6">
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Clans</h3>
+                            <p className="mt-2 text-sm leading-7 text-[#4292c6]">
                                 {clans.slice(0, LANDING_LIMIT).map((clan, index) => (
                                     <React.Fragment key={clan.clan_id}>
                                         <button
                                             onClick={() => handleSelectClan(clan)}
-                                            className="font-medium text-gray-900 underline-offset-2 hover:underline"
+                                            className="font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
                                             aria-label={`Show clan ${clan.name}`}
                                         >
                                             [{clan.tag}] {clan.name}
                                         </button>
-                                        {index < Math.min(clans.length, LANDING_LIMIT) - 1 && <span className="mx-2 text-gray-400">&bull;</span>}
+                                        {index < Math.min(clans.length, LANDING_LIMIT) - 1 && <span className="mx-2 text-[#9ecae1]">&bull;</span>}
                                     </React.Fragment>
                                 ))}
                             </p>
@@ -232,19 +240,19 @@ const PlayerSearch: React.FC = () => {
                     )}
 
                     {players.length > 0 && (
-                        <div className="mt-6 border-t border-gray-100 pt-6">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Players</h3>
-                            <p className="mt-2 text-sm leading-7 text-gray-700">
+                        <div className="mt-6 border-t border-[#c6dbef] pt-6">
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Players</h3>
+                            <p className="mt-2 text-sm leading-7 text-[#4292c6]">
                                 {players.slice(0, LANDING_LIMIT).map((player, index) => (
                                     <React.Fragment key={player.name}>
                                         <button
                                             onClick={() => handleSelectMember(player.name)}
-                                            className="font-medium text-gray-900 underline-offset-2 hover:underline"
+                                            className="font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
                                             aria-label={`Show player ${player.name}`}
                                         >
                                             {player.name}
                                         </button>
-                                        {index < Math.min(players.length, LANDING_LIMIT) - 1 && <span className="mx-2 text-gray-400">&bull;</span>}
+                                        {index < Math.min(players.length, LANDING_LIMIT) - 1 && <span className="mx-2 text-[#9ecae1]">&bull;</span>}
                                     </React.Fragment>
                                 ))}
                             </p>

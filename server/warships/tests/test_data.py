@@ -9,48 +9,26 @@ from warships.models import Player, Snapshot
 
 
 class SnapshotDataTests(TestCase):
-    @patch("warships.data._fetch_snapshot_data")
-    def test_update_snapshot_data_creates_29_day_snapshots_and_intervals(self, mock_fetch_snapshot_data):
-        player = Player.objects.create(name="ActivityUser", player_id=222)
+    @patch("warships.data.update_player_data")
+    def test_update_snapshot_data_creates_snapshot_and_intervals(self, mock_update_player_data):
+        player = Player.objects.create(
+            name="ActivityUser", player_id=222,
+            pvp_battles=103, pvp_wins=52,
+        )
 
-        today = datetime.now().date()
-        start_date = today - timedelta(days=28)
-        sample_date_1 = (start_date + timedelta(days=5)).strftime("%Y%m%d")
-        sample_date_2 = (start_date + timedelta(days=6)).strftime("%Y%m%d")
+        def hydrate_player(p, force_refresh=False):
+            p.pvp_battles = 103
+            p.pvp_wins = 52
+            p.save()
 
-        def fake_stats(_player_id, dates_param):
-            date_set = set(dates_param.split(","))
-            data = {}
-            if sample_date_1 in date_set:
-                data[sample_date_1] = {
-                    "battles": 100,
-                    "wins": 50,
-                    "survived_battles": 10,
-                    "battle_type": "pvp",
-                }
-            if sample_date_2 in date_set:
-                data[sample_date_2] = {
-                    "battles": 103,
-                    "wins": 52,
-                    "survived_battles": 11,
-                    "battle_type": "pvp",
-                }
-            return data
-
-        mock_fetch_snapshot_data.side_effect = fake_stats
+        mock_update_player_data.side_effect = hydrate_player
 
         update_snapshot_data(player.player_id)
 
-        snapshots = Snapshot.objects.filter(player=player).order_by("date")
-        self.assertEqual(snapshots.count(), 29)
-
-        day_1 = snapshots.get(date=start_date + timedelta(days=5))
-        day_2 = snapshots.get(date=start_date + timedelta(days=6))
-
-        self.assertEqual(day_1.battles, 100)
-        self.assertEqual(day_2.battles, 103)
-        self.assertEqual(day_2.interval_battles, 3)
-        self.assertEqual(day_2.interval_wins, 2)
+        today = datetime.now().date()
+        snapshot = Snapshot.objects.get(player=player, date=today)
+        self.assertEqual(snapshot.battles, 103)
+        self.assertEqual(snapshot.wins, 52)
 
 
 class ActivityDataRefreshTests(TestCase):

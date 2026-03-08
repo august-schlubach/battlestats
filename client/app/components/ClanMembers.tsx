@@ -6,7 +6,7 @@ interface ClanMembersProps {
 }
 
 const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => {
-    const [members, setMembers] = useState<{ name: string }[]>([]);
+    const [members, setMembers] = useState<{ name: string; is_hidden: boolean }[]>([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
@@ -35,13 +35,22 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => 
                 <p className="mt-2 text-sm leading-7 text-gray-700">
                     {members.map((member, index) => (
                         <React.Fragment key={member.name}>
-                            <button
-                                onClick={() => onSelectMember(member.name)}
-                                className="font-medium text-gray-900 underline-offset-2 hover:underline"
-                                aria-label={`Show player ${member.name}`}
-                            >
-                                {member.name}
-                            </button>
+                            {member.is_hidden ? (
+                                <span
+                                    className="font-medium text-gray-500"
+                                    title="Player profile is hidden"
+                                >
+                                    {member.name}
+                                </span>
+                            ) : (
+                                <button
+                                    onClick={() => onSelectMember(member.name)}
+                                    className="font-medium text-gray-900 underline-offset-2 hover:underline"
+                                    aria-label={`Show player ${member.name}`}
+                                >
+                                    {member.name}
+                                </button>
+                            )}
                             {index < members.length - 1 && <span className="mx-2 text-gray-400">•</span>}
                         </React.Fragment>
                     ))}
