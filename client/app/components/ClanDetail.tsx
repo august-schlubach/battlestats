@@ -31,7 +31,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             </div>
 
             <div className="mt-8">
-                <ClanBattleSeasons clanId={clan.clan_id} />
+                <ClanBattleSeasons clanId={clan.clan_id} memberCount={clan.members_count} />
             </div>
 
             <div className="mt-6 border-t border-gray-100 pt-4">

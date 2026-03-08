@@ -8,7 +8,7 @@ interface ClanProps {
     svgHeight?: number;
 }
 
-const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, svgHeight = 240 }) => {
+const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, svgHeight = 280 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -18,7 +18,7 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, 
     }, [clanId, svgWidth, svgHeight]);
 
     const drawClanPlot = (clanId: number) => {
-        const margin = { top: 20, right: 16, bottom: 32, left: 38 };
+        const margin = { top: 44, right: 16, bottom: 32, left: 38 };
         const width = svgWidth - margin.left - margin.right;
         const height = svgHeight - margin.top - margin.bottom;
 
@@ -76,8 +76,9 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, 
                     .domain([0, max])
                     .range([0, width]);
                 svg.append("g")
+                    .style("color", "#6b7280")
                     .attr("transform", `translate(0, ${height})`)
-                    .call(d3.axisBottom(x))
+                    .call(d3.axisBottom(x).ticks(5).tickSizeOuter(0))
                     .selectAll("text")
                     .attr("transform", "translate(-10,0)rotate(-45)")
                     .style("text-anchor", "end");
@@ -86,26 +87,8 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, 
                     .domain([ymin, ymax])
                     .range([height, 0]);
                 svg.append("g")
-                    .call(d3.axisLeft(y));
-
-                svg.append("text")
-                    .attr("class", "axisLabel")
-                    .style("font-size", "9px")
-                    .style("fill", "#6b7280")
-                    .attr("text-anchor", "end")
-                    .attr("x", width)
-                    .attr("y", height - 6)
-                    .text("Battles");
-
-                svg.append("text")
-                    .attr("class", "axisLabel")
-                    .style("font-size", "9px")
-                    .style("fill", "#6b7280")
-                    .attr("text-anchor", "end")
-                    .attr("transform", "translate(-10,0)rotate(-90)")
-                    .attr("x", 0)
-                    .attr("y", 25)
-                    .text("Win %");
+                    .style("color", "#6b7280")
+                    .call(d3.axisLeft(y).ticks(5).tickSizeOuter(0));
 
                 svg.append('g')
                     .selectAll("dot")
@@ -148,28 +131,48 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, 
             });
 
         const showDetails = (d: ClanData) => {
-            const startX = 30, startY = 10;
-
             const detailGroup = svg.append("g")
-                .classed('details', true);
-            detailGroup.append("text")
-                .attr("x", startX)
-                .attr("y", startY)
+                .classed('details', true)
+                .style("pointer-events", "none");
+
+            const detailText = detailGroup.append("text")
+                .attr("x", 0)
+                .attr("y", -16)
+                .attr("dominant-baseline", "middle");
+
+            detailText.append("tspan")
                 .style("font-size", "11px")
                 .attr("font-weight", "700")
+                .style("fill", "#084594")
                 .text(d.player_name);
-            detailGroup.append("text")
-                .attr("x", startX)
-                .attr("y", startY + 16)
+
+            detailText.append("tspan")
+                .attr("dx", 10)
                 .style("font-size", "10px")
                 .attr("font-weight", "400")
-                .text(d.pvp_battles + " Battles");
-            detailGroup.append("text")
-                .attr("x", startX + 90)
-                .attr("y", startY + 16)
+                .style("fill", "#6b7280")
+                .text(`${d.pvp_battles} Battles`);
+
+            detailText.append("tspan")
+                .attr("dx", 10)
                 .style("font-size", "10px")
                 .attr("font-weight", "400")
-                .text(d.pvp_ratio + "% WR");
+                .style("fill", "#6b7280")
+                .text(`${d.pvp_ratio}% WR`);
+
+            const textNode = detailText.node();
+            if (!textNode) {
+                return;
+            }
+
+            const bbox = textNode.getBBox();
+            detailGroup.insert("rect", "text")
+                .attr("x", bbox.x - 8)
+                .attr("y", bbox.y - 4)
+                .attr("width", bbox.width + 16)
+                .attr("height", bbox.height + 8)
+                .attr("rx", 6)
+                .attr("fill", "rgba(255, 255, 255, 0.92)");
         };
 
         const hideDetails = () => {

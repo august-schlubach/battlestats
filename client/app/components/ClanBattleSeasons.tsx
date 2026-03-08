@@ -17,7 +17,11 @@ interface ClanBattleSeason {
 
 interface ClanBattleSeasonsProps {
     clanId: number;
+    memberCount: number;
 }
+
+type SortKey = 'season' | 'start_date' | 'ships' | 'participants' | 'active_rate' | 'roster_win_rate';
+type SortDirection = 'asc' | 'desc';
 
 const formatTierRange = (minTier: number | null, maxTier: number | null): string => {
     if (minTier == null && maxTier == null) return '—';
@@ -27,15 +31,23 @@ const formatTierRange = (minTier: number | null, maxTier: number | null): string
     return `Tiers ${minTier}-${maxTier}`;
 };
 
-const formatDateRange = (startDate: string | null, endDate: string | null): string => {
-    if (startDate && endDate) return `${startDate} to ${endDate}`;
-    return startDate || endDate || '—';
+const selectColorByWR = (winRatio: number): string => {
+    if (winRatio > 65) return '#810c9e';
+    if (winRatio >= 60) return '#D042F3';
+    if (winRatio >= 56) return '#3182bd';
+    if (winRatio >= 54) return '#74c476';
+    if (winRatio >= 52) return '#a1d99b';
+    if (winRatio >= 50) return '#fed976';
+    if (winRatio >= 45) return '#fd8d3c';
+    return '#a50f15';
 };
 
-const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId }) => {
+const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCount }) => {
     const [seasons, setSeasons] = useState<ClanBattleSeason[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [sortKey, setSortKey] = useState<SortKey>('start_date');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
     useEffect(() => {
         let cancelled = false;
@@ -71,10 +83,56 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId }) => {
         };
     }, [clanId]);
 
+    const handleSort = (nextSortKey: SortKey) => {
+        if (sortKey === nextSortKey) {
+            setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc');
+            return;
+        }
+
+        setSortKey(nextSortKey);
+        setSortDirection(nextSortKey === 'start_date' || nextSortKey === 'season' ? 'desc' : 'desc');
+    };
+
+    const sortedSeasons = [...seasons].sort((left, right) => {
+        const directionMultiplier = sortDirection === 'asc' ? 1 : -1;
+
+        const shipRangeLeft = `${left.ship_tier_min ?? -1}-${left.ship_tier_max ?? -1}`;
+        const shipRangeRight = `${right.ship_tier_min ?? -1}-${right.ship_tier_max ?? -1}`;
+
+        const activeRateLeft = memberCount > 0 ? (left.participants / memberCount) * 100 : 0;
+        const activeRateRight = memberCount > 0 ? (right.participants / memberCount) * 100 : 0;
+
+        const valueMap = {
+            season: left.season_id - right.season_id,
+            start_date: (left.start_date || '').localeCompare(right.start_date || ''),
+            ships: shipRangeLeft.localeCompare(shipRangeRight),
+            participants: left.participants - right.participants,
+            active_rate: activeRateLeft - activeRateRight,
+            roster_win_rate: left.roster_win_rate - right.roster_win_rate,
+        };
+
+        const primary = valueMap[sortKey] * directionMultiplier;
+        if (primary !== 0) {
+            return primary;
+        }
+
+        return (right.season_id - left.season_id);
+    });
+
+    const sortIndicator = (key: SortKey): string => {
+        if (sortKey !== key) return '';
+        return sortDirection === 'desc' ? ' ↓' : ' ↑';
+    };
+
+    const ariaSortFor = (key: SortKey): 'none' | 'ascending' | 'descending' => {
+        if (sortKey !== key) return 'none';
+        return sortDirection === 'asc' ? 'ascending' : 'descending';
+    };
+
     return (
         <div>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clan Battles Seasons</h3>
-            <p className="mt-1 text-xs text-gray-500">Current roster aggregate by season.</p>
+            <p className="mt-1 text-xs text-gray-500">Current roster aggregate by season. Active shows the share of the current clan roster that played that season.</p>
 
             {loading && <p className="mt-3 text-sm text-gray-500">Loading clan battles seasons...</p>}
             {!loading && error && <p className="mt-3 text-sm text-gray-500">{error}</p>}
@@ -83,32 +141,54 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId }) => {
             )}
 
             {!loading && !error && seasons.length > 0 && (
-                <div className="mt-3 overflow-x-auto">
+                <div className="mt-3 max-h-[28rem] overflow-y-auto overflow-x-auto rounded-sm">
                     <table className="min-w-full border-collapse text-sm tabular-nums text-gray-700">
                         <thead>
-                            <tr className="border-b border-gray-200 text-[11px] uppercase tracking-[0.14em] text-gray-500">
-                                <th className="py-2 pr-4 text-left font-semibold">Season</th>
-                                <th className="py-2 pr-4 text-left font-semibold">Dates</th>
-                                <th className="py-2 pr-4 text-left font-semibold">Ships</th>
-                                <th className="py-2 pr-4 text-right font-semibold">Players</th>
-                                <th className="py-2 pr-4 text-right font-semibold">Battles</th>
-                                <th className="py-2 pr-4 text-right font-semibold">Wins</th>
-                                <th className="py-2 text-right font-semibold">WR</th>
+                            <tr className="border-b border-gray-200 bg-white text-[11px] uppercase tracking-[0.14em] text-gray-500">
+                                <th className="sticky top-0 bg-white py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('season')}>
+                                    <button type="button" onClick={() => handleSort('season')} className="text-left font-semibold text-inherit hover:text-gray-700">
+                                        Season{sortIndicator('season')}
+                                    </button>
+                                </th>
+                                <th className="sticky top-0 bg-white py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('start_date')}>
+                                    <button type="button" onClick={() => handleSort('start_date')} className="text-left font-semibold text-inherit hover:text-gray-700">
+                                        Date Start{sortIndicator('start_date')}
+                                    </button>
+                                </th>
+                                <th className="sticky top-0 bg-white py-2 pr-4 text-left font-semibold" aria-sort={ariaSortFor('ships')}>
+                                    <button type="button" onClick={() => handleSort('ships')} className="text-left font-semibold text-inherit hover:text-gray-700">
+                                        Ships{sortIndicator('ships')}
+                                    </button>
+                                </th>
+                                <th className="sticky top-0 bg-white py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('participants')}>
+                                    <button type="button" onClick={() => handleSort('participants')} className="text-right font-semibold text-inherit hover:text-gray-700">
+                                        Players{sortIndicator('participants')}
+                                    </button>
+                                </th>
+                                <th className="sticky top-0 bg-white py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('active_rate')}>
+                                    <button type="button" onClick={() => handleSort('active_rate')} className="text-right font-semibold text-inherit hover:text-gray-700">
+                                        Active{sortIndicator('active_rate')}
+                                    </button>
+                                </th>
+                                <th className="sticky top-0 bg-white py-2 pr-3 text-right font-semibold" aria-sort={ariaSortFor('roster_win_rate')}>
+                                    <button type="button" onClick={() => handleSort('roster_win_rate')} className="text-right font-semibold text-inherit hover:text-gray-700">
+                                        WR{sortIndicator('roster_win_rate')}
+                                    </button>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
-                            {seasons.map((season) => (
+                            {sortedSeasons.map((season) => (
                                 <tr key={season.season_id} className="border-b border-gray-100 align-top last:border-b-0">
                                     <td className="py-2 pr-4 text-left text-[#084594]">
                                         <div className="font-medium">{season.season_name}</div>
                                         <div className="text-xs text-gray-500">{season.season_label}</div>
                                     </td>
-                                    <td className="py-2 pr-4 text-left text-gray-600">{formatDateRange(season.start_date, season.end_date)}</td>
+                                    <td className="py-2 pr-4 text-left text-gray-600">{season.start_date || '—'}</td>
                                     <td className="py-2 pr-4 text-left text-gray-600">{formatTierRange(season.ship_tier_min, season.ship_tier_max)}</td>
                                     <td className="py-2 pr-4 text-right">{season.participants.toLocaleString()}</td>
-                                    <td className="py-2 pr-4 text-right">{season.roster_battles.toLocaleString()}</td>
-                                    <td className="py-2 pr-4 text-right">{season.roster_wins.toLocaleString()}</td>
-                                    <td className="py-2 text-right font-medium text-[#2171b5]">{season.roster_win_rate.toFixed(1)}%</td>
+                                    <td className="py-2 pr-4 text-right">{memberCount > 0 ? `${((season.participants / memberCount) * 100).toFixed(0)}%` : '—'}</td>
+                                    <td className="py-2 pr-3 text-right font-medium" style={{ color: selectColorByWR(season.roster_win_rate) }}>{season.roster_win_rate.toFixed(1)}%</td>
                                 </tr>
                             ))}
                         </tbody>

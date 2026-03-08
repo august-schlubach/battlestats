@@ -57,7 +57,7 @@ BASE_URL = "https://api.worldofwarships.com/wows/"
 APP_ID = os.environ.get("WG_APP_ID")
 REQUEST_TIMEOUT = 20
 PAGE_SIZE = 100  # max allowed by the API
-RATE_LIMIT_DELAY = 0.5  # seconds between API calls
+RATE_LIMIT_DELAY = 0.25  # seconds between API calls
 BATCH_SIZE = 100  # max account IDs per account/info/ call
 
 logging.basicConfig(

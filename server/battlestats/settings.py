@@ -66,11 +66,11 @@ WSGI_APPLICATION = 'battlestats.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.{}'.format(
-            os.getenv('DB_ENGINE', 'sqlite3')
+            os.getenv('DB_ENGINE', 'postgresql_psycopg2')
         ),
-        'NAME': os.getenv('DB_NAME', BASE_DIR / 'db.sqlite3'),
+        'NAME': os.getenv('DB_NAME', 'battlestats'),
         'USER': os.getenv('DB_USERNAME', 'django'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'django'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'XVIB58E5rWnAsU6'),
         'HOST': os.getenv('DB_HOST', '127.0.0.1'),
         'PORT': os.getenv('DB_PORT', '5432'),
     }

@@ -66,7 +66,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
             <div className="grid grid-cols-[340px_1fr] gap-4">
                 {/* First Column */}
                 <div>
-                    <div className="mb-3 border-b border-[#c6dbef] pb-3">
+                    <div className="mb-4 pb-1">
                         {player.clan_id ? (
                             <button
                                 type="button"
@@ -82,10 +82,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     </div>
                     {player.clan_id ? (
                         <>
-                            <div id="clan_plot_container" className="mb-4">
-                                <ClanSVG clanId={player.clan_id} onSelectMember={onSelectMember} />
+                            <div id="clan_plot_container" className="mb-5">
+                                <ClanSVG clanId={player.clan_id} onSelectMember={onSelectMember} svgHeight={280} />
                             </div>
-                            <div id="clan_members_container" className="border-t border-gray-100 pt-4">
+                            <div id="clan_members_container" className="pt-5">
                                 <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} />
                             </div>
                         </>
@@ -135,10 +135,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             </div>
 
                             <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-[#4292c6]">
-                                <p>Total Battles: <span className="font-medium text-[#2171b5]">{player.total_battles}</span></p>
-                                <p>PvP Wins: <span className="font-medium text-[#2171b5]">{player.pvp_wins}</span></p>
-                                <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses}</span></p>
+                                <p>Total Battles: <span className="font-medium text-[#2171b5]">{player.total_battles.toLocaleString()}</span></p>
+                                <p>PvP Wins: <span className="font-medium text-[#2171b5]">{player.pvp_wins.toLocaleString()}</span></p>
                                 <p>Last Battle Date: <span className="font-medium text-[#2171b5]">{player.last_battle_date}</span></p>
+                                <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses.toLocaleString()}</span></p>
                             </div>
 
                             <div className="mt-5 border-t border-[#c6dbef] pt-5">

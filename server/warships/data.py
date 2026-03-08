@@ -278,6 +278,36 @@ CLAN_BATTLE_PLAYER_STATS_CACHE_TTL = 21600
 CLAN_BATTLE_SUMMARY_CACHE_TTL = 3600
 
 
+def _get_clan_battle_summary_cache_key(clan_id: str) -> str:
+    return f'clan_battles:summary:v2:{clan_id}'
+
+
+def _invalidate_clan_battle_summary_cache(clan_id: str) -> None:
+    cache.delete(_get_clan_battle_summary_cache_key(clan_id))
+
+
+def _clan_battle_season_sort_key(summary: dict) -> tuple:
+    start_date = summary.get('start_date')
+    end_date = summary.get('end_date')
+
+    parsed_start = datetime.min
+    parsed_end = datetime.min
+
+    if start_date:
+        try:
+            parsed_start = datetime.strptime(start_date, '%Y-%m-%d')
+        except ValueError:
+            pass
+
+    if end_date:
+        try:
+            parsed_end = datetime.strptime(end_date, '%Y-%m-%d')
+        except ValueError:
+            pass
+
+    return parsed_start, parsed_end, summary.get('season_id', 0)
+
+
 def _get_ranked_seasons_metadata() -> dict:
     """Return season_id → {name, label, start_date, end_date}. Cached for 24h in Redis."""
     from warships.api.players import _fetch_ranked_seasons_info
@@ -355,7 +385,7 @@ def fetch_clan_battle_seasons(clan_id: str) -> list:
     if not clan_id:
         return []
 
-    cache_key = f'clan_battles:summary:{clan_id}'
+    cache_key = _get_clan_battle_summary_cache_key(clan_id)
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -366,13 +396,15 @@ def fetch_clan_battle_seasons(clan_id: str) -> list:
         return []
 
     members = list(
-        clan.player_set.exclude(name='').exclude(player_id__isnull=True).values('player_id', 'name')
+        clan.player_set.exclude(name='').exclude(
+            player_id__isnull=True).values('player_id', 'name')
     )
 
     if not members and clan.members_count:
         update_clan_members(clan_id=clan_id)
         members = list(
-            clan.player_set.exclude(name='').exclude(player_id__isnull=True).values('player_id', 'name')
+            clan.player_set.exclude(name='').exclude(
+                player_id__isnull=True).values('player_id', 'name')
         )
 
     if not members:
@@ -430,14 +462,12 @@ def fetch_clan_battle_seasons(clan_id: str) -> list:
                 summary['roster_losses'] += int(season.get('losses', 0) or 0)
 
     result = []
-    for sid in sorted(season_summaries.keys(), reverse=True):
-        summary = season_summaries[sid]
+    for summary in sorted(season_summaries.values(), key=_clan_battle_season_sort_key, reverse=True):
         battles = summary['roster_battles']
         summary['roster_win_rate'] = round(
             summary['roster_wins'] / battles * 100, 1) if battles > 0 else 0.0
         result.append(summary)
 
-    result = result[:8]
     cache.set(cache_key, result, CLAN_BATTLE_SUMMARY_CACHE_TTL)
     return result
 
@@ -756,6 +786,7 @@ def update_clan_data(clan_id: str) -> None:
     clan.leader_name = data.get('leader_name', '')
     clan.last_fetch = datetime.now()
     clan.save()
+    _invalidate_clan_battle_summary_cache(clan_id)
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
@@ -793,6 +824,8 @@ def update_clan_members(clan_id: str) -> None:
                 player.save()
 
         update_player_data(player)
+
+    _invalidate_clan_battle_summary_cache(clan_id)
 
 
 def update_player_data(player: Player, force_refresh: bool = False) -> None:

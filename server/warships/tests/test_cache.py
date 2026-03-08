@@ -227,3 +227,181 @@ class RankedSeasonsMetadataCacheTests(TestCase):
         result = _get_ranked_seasons_metadata()
         self.assertEqual(result, {})
         self.assertIsNone(cache.get(RANKED_SEASONS_CACHE_KEY))
+
+
+@override_settings(CACHES=LOCMEM_CACHES)
+class ClanBattleSeasonsMetadataCacheTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    @patch("warships.data._fetch_clan_battle_seasons_info")
+    def test_clan_battle_seasons_cached_after_first_call(self, mock_fetch):
+        from warships.data import _get_clan_battle_seasons_metadata, CLAN_BATTLE_SEASONS_CACHE_KEY
+
+        mock_fetch.return_value = {
+            "50": {
+                "name": "Valhalla",
+                "start_time": 1700000000,
+                "finish_time": 1703000000,
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+            }
+        }
+
+        result1 = _get_clan_battle_seasons_metadata()
+        self.assertIn(50, result1)
+        self.assertEqual(result1[50]["name"], "Valhalla")
+        self.assertEqual(cache.get(CLAN_BATTLE_SEASONS_CACHE_KEY)[
+                         50]["ship_tier_max"], 10)
+        mock_fetch.assert_called_once()
+
+        mock_fetch.reset_mock()
+        result2 = _get_clan_battle_seasons_metadata()
+        self.assertEqual(result2[50]["name"], "Valhalla")
+        mock_fetch.assert_not_called()
+
+    @patch("warships.data._fetch_clan_battle_seasons_info")
+    def test_clan_battle_seasons_empty_response_not_cached(self, mock_fetch):
+        from warships.data import _get_clan_battle_seasons_metadata, CLAN_BATTLE_SEASONS_CACHE_KEY
+
+        mock_fetch.return_value = None
+
+        result = _get_clan_battle_seasons_metadata()
+        self.assertEqual(result, {})
+        self.assertIsNone(cache.get(CLAN_BATTLE_SEASONS_CACHE_KEY))
+
+
+@override_settings(CACHES=LOCMEM_CACHES)
+class ClanBattlePlayerStatsCacheTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    @patch("warships.data._fetch_clan_battle_season_stats")
+    def test_player_clan_battle_stats_cached_after_first_call(self, mock_fetch):
+        from warships.data import _get_player_clan_battle_season_stats
+
+        mock_fetch.return_value = {
+            "seasons": [
+                {"season_id": 50, "battles": 12, "wins": 7, "losses": 5}
+            ]
+        }
+
+        result1 = _get_player_clan_battle_season_stats(12345)
+        self.assertEqual(result1[0]["season_id"], 50)
+        mock_fetch.assert_called_once_with(12345)
+
+        mock_fetch.reset_mock()
+        result2 = _get_player_clan_battle_season_stats(12345)
+        self.assertEqual(result2[0]["battles"], 12)
+        mock_fetch.assert_not_called()
+
+
+@override_settings(CACHES=LOCMEM_CACHES)
+class ClanBattleSummaryCacheTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    @patch("warships.data._get_player_clan_battle_season_stats")
+    @patch("warships.data._get_clan_battle_seasons_metadata")
+    def test_clan_battle_summary_cached_after_first_call(self, mock_meta, mock_player_stats):
+        from warships.data import fetch_clan_battle_seasons, _get_clan_battle_summary_cache_key
+
+        clan = Clan.objects.create(
+            clan_id=77, name="CacheClan", tag="CC", members_count=2)
+        Player.objects.create(name="One", player_id=1001, clan=clan)
+        Player.objects.create(name="Two", player_id=1002, clan=clan)
+
+        mock_meta.return_value = {
+            50: {
+                "name": "Valhalla",
+                "label": "S50",
+                "start_date": "2026-01-01",
+                "end_date": "2026-02-01",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+            }
+        }
+        mock_player_stats.side_effect = [
+            [{"season_id": 50, "battles": 10, "wins": 6, "losses": 4}],
+            [{"season_id": 50, "battles": 20, "wins": 9, "losses": 11}],
+        ]
+
+        result1 = fetch_clan_battle_seasons("77")
+        self.assertEqual(result1[0]["participants"], 2)
+        self.assertEqual(result1[0]["roster_battles"], 30)
+        self.assertEqual(result1[0]["roster_wins"], 15)
+        self.assertEqual(result1[0]["roster_win_rate"], 50.0)
+        self.assertIsNotNone(
+            cache.get(_get_clan_battle_summary_cache_key("77")))
+        self.assertEqual(mock_player_stats.call_count, 2)
+
+        mock_player_stats.reset_mock()
+        result2 = fetch_clan_battle_seasons("77")
+        self.assertEqual(result2[0]["roster_battles"], 30)
+        mock_player_stats.assert_not_called()
+
+    @patch("warships.data._get_player_clan_battle_season_stats")
+    @patch("warships.data._get_clan_battle_seasons_metadata")
+    def test_clan_battle_summary_orders_by_season_dates_and_keeps_all_rows(self, mock_meta, mock_player_stats):
+        from warships.data import fetch_clan_battle_seasons
+
+        clan = Clan.objects.create(
+            clan_id=78, name="SortClan", tag="SC", members_count=1)
+        Player.objects.create(name="One", player_id=2001, clan=clan)
+
+        mock_meta.return_value = {
+            301: {
+                "name": "Legacy",
+                "label": "S301",
+                "start_date": "2020-11-27",
+                "end_date": "2020-11-30",
+                "ship_tier_min": 8,
+                "ship_tier_max": 8,
+            },
+            32: {
+                "name": "Pelican",
+                "label": "S32",
+                "start_date": "2025-12-01",
+                "end_date": "2026-02-09",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+            },
+            31: {
+                "name": "Mahi-Mahi",
+                "label": "S31",
+                "start_date": "2025-09-08",
+                "end_date": "2025-10-27",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+            },
+        }
+        mock_player_stats.return_value = [
+            {"season_id": 301, "battles": 7, "wins": 3, "losses": 4},
+            {"season_id": 32, "battles": 12, "wins": 8, "losses": 4},
+            {"season_id": 31, "battles": 10, "wins": 6, "losses": 4},
+        ]
+
+        result = fetch_clan_battle_seasons("78")
+
+        self.assertEqual([row["season_id"] for row in result], [32, 31, 301])
+        self.assertEqual(len(result), 3)
+
+    def test_clan_battle_summary_invalidation_helper_clears_cache(self):
+        from warships.data import _get_clan_battle_summary_cache_key, _invalidate_clan_battle_summary_cache
+
+        cache_key = _get_clan_battle_summary_cache_key("88")
+        cache.set(cache_key, [{"season_id": 50}], 3600)
+        self.assertIsNotNone(cache.get(cache_key))
+
+        _invalidate_clan_battle_summary_cache("88")
+
+        self.assertIsNone(cache.get(cache_key))
