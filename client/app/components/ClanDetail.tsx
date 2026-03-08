@@ -17,8 +17,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
     return (
         <div className="bg-white p-6">
             <div className="mb-3 border-b border-gray-100 pb-3">
-                <p className="text-xs uppercase tracking-wide text-gray-500">Clan</p>
-                <h1 className="mt-1 text-3xl font-semibold tracking-tight text-gray-900">
+                <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
                     [{clan.tag}] {clan.name}
                 </h1>
                 <p className="mt-1 text-sm text-gray-500">

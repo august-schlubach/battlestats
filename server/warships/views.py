@@ -1,6 +1,8 @@
 import logging
 from datetime import timedelta
 from django.core.cache import cache
+from django.db.models import Sum, F, FloatField, Case, When, Value
+from django.db.models.functions import Cast
 from django.http import Http404
 from rest_framework import generics, permissions, viewsets
 from rest_framework import status
@@ -49,6 +51,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
         self.check_object_permissions(self.request, obj)
 
         now = timezone.now()
+
+        # Record the last time this player profile was viewed via the API.
+        obj.last_lookup = now
+        obj.save(update_fields=["last_lookup"])
+        cache.delete('landing:recent_players')
+
         player_refresh_stale = not obj.last_fetch or (
             now - obj.last_fetch) > timedelta(minutes=15)
 
@@ -90,6 +98,14 @@ class ClanViewSet(viewsets.ModelViewSet):
     serializer_class = ClanSerializer
     lookup_field = 'clan_id'
     permission_classes = [permissions.AllowAny]
+
+    def get_object(self):
+        obj = super().get_object()
+        now = timezone.now()
+        obj.last_lookup = now
+        obj.save(update_fields=["last_lookup"])
+        cache.delete('landing:clans')
+        return obj
 
 
 class ClanDetail(generics.RetrieveUpdateDestroyAPIView):
@@ -220,11 +236,20 @@ def clan_data(request, clan_filter: str) -> Response:
 @api_view(["GET"])
 def landing_clans(request) -> Response:
     def _fetch_landing_clans():
-        return list(
-            Clan.objects.exclude(name__isnull=True).exclude(name='').values(
-                'clan_id', 'name', 'tag', 'members_count'
-            ).order_by('name')
-        )
+        qs = Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
+            total_wins=Sum('player__pvp_wins'),
+            total_battles=Sum('player__pvp_battles'),
+        ).annotate(
+            clan_wr=Case(
+                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
+                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
+                default=None,
+                output_field=FloatField(),
+            ),
+        ).values(
+            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
+        ).order_by(F('last_lookup').desc(nulls_last=True), 'name')
+        return list(qs)
 
     data = cache.get_or_set('landing:clans', _fetch_landing_clans, 60)
     return Response(data)
@@ -236,8 +261,22 @@ def landing_players(request) -> Response:
         return list(
             Player.objects.exclude(name='').exclude(
                 last_battle_date__isnull=True
-            ).values('name').order_by('-last_battle_date')
+            ).values('name', 'pvp_ratio').order_by('-last_battle_date')
         )
 
     data = cache.get_or_set('landing:players', _fetch_landing_players, 60)
+    return Response(data)
+
+
+@api_view(["GET"])
+def landing_recent_players(request) -> Response:
+    def _fetch_recent_players():
+        return list(
+            Player.objects.exclude(name='').exclude(
+                last_lookup__isnull=True
+            ).values('name', 'pvp_ratio').order_by('-last_lookup')[:40]
+        )
+
+    data = cache.get_or_set('landing:recent_players',
+                            _fetch_recent_players, 60)
     return Response(data)

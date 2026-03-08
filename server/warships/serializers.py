@@ -99,3 +99,4 @@ class ClanDataSerializer(serializers.Serializer):
 class ClanMemberSerializer(serializers.Serializer):
     name = serializers.CharField()
     is_hidden = serializers.BooleanField()
+    pvp_ratio = serializers.FloatField(allow_null=True)

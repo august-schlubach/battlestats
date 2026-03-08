@@ -1,6 +1,7 @@
 from unittest.mock import patch
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
@@ -8,6 +9,38 @@ from warships.models import Player, Clan
 
 
 class PlayerViewSetTests(TestCase):
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_lookup_updates_last_lookup_timestamp(
+        self,
+        _mock_update_player_task,
+        _mock_update_clan_task,
+        _mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=950,
+            name="LookupClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        player = Player.objects.create(
+            name="LookupPlayer",
+            player_id=9050,
+            clan=clan,
+            last_fetch=now,
+            last_lookup=None,
+        )
+
+        response = self.client.get("/api/player/LookupPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        player.refresh_from_db()
+        self.assertIsNotNone(player.last_lookup)
+        self.assertLess(
+            abs((timezone.now() - player.last_lookup).total_seconds()), 5)
+
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
@@ -156,12 +189,32 @@ class ClanMembersEndpointTests(TestCase):
         response = self.client.get("/api/fetch/clan_members/42/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), [{"name": "MemberOne", "is_hidden": False}])
+        self.assertEqual(response.json(), [
+                         {"name": "MemberOne", "is_hidden": False, "pvp_ratio": None}])
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 
 
 class ApiContractTests(TestCase):
+    def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
+        cache.delete('landing:recent_players')
+        now = timezone.now()
+
+        for index in range(45):
+            Player.objects.create(
+                name=f"RecentPlayer{index}",
+                player_id=10000 + index,
+                last_lookup=now - timedelta(minutes=index),
+            )
+
+        response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 40)
+        self.assertEqual(payload[0]["name"], "RecentPlayer0")
+        self.assertEqual(payload[39]["name"], "RecentPlayer39")
+
     def test_clan_data_rejects_invalid_filter_type(self):
         response = self.client.get("/api/fetch/clan_data/42:invalid")
 
