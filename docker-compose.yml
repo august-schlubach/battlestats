@@ -1,4 +1,16 @@
 services:
+  db:
+    container_name: battlestats-db
+    image: postgres:15
+    environment:
+      POSTGRES_DB: battlestats
+      POSTGRES_USER: django
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-XVIB58E5rWnAsU6}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   rabbitmq:
     container_name: battlestats-rabbitmq
     image: "rabbitmq:3-management"
@@ -19,6 +31,7 @@ services:
     env_file:
       - server/.env
     depends_on:
+      - db
       - rabbitmq
     ports:
       - "8888:8888" # Expose port 8888 for WSGI server
@@ -33,8 +46,8 @@ services:
     ports:
       - "3001:3001"
     volumes:
-      - ./client:/usr/src/app
-    command: npm start
+      - ./client:/app
+    command: npm run dev
 
   task-runner:
     container_name: battlestats-celery
@@ -43,10 +56,11 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./server:/usr/src/app
-    command: celery -A battlestats worker -l INFO --time-limit=600
+    command: celery -A battlestats worker -l INFO --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle
     env_file:
       - server/.env
     depends_on:
+      - db
       - rabbitmq
 
   task-scheduler:
@@ -62,3 +76,6 @@ services:
     depends_on:
       - task-runner
       - rabbitmq
+
+volumes:
+  postgres_data:

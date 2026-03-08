@@ -17,7 +17,7 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
             d3.select(container).selectAll("*").remove();
 
             const tier_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
-                svg_width = 600 - tier_svg_margin.left - tier_svg_margin.right,
+                svg_width = 500 - tier_svg_margin.left - tier_svg_margin.right,
                 svg_height = 300 - tier_svg_margin.top - tier_svg_margin.bottom;
 
             const svg = d3.select("#tier_svg_container")
@@ -52,6 +52,23 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
                         .padding(.1);
                     svg.append("g")
                         .call(d3.axisLeft(y));
+
+                    svg.append("text")
+                        .attr("x", svg_width)
+                        .attr("y", svg_height + 44)
+                        .attr("text-anchor", "end")
+                        .style("font-size", "10px")
+                        .style("fill", "#6b7280")
+                        .text("Random Battles");
+
+                    svg.append("text")
+                        .attr("transform", "rotate(-90)")
+                        .attr("x", -2)
+                        .attr("y", -52)
+                        .attr("text-anchor", "end")
+                        .style("font-size", "10px")
+                        .style("fill", "#6b7280")
+                        .text("Ship Tier");
 
                     const rect_nodes = svg.selectAll(".rect")
                         .data(data)

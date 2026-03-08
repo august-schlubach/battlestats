@@ -130,6 +130,11 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3001',
 ]
 
+CORS_EXPOSE_HEADERS = [
+    'X-Randoms-Updated-At',
+    'X-Battles-Updated-At',
+]
+
 LOGGING_CONFIG = None
 
 # Get loglevel from env
@@ -175,14 +180,28 @@ logging.config.dictConfig({
 
 
 # Celery settings
-CELERY_BROKER_URL = 'amqp://guest:guest@rabbitmq:5672//'  # Use RabbitMQ
-CELERY_RESULT_BACKEND = 'rpc://'  # Use RPC backend for results
+CELERY_BROKER_URL = os.getenv(
+    'CELERY_BROKER_URL', 'amqp://guest:guest@rabbitmq:5672//')
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'rpc://')
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_POOL_LIMIT = int(os.getenv('CELERY_BROKER_POOL_LIMIT', '10'))
+
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_TRACK_STARTED = False
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
+    os.getenv('CELERY_WORKER_MAX_TASKS_PER_CHILD', '200'))
 
 REST_FRAMEWORK = {
+    'EXCEPTION_HANDLER': 'warships.exceptions.custom_exception_handler',
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',
         'rest_framework.renderers.BrowsableAPIRenderer',

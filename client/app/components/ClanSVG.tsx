@@ -1,21 +1,31 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
 interface ClanProps {
     clanId: number;
+    onSelectMember?: (memberName: string) => void;
+    svgWidth?: number;
+    svgHeight?: number;
 }
 
-const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
+const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, svgWidth = 320, svgHeight = 240 }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+
     useEffect(() => {
-        drawClanPlot(clanId);
-    }, [clanId]);
+        if (containerRef.current) {
+            drawClanPlot(clanId);
+        }
+    }, [clanId, svgWidth, svgHeight]);
 
     const drawClanPlot = (clanId: number) => {
-        const margin = { top: 20, right: 30, bottom: 40, left: 40 };
-        const width = 650 - margin.left - margin.right;
-        const height = 500 - margin.top - margin.bottom;
+        const margin = { top: 20, right: 16, bottom: 32, left: 38 };
+        const width = svgWidth - margin.left - margin.right;
+        const height = svgHeight - margin.top - margin.bottom;
 
-        const svg = d3.select("#clan_svg_container")
+        const container = d3.select(containerRef.current);
+        container.selectAll("*").remove();
+
+        const svg = container
             .append("svg")
             .attr("width", width + margin.left + margin.right)
             .attr("height", height + margin.top + margin.bottom)
@@ -25,8 +35,8 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
         // Define the interface for the data structure
         interface ClanData {
             player_name: string;
-            pvp_battles: string;
-            pvp_ratio: string;
+            pvp_battles: number;
+            pvp_ratio: number;
         }
 
         // Declare max, ymax, and ymin outside of fetch
@@ -34,16 +44,30 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
         let ymax = 0;
         let ymin = 0;
 
-        // Cast the element to HTMLInputElement
-        const filterType = (document.querySelector('input[name="filter_type"]:checked') as HTMLInputElement)?.value || 'default';
+        const filterType = 'active';
         const path = `http://localhost:8888/api/fetch/clan_data/${clanId}:${filterType}`;
 
         fetch(path)
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch clan data: ${response.status}`);
+                }
+                return response.json();
+            })
             .then((data: ClanData[]) => {
-                max = d3.max(data, (d: ClanData) => +d.pvp_battles) + 100;
-                ymax = d3.max(data, (d: ClanData) => +d.pvp_ratio) + 5;
-                ymin = d3.min(data, (d: ClanData) => +d.pvp_ratio) - 5;
+                if (!Array.isArray(data) || data.length === 0) {
+                    svg.append("text")
+                        .attr("x", 0)
+                        .attr("y", 16)
+                        .attr("class", "text-sm")
+                        .style("fill", "#6b7280")
+                        .text("No clan chart data available.");
+                    return;
+                }
+
+                max = (d3.max(data, (d: ClanData) => d.pvp_battles) || 0) + 50;
+                ymax = (d3.max(data, (d: ClanData) => d.pvp_ratio) || 0) + 2;
+                ymin = (d3.min(data, (d: ClanData) => d.pvp_ratio) || 0) - 2;
 
                 // Remove any existing elements
                 svg.selectAll("*").remove();
@@ -65,57 +89,62 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
                     .call(d3.axisLeft(y));
 
                 svg.append("text")
-                    .attr("class", "f6 lh-copy axisLabel")
+                    .attr("class", "axisLabel")
+                    .style("font-size", "9px")
+                    .style("fill", "#6b7280")
                     .attr("text-anchor", "end")
                     .attr("x", width)
                     .attr("y", height - 6)
-                    .text("Random Battles");
+                    .text("Battles");
 
                 svg.append("text")
-                    .attr("class", "f6 lh-copy axisLabel")
+                    .attr("class", "axisLabel")
+                    .style("font-size", "9px")
+                    .style("fill", "#6b7280")
                     .attr("text-anchor", "end")
                     .attr("transform", "translate(-10,0)rotate(-90)")
                     .attr("x", 0)
                     .attr("y", 25)
                     .text("Win %");
 
-                svg.append("g")
-                    .selectAll("name")
-                    .data(data)
-                    .enter()
-                    .append("text")
-                    .attr("class", "f6 lh-copy axisLabel")
-                    .style("font-size", "9px")
-                    .attr("text-anchor", "end")
-                    .attr("x", (d: ClanData) => x(+d.pvp_battles) - 9)
-                    .attr("y", (d: ClanData) => y(+d.pvp_ratio) + 4)
-                    .text((d: ClanData) => d.player_name);
-
                 svg.append('g')
                     .selectAll("dot")
                     .data(data)
                     .enter()
-                    .append("a")
-                    .attr("xlink:href", (d: ClanData) => `https://battlestats.io/warships/player/${d.player_name}`)
                     .append("circle")
-                    .attr("cx", (d: ClanData) => x(+d.pvp_battles))
-                    .attr("cy", (d: ClanData) => y(+d.pvp_ratio))
-                    .attr("r", 6)
+                    .attr("cx", (d: ClanData) => x(d.pvp_battles))
+                    .attr("cy", (d: ClanData) => y(d.pvp_ratio))
+                    .attr("r", 4)
                     .style("stroke", "#444")
                     .style("stroke-width", 1.25)
-                    .attr("fill", (d: ClanData) => selectColorByWR(+d.pvp_ratio))
-                    .on('mouseover', (event: MouseEvent, d: ClanData) => {
+                    .style("cursor", onSelectMember ? "pointer" : "default")
+                    .attr("fill", (d: ClanData) => selectColorByWR(d.pvp_ratio))
+                    .on('click', function (this: SVGCircleElement, event: MouseEvent, d: ClanData) {
+                        if (onSelectMember) {
+                            onSelectMember(d.player_name);
+                        }
+                    })
+                    .on('mouseover', function (this: SVGCircleElement, event: MouseEvent, d: ClanData) {
                         showDetails(d);
                         d3.select(this).transition()
                             .duration(50)
                             .attr('fill', '#bcbddc');
                     })
-                    .on('mouseout', (event: MouseEvent, d: ClanData) => {
+                    .on('mouseout', function (this: SVGCircleElement, event: MouseEvent, d: ClanData) {
                         hideDetails();
                         d3.select(this).transition()
                             .duration(50)
-                            .attr("fill", (d: ClanData) => selectColorByWR(+d.pvp_ratio));
+                            .attr("fill", selectColorByWR(d.pvp_ratio));
                     });
+            })
+            .catch(() => {
+                svg.selectAll("*").remove();
+                svg.append("text")
+                    .attr("x", 0)
+                    .attr("y", 16)
+                    .attr("class", "text-sm")
+                    .style("fill", "#6b7280")
+                    .text("Unable to load clan chart.");
             });
 
         const showDetails = (d: ClanData) => {
@@ -126,18 +155,21 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
             detailGroup.append("text")
                 .attr("x", startX)
                 .attr("y", startY)
+                .style("font-size", "11px")
                 .attr("font-weight", "700")
                 .text(d.player_name);
             detailGroup.append("text")
                 .attr("x", startX)
-                .attr("y", startY + 20)
+                .attr("y", startY + 16)
+                .style("font-size", "10px")
                 .attr("font-weight", "400")
                 .text(d.pvp_battles + " Battles");
             detailGroup.append("text")
-                .attr("x", startX + 110)
-                .attr("y", startY + 20)
+                .attr("x", startX + 90)
+                .attr("y", startY + 16)
+                .style("font-size", "10px")
                 .attr("font-weight", "400")
-                .text(d.pvp_ratio + "% Win Rate");
+                .text(d.pvp_ratio + "% WR");
         };
 
         const hideDetails = () => {
@@ -160,7 +192,7 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
                 return "#fed976"; // average
             } else if (winRatio >= 45) {
                 return "#fd8d3c"; // below average
-            } else if (winRatio >= 40 && winRatio < 35) {
+            } else if (winRatio >= 40) {
                 return "#e6550d"; // bad
             } else {
                 return "#a50f15"; // super bad
@@ -168,7 +200,7 @@ const ClanSVG: React.FC<ClanProps> = ({ clanId }) => {
         };
     };
 
-    return <div id="clan_svg_container"></div>;
+    return <div ref={containerRef}></div>;
 };
 
 export default ClanSVG;

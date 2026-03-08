@@ -1,10 +1,18 @@
 import logging
-from django.http import Http404, JsonResponse
+from datetime import timedelta
+from django.http import Http404
 from rest_framework import generics, permissions, viewsets
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.utils import timezone
 from warships.models import Player, Clan, Ship
+from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
-    TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer
-from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data
+    TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
+    RankedDataSerializer
+from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, \
+    fetch_ranked_data
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
@@ -19,19 +27,53 @@ class PlayerViewSet(viewsets.ModelViewSet):
         lookup_field_value = self.kwargs[self.lookup_field]
         try:
             obj = Player.objects.get(name__iexact=lookup_field_value)
+            if not obj.clan:
+                from warships.data import update_player_data
+                update_player_data(player=obj, force_refresh=True)
+                obj.refresh_from_db()
         except Player.DoesNotExist:
-            raise Http404("Player matching query does not exist.")
+            player_id = _fetch_player_id_by_name(lookup_field_value)
+            if not player_id:
+                raise Http404("Player matching query does not exist.")
+
+            obj, _ = Player.objects.get_or_create(
+                player_id=int(player_id),
+                defaults={"name": lookup_field_value.strip()}
+            )
+
+            from warships.data import update_player_data
+            update_player_data(player=obj, force_refresh=True)
+            obj.refresh_from_db()
 
         self.check_object_permissions(self.request, obj)
 
-        update_player_data_task.delay(player_id=obj.player_id)
+        now = timezone.now()
+        player_refresh_stale = not obj.last_fetch or (
+            now - obj.last_fetch) > timedelta(minutes=15)
+
+        # When clan is still missing, force a refresh task so we do not get
+        # stuck on fresh-but-incomplete player records.
+        if not obj.clan:
+            update_player_data_task.delay(
+                player_id=obj.player_id,
+                force_refresh=True,
+            )
+        elif player_refresh_stale:
+            update_player_data_task.delay(player_id=obj.player_id)
 
         if obj.clan:
             clan = obj.clan
-            logging.info(
-                f'Updating clan data: {obj.name} : {clan.name} {obj.player_id}')
-            update_clan_data_task.delay(clan_id=clan.clan_id)
-            update_clan_members_task.delay(clan_id=clan.clan_id)
+            clan_refresh_stale = not clan.last_fetch or (
+                now - clan.last_fetch) > timedelta(hours=12)
+            clan_members_incomplete = not clan.members_count or clan.player_set.count() < clan.members_count
+
+            if clan_refresh_stale:
+                logging.info(
+                    f'Updating clan data: {obj.name} : {clan.name} {obj.player_id}')
+                update_clan_data_task.delay(clan_id=clan.clan_id)
+
+            if clan_refresh_stale or clan_members_incomplete:
+                update_clan_members_task.delay(clan_id=clan.clan_id)
         return obj
 
 
@@ -67,40 +109,123 @@ class ShipDetail(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.AllowAny]
 
 
-def tier_data(request, player_id: str) -> JsonResponse:
+def _validated_list_response(data, serializer_class):
+    serializer = serializer_class(data=data, many=True)
+    serializer.is_valid(raise_exception=True)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+def tier_data(request, player_id: str) -> Response:
     data = fetch_tier_data(player_id)
-    serializer = TierDataSerializer(data=data, many=True)
-    if serializer.is_valid():
-        return JsonResponse(serializer.data, safe=False)
-    return JsonResponse(serializer.errors, status=400)
+    return _validated_list_response(data, TierDataSerializer)
 
 
-def activity_data(request, player_id: str) -> JsonResponse:
+@api_view(["GET"])
+def activity_data(request, player_id: str) -> Response:
     data = fetch_activity_data(player_id)
-    serializer = ActivityDataSerializer(data=data, many=True)
-    if serializer.is_valid():
-        return JsonResponse(serializer.data, safe=False)
-    return JsonResponse(serializer.errors, status=400)
+    return _validated_list_response(data, ActivityDataSerializer)
 
 
-def type_data(request, player_id: str) -> JsonResponse:
+@api_view(["GET"])
+def type_data(request, player_id: str) -> Response:
     data = fetch_type_data(player_id)
-    serializer = TypeDataSerializer(data=data, many=True)
-    if serializer.is_valid():
-        return JsonResponse(serializer.data, safe=False)
-    return JsonResponse(serializer.errors, status=400)
+    return _validated_list_response(data, TypeDataSerializer)
 
 
-def randoms_data(request, player_id: str) -> JsonResponse:
-    data = fetch_randoms_data(player_id)
-    serializer = RandomsDataSerializer(data=data, many=True)
-    if serializer.is_valid():
-        return JsonResponse(serializer.data, safe=False)
-    return JsonResponse(serializer.errors, safe=False, status=400)
+@api_view(["GET"])
+def randoms_data(request, player_id: str) -> Response:
+    fetch_all = request.query_params.get('all', '').lower() in ('true', '1')
+
+    if fetch_all:
+        # Return all ships from battles_json (sorted by pvp_battles desc)
+        # while still triggering any staleness refresh via fetch_randoms_data
+        fetch_randoms_data(player_id)
+        player = Player.objects.filter(player_id=player_id).first()
+        if not player or not player.battles_json:
+            return Response([])
+
+        import pandas as pd
+        df = pd.DataFrame(player.battles_json)
+        df = df.filter(['pvp_battles', 'ship_name', 'ship_type',
+                        'ship_tier', 'win_ratio', 'wins'])
+        try:
+            df = df.sort_values(by='pvp_battles', ascending=False)
+        except KeyError:
+            pass
+        data = df.to_dict(orient='records')
+    else:
+        data = fetch_randoms_data(player_id)
+
+    response = _validated_list_response(data, RandomsDataSerializer)
+
+    player = Player.objects.filter(player_id=player_id).first()
+    if player and player.randoms_updated_at:
+        response["X-Randoms-Updated-At"] = player.randoms_updated_at.isoformat()
+    if player and player.battles_updated_at:
+        response["X-Battles-Updated-At"] = player.battles_updated_at.isoformat()
+
+    return response
 
 
-def clan_members(request, clan_id: str) -> JsonResponse:
-    clan = Clan.objects.get(clan_id=clan_id)
-    members = clan.player_set.all()
+@api_view(["GET"])
+def ranked_data(request, player_id: str) -> Response:
+    data = fetch_ranked_data(player_id)
+    return _validated_list_response(data, RankedDataSerializer)
+
+
+@api_view(["GET"])
+def clan_members(request, clan_id: str) -> Response:
+    if not clan_id or clan_id in {"null", "None", "undefined"}:
+        return Response([])
+
+    try:
+        clan = Clan.objects.get(clan_id=clan_id)
+    except Clan.DoesNotExist:
+        return Response([])
+
+    from warships.data import update_clan_data, update_clan_members
+    if not clan.members_count:
+        update_clan_data(clan_id=clan_id)
+        clan.refresh_from_db()
+
+    members = clan.player_set.exclude(name='').all()
+    if not members.exists() or (clan.members_count and members.count() < clan.members_count):
+        update_clan_members(clan_id=clan_id)
+        members = clan.player_set.exclude(name='').all()
+
     serializer = ClanMemberSerializer(members, many=True)
-    return JsonResponse(serializer.data, safe=False)
+    return Response(serializer.data)
+
+
+@api_view(["GET"])
+def clan_data(request, clan_filter: str) -> Response:
+    if ':' in clan_filter:
+        clan_id, filter_type = clan_filter.split(':', 1)
+    else:
+        clan_id, filter_type = clan_filter, 'active'
+
+    if filter_type not in {'active', 'all'}:
+        return Response(
+            {'detail': "filter_type must be one of: 'active', 'all'"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type)
+    return _validated_list_response(data, ClanDataSerializer)
+
+
+@api_view(["GET"])
+def landing_clans(request) -> Response:
+    clans = Clan.objects.exclude(name__isnull=True).exclude(name='').values(
+        'clan_id', 'name', 'tag', 'members_count'
+    ).order_by('name')
+    return Response(list(clans))
+
+
+@api_view(["GET"])
+def landing_players(request) -> Response:
+    players = Player.objects.exclude(name='').values(
+        'name'
+    ).order_by('name')
+    return Response(list(players))

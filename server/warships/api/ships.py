@@ -9,6 +9,7 @@ logging.basicConfig(level=logging.INFO)
 
 BASE_URL = "https://api.worldofwarships.com/wows/"
 APP_ID = os.environ.get('WG_APP_ID')
+REQUEST_TIMEOUT_SECONDS = 20
 
 
 def _fetch_ship_stats_for_player(player_id: str) -> Dict:
@@ -24,8 +25,9 @@ def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     data_dict = {}
     try:
         data_dict = data[str(player_id)]
-    except KeyError:
-        keys_to_print = list(data.keys())[:10]
+    except (KeyError, TypeError):
+        keys_to_print = list(data.keys())[
+            :10] if isinstance(data, dict) else []
         logging.error(
             f'Unexpected response while loading ship data: {keys_to_print}')
 
@@ -43,7 +45,8 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
         return None
 
     ship, created = Ship.objects.get_or_create(ship_id=clean_ship_id)
-    if created:
+    needs_refresh = created or not ship.name or not ship.ship_type or ship.tier is None
+    if needs_refresh:
         params = {
             "application_id": APP_ID,
             "ship_id": ship_id
@@ -59,7 +62,10 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
             ship.ship_type = ship_data.get('type')
             ship.tier = ship_data.get('tier')
             ship.save()
-            logging.info(f'Created ship {ship.name}')
+            if created:
+                logging.info(f'Created ship {ship.name}')
+            else:
+                logging.info(f'Refreshed ship metadata for {ship.name}')
         else:
             logging.error(
                 f"ERROR: Null or invalid response data for ship_id: {ship_id}")
@@ -71,8 +77,21 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
 
 def _make_api_request(endpoint: str, params: Dict) -> Optional[Dict]:
     """Helper function to make API requests and handle responses."""
-    response = requests.get(BASE_URL + endpoint, params=params)
-    data = response.json()
+    try:
+        response = requests.get(
+            BASE_URL + endpoint,
+            params=params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as error:
+        logging.error(
+            f"HTTP request failed for endpoint '{endpoint}': {error}")
+        return None
+    except ValueError as error:
+        logging.error(f"Invalid JSON from endpoint '{endpoint}': {error}")
+        return None
 
     if data.get('status') != 'ok':
         logging.error(f"Error in response: {data}")

@@ -1,78 +1,89 @@
 from __future__ import absolute_import, unicode_literals
+import logging
+
 from battlestats.celery import app
-from warships.models import Player
 
 
-@app.task(time_limit=600)
+logger = logging.getLogger(__name__)
+TASK_OPTS = {
+    "time_limit": 600,
+    "soft_time_limit": 540,
+    "ignore_result": True,
+}
+
+
+@app.task(**TASK_OPTS)
 def update_clan_data_task(clan_id):
     from warships.data import update_clan_data
-    print(
-        f'\n\nStarting async task: update_clan_data_task for clan_id: {clan_id}\n\n')
+    logger.info("Starting update_clan_data_task for clan_id=%s", clan_id)
     update_clan_data(clan_id=clan_id)
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def update_clan_members_task(clan_id):
     from warships.data import update_clan_members
-    print(
-        f'\n\nStarting async task: update_clan_members_task for clan_id: {clan_id}\n\n')
+    logger.info("Starting update_clan_members_task for clan_id=%s", clan_id)
     update_clan_members(clan_id=clan_id)
 
 
-@app.task(time_limit=600)
-def update_player_data_task(player_id):
+@app.task(**TASK_OPTS)
+def update_player_data_task(player_id, force_refresh=False):
     from warships.data import update_player_data
-    print(
-        f'\n\nStarting async task: update_player_data_task for player_id: {player_id}\n\n')
+    from warships.models import Player
+
+    logger.info(
+        "Starting update_player_data_task for player_id=%s force_refresh=%s",
+        player_id,
+        force_refresh,
+    )
     player = Player.objects.get(player_id=player_id)
-    update_player_data(player=player)
+    update_player_data(player=player, force_refresh=force_refresh)
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def preload_battles_json_task():
     from warships.data import preload_battles_json
-    print('\n\nPreloading battles JSON\n\n')
+    logger.info("Starting preload_battles_json_task")
     preload_battles_json()
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def preload_activity_data_task():
     from warships.data import preload_activity_data
-    print('\n\nPreloading activity JSON\n\n')
+    logger.info("Starting preload_activity_data_task")
     preload_activity_data()
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def update_randoms_data_task(player_id):
     from warships.data import update_randoms_data
-    print(
-        f'\n\nUpdating randoms JSON for player_id: {player_id}\n\n')
+    logger.info("Starting update_randoms_data_task for player_id=%s", player_id)
     update_randoms_data(player_id=player_id)
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def update_tiers_data_task(player_id):
     from warships.data import update_tiers_data
-    print('\n\nUpdating tiers JSON\n\n')
+    logger.info("Starting update_tiers_data_task for player_id=%s", player_id)
     update_tiers_data(player_id=player_id)
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def update_snapshot_data_task(player_id):
     from warships.data import update_snapshot_data
-    print(f'\n\nUpdating snapshot JSON for {player_id} \n\n')
+    logger.info("Starting update_snapshot_data_task for player_id=%s", player_id)
     update_snapshot_data(player_id=player_id)
 
 
-@app.task(time_limit=600)
-def update_activity_data_task(chain_rv, player_id):
+@app.task(**TASK_OPTS)
+def update_activity_data_task(player_id):
     from warships.data import update_activity_data
-    print(f'\n\nUpdating activity JSON for {player_id} \n\n')
+    logger.info("Starting update_activity_data_task for player_id=%s", player_id)
     update_activity_data(player_id=player_id)
 
 
-@app.task(time_limit=600)
+@app.task(**TASK_OPTS)
 def update_type_data_task(player_id):
     from warships.data import update_type_data
-    print('\n\nUpdating type JSON\n\n')
+    logger.info("Starting update_type_data_task for player_id=%s", player_id)
     update_type_data(player_id=player_id)

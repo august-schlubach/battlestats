@@ -1,47 +1,82 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import * as d3 from 'd3';
 
 interface RandomsSVGProps {
     playerId: number;
 }
 
-const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
-    const [data, setData] = useState([]);
+interface RandomsRow {
+    pvp_battles: number;
+    ship_name: string;
+    ship_type: string;
+    ship_tier: number;
+    win_ratio: number;
+    wins: number;
+}
 
+const TOP_N = 20;
+
+const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
+    const [allShips, setAllShips] = useState<RandomsRow[]>([]);
+    const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+    const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
+    const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
+    const [battlesUpdatedAt, setBattlesUpdatedAt] = useState<string | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Fetch ALL ships once
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/randoms_data/${playerId}`);
-                const result = await response.json();
-                setData(result);
+                const response = await fetch(`http://localhost:8888/api/fetch/randoms_data/${playerId}/?all=true`);
+                const result: RandomsRow[] = await response.json();
+                setAllShips(result);
+                setRandomsUpdatedAt(response.headers.get('X-Randoms-Updated-At'));
+                setBattlesUpdatedAt(response.headers.get('X-Battles-Updated-At'));
+
+                const types = Array.from(new Set(result.map((r) => r.ship_type)));
+                const tiers = Array.from(new Set(result.map((r) => r.ship_tier))).sort((a, b) => b - a);
+                setSelectedTypes(types);
+                setSelectedTiers(tiers);
             } catch (error) {
                 console.error('Error fetching data:', error);
             }
         };
-
         fetchData();
     }, [playerId]);
 
-    useEffect(() => {
-        if (data.length > 0) {
-            d3.select("#randoms_svg_container").selectAll("*").remove();
-            drawBattlePlot(data);
-        }
-    }, [data]);
+    // Filter, sort, and take top N
+    const chartData = useMemo(() => {
+        const filtered = allShips.filter(
+            (row) => selectedTypes.includes(row.ship_type) && selectedTiers.includes(row.ship_tier)
+        );
+        return filtered
+            .sort((a, b) => b.pvp_battles - a.pvp_battles)
+            .slice(0, TOP_N);
+    }, [allShips, selectedTypes, selectedTiers]);
 
-    const drawBattlePlot = (data: any) => {
+    // Draw chart when data changes
+    useEffect(() => {
+        if (!containerRef.current) return;
+        d3.select(containerRef.current).selectAll("*").remove();
+        if (chartData.length > 0) {
+            drawBattlePlot(chartData);
+        }
+    }, [chartData]);
+
+    const drawBattlePlot = (data: RandomsRow[]) => {
         const margin = { top: 10, right: 20, bottom: 30, left: 140 };
-        const width = 600 - margin.left - margin.right;
+        const width = 500 - margin.left - margin.right;
         const height = 500 - margin.top - margin.bottom;
 
-        const svg = d3.select("#randoms_svg_container")
+        const svg = d3.select(containerRef.current)
             .append("svg")
             .attr("width", width + margin.left + margin.right)
             .attr("height", height + margin.top + margin.bottom)
             .append("g")
             .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
-        const max = Math.max(d3.max(data, (d: any) => +d.pvp_battles), 15);
+        const max = Math.max(d3.max(data, (d: RandomsRow) => +d.pvp_battles) || 0, 15);
 
         // X axis
         const x = d3.scaleLinear()
@@ -57,7 +92,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
         // Y axis
         const y = d3.scaleBand()
             .range([0, height])
-            .domain(data.map((d: any) => d.ship_name))
+            .domain(data.map((d) => d.ship_name))
             .padding(.1);
         svg.append("g")
             .call(d3.axisLeft(y));
@@ -77,35 +112,35 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
 
         nodes.append("rect")
             .attr("x", x(0))
-            .attr("y", (d: any) => y(d.ship_name) + 3)
-            .attr("width", (d: any) => x(d.pvp_battles))
+            .attr("y", (d: RandomsRow) => (y(d.ship_name) ?? 0) + 3)
+            .attr("width", (d: RandomsRow) => x(d.pvp_battles))
             .attr("height", (y.bandwidth() * .7))
             .attr("fill", "#d9d9d9");
 
         nodes.append("rect")
             .attr("x", x(0))
-            .attr("y", (d: { ship_name: string }) => y(d.ship_name))
-            .attr("width", (d: { wins: number }) => x(d.wins))
+            .attr("y", (d: RandomsRow) => y(d.ship_name) ?? 0)
+            .attr("width", (d: RandomsRow) => x(d.wins))
             .attr("height", y.bandwidth())
             .style("stroke", "#444")
             .style("stroke-width", 0.75)
-            .attr("fill", (d: { win_ratio: number }) => selectColorByWr(d.win_ratio))
-            .on('mouseover', (event: MouseEvent, d: { win_ratio: number }) => {
+            .attr("fill", (d: RandomsRow) => selectColorByWr(d.win_ratio))
+            .on('mouseover', function (this: SVGRectElement, event: MouseEvent, d: RandomsRow) {
                 showDetails(d, svg);
                 d3.select(this).transition()
                     .duration(50)
                     .attr('fill', '#bcbddc');
             })
-            .on('mouseout', (event: MouseEvent, d: { win_ratio: number }) => {
+            .on('mouseout', function (this: SVGRectElement, event: MouseEvent, d: RandomsRow) {
                 hideDetails(svg);
                 d3.select(this).transition()
                     .duration(50)
-                    .attr("fill", (d: { win_ratio: number }) => selectColorByWr(d.win_ratio));
+                    .attr("fill", selectColorByWr(d.win_ratio));
             });
     };
 
     const showDetails = (d: any, svg: any) => {
-        const start_x = 300, start_y = 320, x_offset = 10;
+        const start_x = 200, start_y = 320, x_offset = 10;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
         const detailGroup = svg.append("g")
@@ -146,11 +181,104 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId }) => {
         if (win_ratio >= 0.52) return "#a1d99b"; // good
         if (win_ratio >= 0.50) return "#fed976"; // average
         if (win_ratio >= 0.45) return "#fd8d3c"; // below average
-        if (win_ratio >= 0.40 && win_ratio < 0.35) return "#e6550d"; // bad
+        if (win_ratio >= 0.40) return "#e6550d"; // bad
         return "#a50f15"; // super bad
     };
 
-    return <div id="randoms_svg_container"></div>;
+    const availableTypes = Array.from(new Set(allShips.map((row) => row.ship_type)));
+    const availableTiers = Array.from(new Set(allShips.map((row) => row.ship_tier))).sort((a, b) => b - a);
+
+    const toggleType = (shipType: string) => {
+        setSelectedTypes((current) =>
+            current.includes(shipType)
+                ? current.filter((value) => value !== shipType)
+                : [...current, shipType]
+        );
+    };
+
+    const toggleTier = (tier: number) => {
+        setSelectedTiers((current) =>
+            current.includes(tier)
+                ? current.filter((value) => value !== tier)
+                : [...current, tier]
+        );
+    };
+
+    const getFreshnessStatus = (timestamp: string | null): 'fresh' | 'stale' | 'unknown' => {
+        if (!timestamp) {
+            return 'unknown';
+        }
+
+        const updatedAt = new Date(timestamp).getTime();
+        if (Number.isNaN(updatedAt)) {
+            return 'unknown';
+        }
+
+        const ageMs = Date.now() - updatedAt;
+        return ageMs <= 24 * 60 * 60 * 1000 ? 'fresh' : 'stale';
+    };
+
+    const formatTimestamp = (timestamp: string | null): string => {
+        if (!timestamp) {
+            return 'unknown';
+        }
+
+        const parsed = new Date(timestamp);
+        if (Number.isNaN(parsed.getTime())) {
+            return 'unknown';
+        }
+
+        return parsed.toLocaleString();
+    };
+
+    const randomsFreshness = getFreshnessStatus(randomsUpdatedAt);
+
+    return (
+        <div>
+            <div className="mb-2 text-xs text-gray-600">
+                Randoms data last refreshed: {formatTimestamp(randomsUpdatedAt)}
+                {' · '}
+                <span className={randomsFreshness === 'fresh' ? 'text-green-700' : randomsFreshness === 'stale' ? 'text-red-700' : 'text-gray-500'}>
+                    {randomsFreshness === 'fresh' ? 'fresh' : randomsFreshness === 'stale' ? 'stale' : 'unknown'}
+                </span>
+                {battlesUpdatedAt ? ` (battles cache: ${formatTimestamp(battlesUpdatedAt)})` : ''}
+            </div>
+            <div className="mb-2 text-sm">
+                <div className="mb-1 font-semibold">Ship Type</div>
+                <div className="flex flex-wrap gap-3">
+                    {availableTypes.map((shipType) => (
+                        <label key={shipType} className="flex items-center gap-1">
+                            <input
+                                type="checkbox"
+                                checked={selectedTypes.includes(shipType)}
+                                onChange={() => toggleType(shipType)}
+                            />
+                            <span>{shipType}</span>
+                        </label>
+                    ))}
+                </div>
+                <div className="mt-2 mb-1 font-semibold">Tier</div>
+                <div className="flex flex-wrap gap-3">
+                    {availableTiers.map((tier) => (
+                        <label key={tier} className="flex items-center gap-1">
+                            <input
+                                type="checkbox"
+                                checked={selectedTiers.includes(tier)}
+                                onChange={() => toggleTier(tier)}
+                            />
+                            <span>{tier}</span>
+                        </label>
+                    ))}
+                </div>
+            </div>
+
+            {chartData.length === 0 ? (
+                <p className="text-sm text-gray-500">No ships match the selected filters.</p>
+            ) : null}
+
+            <div ref={containerRef}></div>
+        </div>
+    );
 };
 
 export default RandomsSVG;

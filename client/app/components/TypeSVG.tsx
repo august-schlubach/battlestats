@@ -17,8 +17,8 @@ const TypeSVG: React.FC<TypeSVGProps> = ({ playerId }) => {
                 container.removeChild(container.firstChild);
             }
 
-            const type_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
-                type_svg_width = 600 - type_svg_margin.left - type_svg_margin.right,
+            const type_svg_margin = { top: 10, right: 20, bottom: 50, left: 96 },
+                type_svg_width = 500 - type_svg_margin.left - type_svg_margin.right,
                 type_svg_height = 170 - type_svg_margin.top - type_svg_margin.bottom;
 
             const type_svg = d3.select("#type_svg_container")
@@ -53,6 +53,23 @@ const TypeSVG: React.FC<TypeSVGProps> = ({ playerId }) => {
                         .padding(.1);
                     type_svg.append("g")
                         .call(d3.axisLeft(y));
+
+                    type_svg.append("text")
+                        .attr("x", type_svg_width)
+                        .attr("y", type_svg_height + 44)
+                        .attr("text-anchor", "end")
+                        .style("font-size", "10px")
+                        .style("fill", "#6b7280")
+                        .text("Random Battles");
+
+                    type_svg.append("text")
+                        .attr("transform", "rotate(-90)")
+                        .attr("x", -2)
+                        .attr("y", -76)
+                        .attr("text-anchor", "end")
+                        .style("font-size", "10px")
+                        .style("fill", "#6b7280")
+                        .text("Ship Type");
 
                     const rect_nodes = type_svg.selectAll(".rect")
                         .data(data)

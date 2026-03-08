@@ -1,15 +1,12 @@
-from celery import chain
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import pandas as pd
 import logging
-from django.http import JsonResponse
-from datetime import datetime, timedelta
 from warships.models import Player, Snapshot, Clan
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
-from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids
-from warships.tasks import update_randoms_data_task, update_tiers_data_task, update_snapshot_data_task, update_activity_data_task, update_type_data_task
+from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player
+from warships.tasks import update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -99,7 +96,7 @@ def fetch_tier_data(player_id: str) -> list:
         if not player.battles_json:
             update_battle_data(player_id)
     except Player.DoesNotExist:
-        return JsonResponse({'error': 'Player not found'}, status=404)
+        return []
 
     player = Player.objects.get(player_id=player_id)
 
@@ -144,101 +141,91 @@ def update_tiers_data(player_id: str) -> list:
 
 def update_snapshot_data(player_id: int) -> None:
     """
-    Updates the snapshot data for a given player.
+    Records today's cumulative PvP stats as a Snapshot and computes
+    daily interval_battles / interval_wins from successive snapshots.
 
-    This function fetches the latest snapshot data for a player from an external API if the cached data is older than a day.
-    The fetched data is then processed and saved back to the player's record in the database.
-
-    Args:
-        player_id (int): The ID of the player whose snapshot data needs to be updated.
-
-    Returns:
-        None
+    The WoWS account/statsbydate endpoint no longer returns pvp data,
+    so we use the Player model's pvp_battles / pvp_wins (kept current
+    by update_player_data via account/info) as today's cumulative values.
     """
     player = Player.objects.get(player_id=player_id)
     player.last_lookup = datetime.now()
     player.save()
 
-    try:
-        last_snapshot = Snapshot.objects.filter(player=player).latest('date')
-        last_fetch_date = last_snapshot.last_fetch
-    except Snapshot.DoesNotExist:
-        last_fetch_date = datetime.now() - timedelta(days=50)
+    # Ensure the player model has fresh stats
+    from warships.data import update_player_data
+    update_player_data(player, force_refresh=True)
+    player.refresh_from_db()
 
-    time_since_last_fetch = datetime.now() - last_fetch_date
-    if time_since_last_fetch.days < 1:
-        hours, remainder = divmod(time_since_last_fetch.seconds, 3600)
-        minutes, _ = divmod(remainder, 60)
-        logging.info(
-            f'Fresh snapshot fetched {hours:02}h {minutes:02}m ago')
-        return
-    else:
-        logging.info(
-            f'Old snapshot data: Fetched {time_since_last_fetch.days} days ago')
-        logging.info('Fetching new snapshot data')
-
-    today = datetime.now()
+    today = datetime.now().date()
     start_date = today - timedelta(days=28)
-    dates = [(start_date + timedelta(days=i)).strftime("%Y%m%d")
-             for i in range(29)]
 
-    for n in range(4):
-        week = [dates[x + n * 7] for x in range(1, 8)]
-        week_str = ','.join(week)
-        stats = _fetch_snapshot_data(player.player_id, week_str)
+    # Purge stale zero-value snapshots left by the broken statsbydate API
+    Snapshot.objects.filter(
+        player=player, battles=0, wins=0
+    ).exclude(date=today).delete()
 
-        if stats:
-            # this means that the player has battles during this week
-            logging.info(
-                f'Fetched {len(stats)} snapshots for {player.name}')
-            for date_str, stat in stats.items():
-                output_date = datetime.strptime(
-                    date_str, '%Y%m%d').strftime('%Y-%m-%d')
-                snapshot, created = Snapshot.objects.get_or_create(
-                    player=player, date=output_date)
-                snapshot.battles = stat['battles']
-                snapshot.wins = stat['wins']
-                snapshot.survived_battles = stat['survived_battles']
-                snapshot.battle_type = stat['battle_type']
-                snapshot.last_fetch = datetime.now()
-                snapshot.save()
+    # Upsert today's snapshot with current cumulative totals
+    snapshot, _ = Snapshot.objects.get_or_create(player=player, date=today)
+    snapshot.battles = player.pvp_battles or 0
+    snapshot.wins = player.pvp_wins or 0
+    snapshot.last_fetch = datetime.now()
+    snapshot.save()
+
+    # Recompute intervals for the whole 28-day window
+    snapshots = list(Snapshot.objects.filter(
+        player=player, date__gte=start_date, date__lte=today).order_by('date'))
+
+    previous_battles = None
+    previous_wins = None
+    for snap in snapshots:
+        if previous_battles is None or previous_wins is None:
+            snap.interval_battles = 0
+            snap.interval_wins = 0
         else:
-            # create a snapshot with 0 battles for this week
-            logging.info(
-                f'No battles found for {player.name} in week {n+1}')
-            # make an empty snapshot for the player
-            snapshot, created = Snapshot.objects.get_or_create(
-                player=player, date=(today - timedelta(days=7 * n)).date())
-            snapshot.battles = 0
-            snapshot.wins = 0
-            snapshot.survived_battles = 0
-            snapshot.battle_type = 'pvp'
-            snapshot.last_fetch = datetime.now()
-            snapshot.save()
+            snap.interval_battles = max(
+                0, int(snap.battles or 0) - int(previous_battles or 0))
+            snap.interval_wins = max(
+                0, int(snap.wins or 0) - int(previous_wins or 0))
 
-    snapshots = Snapshot.objects.filter(
-        player=player, date__gte=start_date).order_by('date')
-
-    for i in range(1, len(snapshots)):
-        snapshots[i].interval_battles = snapshots[i].battles - \
-            snapshots[i-1].battles
-        snapshots[i].interval_wins = snapshots[i].wins - snapshots[i-1].wins
-        snapshots[i].save()
+        snap.save(update_fields=['interval_battles', 'interval_wins'])
+        previous_battles = snap.battles
+        previous_wins = snap.wins
 
     logging.info(f'Updated snapshot data for player {player.name}')
 
 
 def fetch_activity_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
+
+    def _is_empty_activity(activity_rows: Any) -> bool:
+        if not isinstance(activity_rows, list) or not activity_rows:
+            return True
+        return all((row.get('battles', 0) or 0) == 0 for row in activity_rows)
+
+    def _looks_like_cumulative_spike(activity_rows: Any) -> bool:
+        if not isinstance(activity_rows, list) or not activity_rows:
+            return False
+        non_zero_days = [row for row in activity_rows if (
+            row.get('battles', 0) or 0) > 0]
+        total_battles = sum((row.get('battles', 0) or 0)
+                            for row in activity_rows)
+        return len(non_zero_days) == 1 and total_battles > 1000
+
     if player.activity_json:
         logging.info(f'Activity data exists for player {player.name}')
-        if not player.activity_updated_at or datetime.now() - player.activity_updated_at > timedelta(minutes=15):
+        is_stale = not player.activity_updated_at or datetime.now(
+        ) - player.activity_updated_at > timedelta(minutes=15)
+        is_empty = _is_empty_activity(player.activity_json)
+        is_cumulative_spike = _looks_like_cumulative_spike(
+            player.activity_json)
+
+        if is_stale or is_empty or is_cumulative_spike:
             logging.info(
-                f'Activity data exists but fetch datetime is empty or outdated: ASYNC update started for {player.name} : {player.player_id}')
-            chain(
-                update_snapshot_data_task.s(player.player_id) |
-                update_activity_data_task.s(player.player_id)
-            ).apply_async()
+                f'Activity data refresh required (stale={is_stale}, empty={is_empty}, cumulative_spike={is_cumulative_spike}) for {player.name} : {player.player_id}')
+            update_snapshot_data(player.player_id)
+            update_activity_data(player.player_id)
+            player.refresh_from_db()
         else:
             logging.info(
                 f'Activity fetch datetime is fresh: returning cached data for player {player.name}')
@@ -253,24 +240,20 @@ def fetch_activity_data(player_id: str) -> list:
 def update_activity_data(player_id: int) -> None:
     player = Player.objects.get(player_id=player_id)
     month = []
-    data = {
-        "date": datetime.now().date().strftime("%Y-%m-%d"),
-        "battles": 0,
-        "wins": 0
-    }
-    for i in range(29):
-        date = (datetime.now() - timedelta(28) +
-                timedelta(days=i)).date().strftime("%Y-%m-%d")
-        data["date"] = date
+    snapshots = list(Snapshot.objects.filter(player=player).order_by('date'))
 
-        snap = Snapshot.objects.filter(player=player, date=date).first()
-        if snap:
-            data["battles"] = snap.interval_battles or 0
-            data["wins"] = snap.interval_wins or 0
-        else:
-            data["battles"] = 0
-            data["wins"] = 0
-        month.extend([data.copy()])
+    latest_snapshot_by_date = {snap.date: snap for snap in snapshots}
+
+    for i in range(29):
+        date = (datetime.now() - timedelta(28) + timedelta(days=i)).date()
+
+        snap = latest_snapshot_by_date.get(date)
+
+        month.append({
+            "date": date.strftime("%Y-%m-%d"),
+            "battles": (snap.interval_battles if snap else 0) or 0,
+            "wins": (snap.interval_wins if snap else 0) or 0
+        })
 
     player.activity_json = month
     player.activity_updated_at = datetime.now()
@@ -279,13 +262,212 @@ def update_activity_data(player_id: int) -> None:
     logging.info(f'Updated activity data for player {player.name}')
 
 
+# ──────────────────────────────────────────────────────────
+#  Ranked Battles data
+# ──────────────────────────────────────────────────────────
+
+# Module-level cache for ranked season metadata (names/dates)
+_ranked_seasons_cache: dict = {}
+_ranked_seasons_cache_time: Optional[datetime] = None
+RANKED_SEASONS_CACHE_TTL = timedelta(hours=24)
+LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
+
+
+def _get_ranked_seasons_metadata() -> dict:
+    """Return season_id → {name, label, start_date, end_date}. Cached for 24h."""
+    global _ranked_seasons_cache, _ranked_seasons_cache_time
+    from warships.api.players import _fetch_ranked_seasons_info
+
+    if _ranked_seasons_cache and _ranked_seasons_cache_time and \
+            datetime.now() - _ranked_seasons_cache_time < RANKED_SEASONS_CACHE_TTL:
+        return _ranked_seasons_cache
+
+    raw = _fetch_ranked_seasons_info()
+    if not raw:
+        return _ranked_seasons_cache  # return stale if fetch fails
+
+    result = {}
+    for sid, info in raw.items():
+        sid_int = int(sid)
+        season_name = info.get('season_name', f'Season {sid_int - 1000}')
+        # Short label: "S24" for season_id 1024
+        label = f'S{sid_int - 1000}'
+        start_ts = info.get('start_at')
+        close_ts = info.get('close_at')
+        result[sid_int] = {
+            'name': season_name,
+            'label': label,
+            'start_date': datetime.fromtimestamp(start_ts).strftime('%Y-%m-%d') if start_ts else None,
+            'end_date': datetime.fromtimestamp(close_ts).strftime('%Y-%m-%d') if close_ts else None,
+        }
+
+    _ranked_seasons_cache = result
+    _ranked_seasons_cache_time = datetime.now()
+    return result
+
+
+def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict) -> list:
+    """
+    Transform the WG API rank_info structure into a flat list of per-season summaries.
+
+    rank_info structure: {season_id: {sprint_key: {league_key: {battles, victories, rank, ...}}}}
+    """
+    seasons = []
+
+    for sid_str, sprints in rank_info.items():
+        if sprints is None:
+            continue
+        sid = int(sid_str)
+        meta = season_meta.get(sid, {})
+
+        total_battles = 0
+        total_wins = 0
+        highest_league = 99  # lower = better (1=Gold)
+        sprints_played = 0
+        best_sprint = None
+        sprint_details = []
+
+        for sprint_key, leagues in sprints.items():
+            if leagues is None:
+                continue
+            sprints_played += 1
+            sprint_battles = 0
+            sprint_wins = 0
+            sprint_best_league = 99
+            sprint_best_rank = 99
+
+            for league_key, sprint_data in leagues.items():
+                if sprint_data is None or not isinstance(sprint_data, dict):
+                    continue
+
+                # Skip mode-style keys (rank_solo, rank_div2, etc.) — use only numeric league keys
+                try:
+                    lk = int(league_key)
+                except (ValueError, TypeError):
+                    continue
+
+                b = sprint_data.get('battles', 0) or 0
+                w = sprint_data.get('victories', 0) or 0
+                rank = sprint_data.get('rank', 99)
+                best_rank_in_sprint = sprint_data.get(
+                    'best_rank_in_sprint', sprint_data.get('rank_best', 99))
+
+                sprint_battles += b
+                sprint_wins += w
+
+                if lk < sprint_best_league or (lk == sprint_best_league and best_rank_in_sprint < sprint_best_rank):
+                    sprint_best_league = lk
+                    sprint_best_rank = best_rank_in_sprint
+
+                if lk < highest_league:
+                    highest_league = lk
+
+            total_battles += sprint_battles
+            total_wins += sprint_wins
+
+            sprint_detail = {
+                'sprint_number': int(sprint_key) if sprint_key.isdigit() else 0,
+                'league': sprint_best_league if sprint_best_league < 99 else 3,
+                'league_name': LEAGUE_NAMES.get(sprint_best_league, 'Bronze'),
+                'rank': sprint_best_rank if sprint_best_rank < 99 else 10,
+                'best_rank': sprint_best_rank if sprint_best_rank < 99 else 10,
+                'battles': sprint_battles,
+                'wins': sprint_wins,
+            }
+            sprint_details.append(sprint_detail)
+
+            # Determine best sprint (highest league, then lowest rank, then most wins)
+            if best_sprint is None or \
+                    sprint_best_league < best_sprint['league'] or \
+                    (sprint_best_league == best_sprint['league'] and sprint_best_rank < best_sprint['best_rank']):
+                best_sprint = sprint_detail
+
+        if total_battles == 0:
+            continue
+
+        if highest_league > 3:
+            highest_league = 3
+
+        win_rate = round(total_wins / total_battles,
+                         4) if total_battles > 0 else 0.0
+
+        seasons.append({
+            'season_id': sid,
+            'season_name': meta.get('name', f'Season {sid - 1000}'),
+            'season_label': meta.get('label', f'S{sid - 1000}'),
+            'start_date': meta.get('start_date'),
+            'end_date': meta.get('end_date'),
+            'highest_league': highest_league,
+            'highest_league_name': LEAGUE_NAMES.get(highest_league, 'Bronze'),
+            'total_battles': total_battles,
+            'total_wins': total_wins,
+            'win_rate': win_rate,
+            'sprints_played': sprints_played,
+            'best_sprint': best_sprint,
+            'sprints': sorted(sprint_details, key=lambda x: x['sprint_number']),
+        })
+
+    # Sort by season_id ascending, take last 10
+    seasons.sort(key=lambda x: x['season_id'])
+    return seasons[-10:]
+
+
+def fetch_ranked_data(player_id: str) -> list:
+    """Fetch ranked battles data for a player. Caches as ranked_json."""
+    try:
+        player = Player.objects.get(player_id=player_id)
+    except Player.DoesNotExist:
+        return []
+
+    # Return cached if fresh
+    if player.ranked_json and player.ranked_updated_at and \
+            datetime.now() - player.ranked_updated_at < timedelta(hours=1):
+        logging.info(f'Ranked data cache fresh for {player.name}')
+        return player.ranked_json
+
+    logging.info(f'Fetching ranked data for {player.name}')
+    update_ranked_data(player_id)
+    player.refresh_from_db()
+    return player.ranked_json or []
+
+
+def update_ranked_data(player_id) -> None:
+    """Fetch ranked data from WG API, aggregate, and cache on Player model."""
+    from warships.api.players import _fetch_ranked_account_info
+
+    player = Player.objects.get(player_id=player_id)
+
+    # Get season metadata (cached globally)
+    season_meta = _get_ranked_seasons_metadata()
+
+    # Get player's rank_info
+    account_data = _fetch_ranked_account_info(int(player_id))
+    rank_info = account_data.get('rank_info') if account_data else None
+
+    if not rank_info:
+        logging.info(f'No ranked data for {player.name}')
+        player.ranked_json = []
+        player.ranked_updated_at = datetime.now()
+        player.save()
+        return
+
+    # Aggregate into per-season summaries
+    result = _aggregate_ranked_seasons(rank_info, season_meta)
+
+    player.ranked_json = result
+    player.ranked_updated_at = datetime.now()
+    player.save()
+    logging.info(
+        f'Updated ranked data for {player.name}: {len(result)} seasons')
+
+
 def fetch_type_data(player_id: str) -> list:
     try:
         player = Player.objects.get(player_id=player_id)
         if not player.battles_json:
             update_battle_data(player_id)
     except Player.DoesNotExist:
-        return JsonResponse({'error': 'Player not found'}, status=404)
+        return []
 
     if player.type_json:
         if not player.type_updated_at or datetime.now() - player.type_updated_at > timedelta(days=1):
@@ -332,11 +514,27 @@ def fetch_randoms_data(player_id: str) -> list:
         if not player.battles_json:
             update_battle_data(player_id)
     except Player.DoesNotExist:
-        return JsonResponse({'error': 'Player not found'}, status=404)
+        return []
 
     if player.randoms_json:
-        if not player.randoms_updated_at or datetime.now() - player.randoms_updated_at > timedelta(days=1):
-            update_randoms_data_task.delay(player_id)
+        has_required_fields = isinstance(player.randoms_json, list) and all(
+            isinstance(row, dict) and 'ship_type' in row and 'ship_tier' in row
+            for row in player.randoms_json
+        )
+
+        if not has_required_fields:
+            update_randoms_data(player_id)
+            player = Player.objects.get(player_id=player_id)
+            return player.randoms_json
+
+        randoms_stale = not player.randoms_updated_at or datetime.now(
+        ) - player.randoms_updated_at > timedelta(days=1)
+        battles_stale = not player.battles_updated_at or datetime.now(
+        ) - player.battles_updated_at > timedelta(minutes=15)
+        if randoms_stale or battles_stale:
+            update_battle_data(player_id)
+            update_randoms_data(player_id)
+            player = Player.objects.get(player_id=player_id)
         return player.randoms_json
     else:
         update_randoms_data(player_id)
@@ -344,10 +542,42 @@ def fetch_randoms_data(player_id: str) -> list:
         return player.randoms_json
 
 
+def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
+    try:
+        clan = Clan.objects.get(clan_id=clan_id)
+    except Clan.DoesNotExist:
+        return []
+
+    if not clan.members_count:
+        update_clan_data(clan_id)
+        clan.refresh_from_db()
+
+    members = clan.player_set.exclude(name='').all()
+
+    if not members.exists() or (clan.members_count and members.count() < clan.members_count):
+        update_clan_members(clan_id)
+        members = clan.player_set.exclude(name='').all()
+
+    data = []
+    for member in members:
+        battles = member.pvp_battles or 0
+        if filter_type != 'all' and battles < 100:
+            continue
+
+        data.append({
+            'player_name': member.name,
+            'pvp_battles': battles,
+            'pvp_ratio': member.pvp_ratio or 0
+        })
+
+    return sorted(data, key=lambda row: row.get('pvp_battles', 0), reverse=True)
+
+
 def update_randoms_data(player_id: str) -> None:
     player = Player.objects.get(player_id=player_id)
     df = pd.DataFrame(player.battles_json)
-    df = df.filter(['pvp_battles', 'ship_name', 'win_ratio', 'wins'])
+    df = df.filter(['pvp_battles', 'ship_name', 'ship_type',
+                   'ship_tier', 'win_ratio', 'wins'])
 
     try:
         df = df.sort_values(by='pvp_battles', ascending=False).head(20)
@@ -429,8 +659,8 @@ def update_clan_members(clan_id: str) -> None:
         update_player_data(player)
 
 
-def update_player_data(player: Player) -> None:
-    if player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=1400):
+def update_player_data(player: Player, force_refresh: bool = False) -> None:
+    if not force_refresh and player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=1400):
         logging.debug(
             f'Player data is fresh')
         return
@@ -440,6 +670,15 @@ def update_player_data(player: Player) -> None:
     # Map basic fields
     player.name = player_data.get("nickname", "")
     player.player_id = player_data.get("account_id", player.player_id)
+
+    clan_membership = _fetch_clan_membership_for_player(player.player_id)
+    clan_id = clan_membership.get("clan_id") or player_data.get("clan_id")
+    if clan_id:
+        clan, _ = Clan.objects.get_or_create(clan_id=clan_id)
+        player.clan = clan
+    else:
+        player.clan = None
+
     player.creation_date = datetime.fromtimestamp(
         player_data.get("created_at", 0), tz=timezone.utc)
     player.last_battle_date = datetime.fromtimestamp(

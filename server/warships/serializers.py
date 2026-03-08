@@ -54,14 +54,42 @@ class TypeDataSerializer(serializers.Serializer):
 class RandomsDataSerializer(serializers.Serializer):
     pvp_battles = serializers.IntegerField()
     ship_name = serializers.CharField()
+    ship_type = serializers.CharField()
+    ship_tier = serializers.IntegerField()
     win_ratio = serializers.FloatField()
     wins = serializers.IntegerField()
+
+
+class RankedSprintSerializer(serializers.Serializer):
+    sprint_number = serializers.IntegerField()
+    league = serializers.IntegerField()
+    league_name = serializers.CharField()
+    rank = serializers.IntegerField()
+    best_rank = serializers.IntegerField()
+    battles = serializers.IntegerField()
+    wins = serializers.IntegerField()
+
+
+class RankedDataSerializer(serializers.Serializer):
+    season_id = serializers.IntegerField()
+    season_name = serializers.CharField()
+    season_label = serializers.CharField()
+    start_date = serializers.CharField(allow_null=True)
+    end_date = serializers.CharField(allow_null=True)
+    highest_league = serializers.IntegerField()
+    highest_league_name = serializers.CharField()
+    total_battles = serializers.IntegerField()
+    total_wins = serializers.IntegerField()
+    win_rate = serializers.FloatField()
+    sprints_played = serializers.IntegerField()
+    best_sprint = RankedSprintSerializer(allow_null=True)
+    sprints = RankedSprintSerializer(many=True)
 
 
 class ClanDataSerializer(serializers.Serializer):
     player_name = serializers.CharField()
     pvp_battles = serializers.IntegerField()
-    win_ratio = serializers.FloatField()
+    pvp_ratio = serializers.FloatField()
 
 
 class ClanMemberSerializer(serializers.Serializer):

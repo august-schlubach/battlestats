@@ -36,8 +36,12 @@ class Player(models.Model):
     randoms_json = models.JSONField(null=True, blank=True)
     randoms_updated_at = models.DateTimeField(null=True, blank=True)
 
+    ranked_json = models.JSONField(null=True, blank=True)
+    ranked_updated_at = models.DateTimeField(null=True, blank=True)
+
     def __str__(self):
-        return self.name + " (" + str(self.player_id) + ") " + str(self.clan.name)
+        clan_name = self.clan.name if self.clan else "No Clan"
+        return f"{self.name} ({self.player_id}) {clan_name}"
 
 
 class Ship(models.Model):

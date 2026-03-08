@@ -1,133 +1,248 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import * as d3 from 'd3';
 
 interface ActivityProps {
     playerId: number;
 }
 
+interface ActivityRow {
+    date: string;
+    battles: number;
+    wins: number;
+}
+
 const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
+    const [isAllZeroWindow, setIsAllZeroWindow] = useState(false);
+    const [chartData, setChartData] = useState<{ rows: ActivityRow[], error: boolean } | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // 1. Fetch data ONCE whenever playerId changes
     useEffect(() => {
-        drawActivityPlot(playerId);
+        let isMounted = true;
+        const path = `http://localhost:8888/api/fetch/activity_data/${playerId}/`;
+
+        fetch(path)
+            .then(response => response.json())
+            .then(data => {
+                if (!isMounted) return;
+                // API now returns a flat list; legacy wrapper is also handled
+                const rows: ActivityRow[] = Array.isArray(data)
+                    ? data
+                    : (data?.data || data?.mode_data?.pvp || []) as ActivityRow[];
+
+                setIsAllZeroWindow(rows.length > 0 && rows.every((row) => (row.battles || 0) === 0));
+                setChartData({ rows, error: false });
+            })
+            .catch(() => {
+                if (!isMounted) return;
+                setIsAllZeroWindow(false);
+                setChartData({ rows: [], error: true });
+            });
+
+        return () => {
+            isMounted = false;
+        };
     }, [playerId]);
 
-    const drawActivityPlot = (playerId: number) => {
+    // 2. Safely render D3 chart ONLY after data is available and state is settled
+    useEffect(() => {
+        if (!containerRef.current || !chartData) return;
 
-        const container = document.getElementById("activity_svg_container");
-        if (container) {
-            // Clear the container before drawing a new SVG
-            d3.select(container).selectAll("*").remove();
-        }
+        const container = containerRef.current;
+        d3.select(container).selectAll("*").remove(); // Clean up safely
+
+        const { rows, error } = chartData;
 
         const margin = { top: 20, right: 20, bottom: 50, left: 70 };
-        const width = 600 - margin.left - margin.right;
+        const width = 500 - margin.left - margin.right;
         const height = 230 - margin.top - margin.bottom;
 
-        const svg = d3.select("#activity_svg_container")
+        const svg = d3.select(container)
             .append("svg")
             .attr("width", width + margin.left + margin.right)
             .attr("height", height + margin.top + margin.bottom)
             .append("g")
             .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
-        const path = `http://localhost:8888/api/fetch/activity_data/${playerId}`;
-        const startDate = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
+        try {
+            if (error) {
+                svg.append("text")
+                    .attr("x", 0)
+                    .attr("y", 16)
+                    .style("font-size", "12px")
+                    .style("fill", "#6b7280")
+                    .text("Unable to load activity data.");
+                return;
+            }
 
-        fetch(path)
-            .then(response => response.json())
-            .then(data => {
-                svg.selectAll("*").remove();
+            if (!rows || rows.length === 0) {
+                svg.append("text")
+                    .attr("x", 0)
+                    .attr("y", 16)
+                    .style("font-size", "12px")
+                    .style("fill", "#6b7280")
+                    .text("No recent activity data available.");
+                return;
+            }
 
-                let maxBattles = d3.max(data, (d: any) => +d.battles);
-                maxBattles = Math.max(maxBattles, 2) + 1;
+            const startDate = new Date(Date.now() - (28 * 24 * 60 * 60 * 1000));
+            // Ensure array behaves properly and values are valid safely:
+            let maxBattles = d3.max(rows, (d: ActivityRow) => {
+                const b = parseInt(String(d.battles || 0), 10);
+                return isNaN(b) ? 0 : b;
+            }) || 0;
+            maxBattles = Math.max(maxBattles, 2) + 1;
 
-                const x = d3.scaleTime()
-                    .domain([startDate, new Date()])
-                    .range([6, width]);
+            const x = d3.scaleTime()
+                .domain([startDate, new Date()])
+                .range([6, width]);
 
-                svg.append("g")
-                    .attr("transform", `translate(0, ${height})`)
-                    .call(d3.axisBottom(x).ticks(8))
-                    .selectAll("text")
-                    .attr("transform", "translate(-10,0)rotate(-45)")
-                    .style("text-anchor", "end");
+            svg.append("g")
+                .attr("transform", `translate(0, ${height})`)
+                .call(d3.axisBottom(x).ticks(8))
+                .selectAll("text")
+                .attr("transform", "translate(-10,0)rotate(-45)")
+                .style("text-anchor", "end");
 
-                const y = d3.scaleLinear()
-                    .domain([maxBattles, 0])
-                    .range([1, height]);
+            const y = d3.scaleLinear()
+                .domain([maxBattles, 0])
+                .range([1, height]);
 
-                svg.append("g")
-                    .call(d3.axisLeft(y).ticks(5));
+            svg.append("g")
+                .call(d3.axisLeft(y).ticks(5));
 
-                const nodes = svg.selectAll(".rect")
-                    .data(data)
-                    .enter()
-                    .append("g")
-                    .classed('rect', true);
+            svg.append("text")
+                .attr("x", width)
+                .attr("y", height + 44)
+                .attr("text-anchor", "end")
+                .style("font-size", "10px")
+                .style("fill", "#6b7280")
+                .text("Date");
 
-                nodes.append("rect")
-                    .attr("x", (d: any) => x(new Date(d.date)))
-                    .attr("y", (d: any) => y(d.battles))
-                    .attr("height", (d: any) => height - (y(d.battles) ?? 0))
-                    .attr("width", "12")
-                    .attr("fill", "#ccc")
-                    .on('mouseover', function (event: any, d: any) {
-                        showRecentDetails(d);
-                    })
-                    .on('mouseout', function (event: any, d: any) {
-                        hideRecentDetails();
-                    });
+            svg.append("text")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -4)
+                .attr("y", -52)
+                .attr("text-anchor", "end")
+                .style("font-size", "10px")
+                .style("fill", "#6b7280")
+                .text("Battles");
 
-                nodes.append("rect")
-                    .attr("x", (d: any) => x(new Date(d.date)) + 1)
-                    .attr("y", (d: any) => y(d.wins))
-                    .attr("height", (d: any) => height - (y(d.wins) ?? 0))
-                    .attr("width", "10")
-                    .style("stroke", "#444")
-                    .style("stroke-width", 0.5)
-                    .attr("fill", "#74c476")
-                    .on('mouseover', function (this: any, event: any, d: any) {
-                        showRecentDetails(d);
-                        d3.select(this).transition()
-                            .duration(50)
-                            .attr('fill', '#bcbddc');
-                    })
-                    .on('mouseout', function (this: any, event: any, d: any) {
-                        hideRecentDetails();
-                        d3.select(this).transition()
-                            .duration(50)
-                            .attr("fill", "#74c476");
-                    });
-            });
-    };
+            svg.append("text")
+                .attr("x", width)
+                .attr("y", 12)
+                .attr("text-anchor", "end")
+                .style("font-size", "10px")
+                .style("fill", "#6b7280")
+                .text("Gray = total games, Green = wins");
 
-    const showRecentDetails = (d: any) => {
-        const startX = 470, startY = 30;
+            const nodes = svg.selectAll(".rect")
+                .data(rows)
+                .enter()
+                .append("g")
+                .classed('rect', true);
 
-        const detailGroup = d3.select("#activity_svg_container").select("svg").append("g")
-            .classed('details', true);
+            nodes.append("rect")
+                .attr("x", (d: ActivityRow) => {
+                    const parsedDate = new Date(d.date);
+                    return isNaN(parsedDate.getTime()) ? 0 : x(parsedDate);
+                })
+                .attr("y", (d: ActivityRow) => {
+                    const val = parseInt(String(d.battles || 0), 10);
+                    return y(isNaN(val) ? 0 : val);
+                })
+                .attr("height", (d: ActivityRow) => {
+                    const val = parseInt(String(d.battles || 0), 10);
+                    const yVal = y(isNaN(val) ? 0 : val);
+                    return height - yVal;
+                })
+                .attr("width", "12")
+                .attr("fill", "#ccc")
+                .on('mouseover', function (event: any, d: ActivityRow) {
+                    showRecentDetails(d);
+                })
+                .on('mouseout', function (event: any, d: ActivityRow) {
+                    hideRecentDetails();
+                });
 
-        detailGroup.append("text")
-            .attr("x", startX)
-            .attr("y", startY)
-            .style("font-size", "12px")
-            .style("font-weight", "700")
-            .attr("text-anchor", "end")
-            .text(d.date);
+            nodes.append("rect")
+                .attr("x", (d: ActivityRow) => {
+                    const parsedDate = new Date(d.date);
+                    return (isNaN(parsedDate.getTime()) ? 0 : x(parsedDate)) + 1;
+                })
+                .attr("y", (d: ActivityRow) => {
+                    const val = parseInt(String(d.wins || 0), 10);
+                    return y(isNaN(val) ? 0 : val);
+                })
+                .attr("height", (d: ActivityRow) => {
+                    const val = parseInt(String(d.wins || 0), 10);
+                    const yVal = y(isNaN(val) ? 0 : val);
+                    return height - yVal;
+                })
+                .attr("width", "10")
+                .style("stroke", "#444")
+                .style("stroke-width", 0.5)
+                .attr("fill", "#74c476")
+                .on('mouseover', function (this: any, event: any, d: ActivityRow) {
+                    showRecentDetails(d);
+                    d3.select(this).transition()
+                        .duration(50)
+                        .attr('fill', '#bcbddc');
+                })
+                .on('mouseout', function (this: any, event: any, d: ActivityRow) {
+                    hideRecentDetails();
+                    d3.select(this).transition()
+                        .duration(50)
+                        .attr("fill", "#74c476");
+                });
 
-        detailGroup.append("text")
-            .attr("x", startX + 110)
-            .attr("y", startY)
-            .style("font-size", "12px")
-            .attr("text-anchor", "end")
-            .text(`${d.wins} W : ${d.battles} Games`);
-    };
+            const showRecentDetails = (d: ActivityRow) => {
+                const startX = 470, startY = 30;
 
-    const hideRecentDetails = () => {
-        const detailGroup = d3.select("#activity_svg_container").select(".details");
-        detailGroup.remove();
-    };
+                const detailGroup = d3.select(containerRef.current).select("svg").append("g")
+                    .classed('details', true);
 
-    return <div id="activity_svg_container"></div>;
+                detailGroup.append("text")
+                    .attr("x", startX)
+                    .attr("y", startY)
+                    .style("font-size", "12px")
+                    .style("font-weight", "700")
+                    .attr("text-anchor", "end")
+                    .text(d.date || "Unknown");
+
+                detailGroup.append("text")
+                    .attr("x", startX + 110)
+                    .attr("y", startY)
+                    .style("font-size", "12px")
+                    .attr("text-anchor", "end")
+                    .text(`${d.wins || 0} W : ${d.battles || 0} Games`);
+            };
+
+            const hideRecentDetails = () => {
+                const detailGroup = d3.select(containerRef.current).select(".details");
+                detailGroup.remove();
+            };
+        } catch (e: any) {
+            console.error("Activity SVG Render Error:", e);
+            svg.append("text")
+                .attr("x", 0)
+                .attr("y", 16)
+                .style("font-size", "12px")
+                .style("fill", "red")
+                .text("Error rendering chart: " + e.message);
+        }
+    }, [chartData]); // Watch chartData
+
+    return (
+        <div>
+            {isAllZeroWindow ? (
+                <p className="mb-2 text-xs text-gray-500">
+                    No daily Random Battles activity recorded in the last 28 days.
+                </p>
+            ) : null}
+            <div ref={containerRef}></div>
+        </div>
+    );
 };
 
 export default ActivitySVG;

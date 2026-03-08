@@ -7,6 +7,7 @@ logging.basicConfig(level=logging.INFO)
 
 BASE_URL = "https://api.worldofwarships.com/wows/"
 APP_ID = os.environ.get('WG_APP_ID')
+REQUEST_TIMEOUT_SECONDS = 20
 
 
 def _fetch_clan_data(clan_id: str) -> Dict:
@@ -46,10 +47,37 @@ def _fetch_player_data_from_list(players: List[int]) -> Dict:
     return data if data else {}
 
 
+def _fetch_clan_membership_for_player(player_id: int) -> Dict:
+    """Fetch clan membership data for a given player account id."""
+    params = {
+        "application_id": APP_ID,
+        "account_id": player_id,
+        "extra": "clan",
+        "fields": "account_id,account_name,clan_id,clan"
+    }
+    logging.info(
+        f' ---> Remote fetching clan membership for player_id: {player_id}')
+    data = _make_api_request("clans/accountinfo/", params)
+    return data.get(str(player_id), {}) if data else {}
+
+
 def _make_api_request(endpoint: str, params: Dict) -> Optional[Dict]:
     """Helper function to make API requests and handle responses."""
-    response = requests.get(BASE_URL + endpoint, params=params)
-    data = response.json()
+    try:
+        response = requests.get(
+            BASE_URL + endpoint,
+            params=params,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except requests.RequestException as error:
+        logging.error(
+            f"HTTP request failed for endpoint '{endpoint}': {error}")
+        return None
+    except ValueError as error:
+        logging.error(f"Invalid JSON from endpoint '{endpoint}': {error}")
+        return None
 
     if data.get('status') != "ok":
         logging.error(f"Error in response: {data}")

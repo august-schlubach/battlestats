@@ -7,15 +7,19 @@ interface ClanMembersProps {
 
 const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => {
     const [members, setMembers] = useState<{ name: string }[]>([]);
+    const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchMembers = async () => {
+            setLoading(true);
             try {
                 const response = await fetch(`http://localhost:8888/api/fetch/clan_members/${clanId}/`);
                 const data = await response.json();
                 setMembers(data);
             } catch (error) {
                 console.error('Error fetching clan members:', error);
+            } finally {
+                setLoading(false);
             }
         };
 
@@ -24,18 +28,25 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => 
 
     return (
         <div>
-            <h1>Clan Members</h1>
-            <ul className="text-sm">
-                {members.map((member, index) => (
-                    <li key={index}>
-                        <button
-                            onClick={() => onSelectMember(member.name)}
-                            className="text-blue-500 underline">
-                            {member.name}
-                        </button>
-                    </li>
-                ))}
-            </ul>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clan Members</h3>
+            {loading && <p className="text-sm text-gray-500">Syncing clan members...</p>}
+            {!loading && members.length === 0 && <p className="text-sm text-gray-500">No clan members found.</p>}
+            {!loading && members.length > 0 && (
+                <p className="mt-2 text-sm leading-7 text-gray-700">
+                    {members.map((member, index) => (
+                        <React.Fragment key={member.name}>
+                            <button
+                                onClick={() => onSelectMember(member.name)}
+                                className="font-medium text-gray-900 underline-offset-2 hover:underline"
+                                aria-label={`Show player ${member.name}`}
+                            >
+                                {member.name}
+                            </button>
+                            {index < members.length - 1 && <span className="mx-2 text-gray-400">•</span>}
+                        </React.Fragment>
+                    ))}
+                </p>
+            )}
         </div>
     );
 };

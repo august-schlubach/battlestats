@@ -22,6 +22,7 @@ model-bakery = "*"
 djangorestframework = "*"
 kombu = "*"
 amqp = "*"
+langgraph = "*"
 
 [dev-packages]
 
