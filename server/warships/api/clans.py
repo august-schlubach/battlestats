@@ -34,6 +34,28 @@ def _fetch_clan_member_ids(clan_id: str) -> List[str]:
     return data.get(str(clan_id), {}).get('members_ids', []) if data else []
 
 
+def _fetch_clan_battle_seasons_info() -> Dict:
+    """Fetch clan battle season metadata."""
+    params = {
+        "application_id": APP_ID,
+    }
+    logging.info(' ---> Remote fetching clan battle seasons metadata')
+    data = _make_api_request("clans/season/", params)
+    return data if data else {}
+
+
+def _fetch_clan_battle_season_stats(account_id: int) -> Dict:
+    """Fetch clan battle season stats for a single player account."""
+    params = {
+        "application_id": APP_ID,
+        "account_id": account_id,
+    }
+    logging.info(
+        f' ---> Remote fetching clan battle season stats for account_id: {account_id}')
+    data = _make_api_request("clans/seasonstats/", params)
+    return data.get(str(account_id), {}) if data else {}
+
+
 def _fetch_player_data_from_list(players: List[int]) -> Dict:
     """Fetch all player data for a given list of player ids."""
     member_list = ','.join(map(str, players))

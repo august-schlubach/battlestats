@@ -13,9 +13,9 @@ from warships.models import Player, Clan, Ship
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
-    RankedDataSerializer
+    RankedDataSerializer, ClanBattleSeasonSummarySerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, \
-    fetch_ranked_data
+    fetch_ranked_data, fetch_clan_battle_seasons
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 
 logging.basicConfig(level=logging.INFO)
@@ -234,6 +234,12 @@ def clan_data(request, clan_filter: str) -> Response:
 
 
 @api_view(["GET"])
+def clan_battle_seasons(request, clan_id: str) -> Response:
+    data = fetch_clan_battle_seasons(clan_id)
+    return _validated_list_response(data, ClanBattleSeasonSummarySerializer)
+
+
+@api_view(["GET"])
 def landing_clans(request) -> Response:
     def _fetch_landing_clans():
         qs = Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
@@ -248,7 +254,7 @@ def landing_clans(request) -> Response:
             ),
         ).values(
             'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
-        ).order_by(F('last_lookup').desc(nulls_last=True), 'name')
+        ).order_by(F('last_lookup').desc(nulls_last=True))
         return list(qs)
 
     data = cache.get_or_set('landing:clans', _fetch_landing_clans, 60)

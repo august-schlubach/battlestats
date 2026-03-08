@@ -196,6 +196,32 @@ class ClanMembersEndpointTests(TestCase):
 
 
 class ApiContractTests(TestCase):
+    @patch("warships.views.fetch_clan_battle_seasons")
+    def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):
+        mock_fetch.return_value = [
+            {
+                "season_id": 50,
+                "season_name": "Valhalla",
+                "season_label": "S50",
+                "start_date": "2026-01-10",
+                "end_date": "2026-02-14",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+                "participants": 7,
+                "roster_battles": 128,
+                "roster_wins": 71,
+                "roster_losses": 57,
+                "roster_win_rate": 55.5,
+            }
+        ]
+
+        response = self.client.get("/api/fetch/clan_battle_seasons/42/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["season_id"], 50)
+        self.assertEqual(response.json()[0]["participants"], 7)
+        self.assertEqual(response.json()[0]["roster_battles"], 128)
+
     def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
         cache.delete('landing:recent_players')
         now = timezone.now()

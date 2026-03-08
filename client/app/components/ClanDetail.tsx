@@ -1,4 +1,5 @@
 import React from 'react';
+import ClanBattleSeasons from './ClanBattleSeasons';
 import ClanSVG from './ClanSVG';
 import ClanMembers from './ClanMembers';
 
@@ -29,7 +30,11 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={400} />
             </div>
 
-            <div className="mt-4 border-t border-gray-100 pt-4">
+            <div className="mt-8">
+                <ClanBattleSeasons clanId={clan.clan_id} />
+            </div>
+
+            <div className="mt-6 border-t border-gray-100 pt-4">
                 <ClanMembers clanId={clan.clan_id} onSelectMember={onSelectMember} />
             </div>
 

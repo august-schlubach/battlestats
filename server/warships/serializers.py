@@ -100,3 +100,18 @@ class ClanMemberSerializer(serializers.Serializer):
     name = serializers.CharField()
     is_hidden = serializers.BooleanField()
     pvp_ratio = serializers.FloatField(allow_null=True)
+
+
+class ClanBattleSeasonSummarySerializer(serializers.Serializer):
+    season_id = serializers.IntegerField()
+    season_name = serializers.CharField()
+    season_label = serializers.CharField()
+    start_date = serializers.CharField(allow_null=True)
+    end_date = serializers.CharField(allow_null=True)
+    ship_tier_min = serializers.IntegerField(allow_null=True)
+    ship_tier_max = serializers.IntegerField(allow_null=True)
+    participants = serializers.IntegerField()
+    roster_battles = serializers.IntegerField()
+    roster_wins = serializers.IntegerField()
+    roster_losses = serializers.IntegerField()
+    roster_win_rate = serializers.FloatField()

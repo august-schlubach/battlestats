@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 import pandas as pd
@@ -6,7 +7,8 @@ from django.core.cache import cache
 from warships.models import Player, Snapshot, Clan
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data
-from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player
+from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
+    _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
 from warships.tasks import update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
@@ -270,6 +272,10 @@ def update_activity_data(player_id: int) -> None:
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
 RANKED_SEASONS_CACHE_KEY = 'ranked:seasons:metadata'
 RANKED_SEASONS_CACHE_TTL = 86400  # 24 hours in seconds
+CLAN_BATTLE_SEASONS_CACHE_KEY = 'clan_battles:seasons:metadata'
+CLAN_BATTLE_SEASONS_CACHE_TTL = 86400
+CLAN_BATTLE_PLAYER_STATS_CACHE_TTL = 21600
+CLAN_BATTLE_SUMMARY_CACHE_TTL = 3600
 
 
 def _get_ranked_seasons_metadata() -> dict:
@@ -299,6 +305,140 @@ def _get_ranked_seasons_metadata() -> dict:
         }
 
     cache.set(RANKED_SEASONS_CACHE_KEY, result, RANKED_SEASONS_CACHE_TTL)
+    return result
+
+
+def _get_clan_battle_seasons_metadata() -> dict:
+    """Return season_id -> clan battle season metadata. Cached for 24h."""
+    cached = cache.get(CLAN_BATTLE_SEASONS_CACHE_KEY)
+    if cached is not None:
+        return cached
+
+    raw = _fetch_clan_battle_seasons_info()
+    if not raw:
+        return {}
+
+    result = {}
+    for sid, info in raw.items():
+        sid_int = int(sid)
+        start_ts = info.get('start_time')
+        finish_ts = info.get('finish_time')
+        result[sid_int] = {
+            'name': info.get('name', f'Season {sid_int}'),
+            'label': f'S{sid_int}',
+            'start_date': datetime.fromtimestamp(start_ts).strftime('%Y-%m-%d') if start_ts else None,
+            'end_date': datetime.fromtimestamp(finish_ts).strftime('%Y-%m-%d') if finish_ts else None,
+            'ship_tier_min': info.get('ship_tier_min'),
+            'ship_tier_max': info.get('ship_tier_max'),
+        }
+
+    cache.set(CLAN_BATTLE_SEASONS_CACHE_KEY,
+              result, CLAN_BATTLE_SEASONS_CACHE_TTL)
+    return result
+
+
+def _get_player_clan_battle_season_stats(account_id: int) -> list:
+    """Return cached clan battle season stats for a player."""
+    cache_key = f'clan_battles:player:{account_id}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    raw = _fetch_clan_battle_season_stats(account_id)
+    seasons = raw.get('seasons', []) if raw else []
+    cache.set(cache_key, seasons, CLAN_BATTLE_PLAYER_STATS_CACHE_TTL)
+    return seasons
+
+
+def fetch_clan_battle_seasons(clan_id: str) -> list:
+    """Aggregate clan battle season stats across the clan's current roster."""
+    if not clan_id:
+        return []
+
+    cache_key = f'clan_battles:summary:{clan_id}'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        clan = Clan.objects.get(clan_id=clan_id)
+    except Clan.DoesNotExist:
+        return []
+
+    members = list(
+        clan.player_set.exclude(name='').exclude(player_id__isnull=True).values('player_id', 'name')
+    )
+
+    if not members and clan.members_count:
+        update_clan_members(clan_id=clan_id)
+        members = list(
+            clan.player_set.exclude(name='').exclude(player_id__isnull=True).values('player_id', 'name')
+        )
+
+    if not members:
+        cache.set(cache_key, [], CLAN_BATTLE_SUMMARY_CACHE_TTL)
+        return []
+
+    season_meta = _get_clan_battle_seasons_metadata()
+    season_summaries = {}
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(_get_player_clan_battle_season_stats, member['player_id']): member
+            for member in members
+        }
+
+        for future in as_completed(futures):
+            member = futures[future]
+            try:
+                seasons = future.result()
+            except Exception as error:
+                logging.error(
+                    'Failed clan battle stats fetch for %s (%s): %s',
+                    member['name'],
+                    member['player_id'],
+                    error,
+                )
+                continue
+
+            for season in seasons:
+                battles = int(season.get('battles', 0) or 0)
+                if battles <= 0:
+                    continue
+
+                sid = int(season.get('season_id', 0) or 0)
+                if sid <= 0:
+                    continue
+
+                summary = season_summaries.setdefault(sid, {
+                    'season_id': sid,
+                    'season_name': season_meta.get(sid, {}).get('name', f'Season {sid}'),
+                    'season_label': season_meta.get(sid, {}).get('label', f'S{sid}'),
+                    'start_date': season_meta.get(sid, {}).get('start_date'),
+                    'end_date': season_meta.get(sid, {}).get('end_date'),
+                    'ship_tier_min': season_meta.get(sid, {}).get('ship_tier_min'),
+                    'ship_tier_max': season_meta.get(sid, {}).get('ship_tier_max'),
+                    'participants': 0,
+                    'roster_battles': 0,
+                    'roster_wins': 0,
+                    'roster_losses': 0,
+                })
+
+                summary['participants'] += 1
+                summary['roster_battles'] += battles
+                summary['roster_wins'] += int(season.get('wins', 0) or 0)
+                summary['roster_losses'] += int(season.get('losses', 0) or 0)
+
+    result = []
+    for sid in sorted(season_summaries.keys(), reverse=True):
+        summary = season_summaries[sid]
+        battles = summary['roster_battles']
+        summary['roster_win_rate'] = round(
+            summary['roster_wins'] / battles * 100, 1) if battles > 0 else 0.0
+        result.append(summary)
+
+    result = result[:8]
+    cache.set(cache_key, result, CLAN_BATTLE_SUMMARY_CACHE_TTL)
     return result
 
 
