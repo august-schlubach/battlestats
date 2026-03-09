@@ -81,4 +81,5 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             },
         )
     else:
-        PeriodicTask.objects.filter(name="clan-battle-summary-warmer").update(enabled=False)
+        PeriodicTask.objects.filter(
+            name="clan-battle-summary-warmer").update(enabled=False)

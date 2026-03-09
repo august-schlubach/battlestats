@@ -318,7 +318,8 @@ class ApiContractTests(TestCase):
             pvp_survival_rate=50.0,
         )
 
-        response = self.client.get("/api/fetch/player_distribution/survival_rate/")
+        response = self.client.get(
+            "/api/fetch/player_distribution/survival_rate/")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -355,7 +356,8 @@ class ApiContractTests(TestCase):
             pvp_survival_rate=35.0,
         )
 
-        response = self.client.get("/api/fetch/player_distribution/battles_played/")
+        response = self.client.get(
+            "/api/fetch/player_distribution/battles_played/")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -363,8 +365,10 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["scale"], "log")
         self.assertEqual(payload["value_format"], "integer")
         self.assertEqual(payload["tracked_population"], 2)
-        self.assertTrue(any(row["bin_min"] == 100 and row["count"] == 1 for row in payload["bins"]))
-        self.assertTrue(any(row["bin_min"] == 6400 and row["count"] == 1 for row in payload["bins"]))
+        self.assertTrue(
+            any(row["bin_min"] == 100 and row["count"] == 1 for row in payload["bins"]))
+        self.assertTrue(
+            any(row["bin_min"] == 6400 and row["count"] == 1 for row in payload["bins"]))
 
     def test_player_distribution_rejects_unknown_metric(self):
         response = self.client.get("/api/fetch/player_distribution/not-real/")
@@ -435,7 +439,8 @@ class ApiContractTests(TestCase):
                 {"date": "2026-02-11", "battles": 1, "wins": 1},
             ],
             battles_json=[
-                {"ship_name": "Ship C", "ship_type": "Battleship", "ship_tier": 9, "pvp_battles": 11, "wins": 6},
+                {"ship_name": "Ship C", "ship_type": "Battleship",
+                    "ship_tier": 9, "pvp_battles": 11, "wins": 6},
             ],
             ranked_json=[],
         )
@@ -446,7 +451,8 @@ class ApiContractTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["results"][0]["battles_last_29_days"], 5)
-        self.assertTrue(PlayerExplorerSummary.objects.filter(player=player).exists())
+        self.assertTrue(PlayerExplorerSummary.objects.filter(
+            player=player).exists())
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

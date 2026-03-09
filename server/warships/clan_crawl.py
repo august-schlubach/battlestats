@@ -25,7 +25,8 @@ log = logging.getLogger("crawl")
 
 
 def _touch_crawl_heartbeat() -> None:
-    cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(), timeout=CLAN_CRAWL_LOCK_TIMEOUT)
+    cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(),
+              timeout=CLAN_CRAWL_LOCK_TIMEOUT)
 
 
 def _now():

@@ -349,8 +349,10 @@ class PlayerExplorerSummaryTests(TestCase):
                 {"date": "2026-03-02", "battles": 4, "wins": 3},
             ],
             battles_json=[
-                {"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 10, "pvp_battles": 8, "wins": 5},
-                {"ship_name": "Ship B", "ship_type": "Cruiser", "ship_tier": 8, "pvp_battles": 4, "wins": 2},
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 8, "wins": 5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 4, "wins": 2},
             ],
             ranked_json=[
                 {"season_id": 3, "highest_league_name": "Silver", "total_battles": 12},
@@ -375,8 +377,10 @@ class PlayerExplorerSummaryTests(TestCase):
             player_id=9912,
             is_hidden=False,
             activity_json=[{"date": "2026-03-01", "battles": 5, "wins": 3}],
-            battles_json=[{"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 10, "pvp_battles": 5, "wins": 3}],
-            ranked_json=[{"season_id": 1, "highest_league_name": "Bronze", "total_battles": 7}],
+            battles_json=[{"ship_name": "Ship A", "ship_type": "Destroyer",
+                           "ship_tier": 10, "pvp_battles": 5, "wins": 3}],
+            ranked_json=[
+                {"season_id": 1, "highest_league_name": "Bronze", "total_battles": 7}],
         )
         PlayerExplorerSummary.objects.create(
             player=player,

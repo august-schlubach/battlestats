@@ -72,7 +72,8 @@ class UpstreamContractAlignmentTests(SimpleTestCase):
     def test_account_list_requested_fields_exist_in_contract(self):
         contract = _load_contract("wows-account-list.yaml")
         documented_paths = _documented_response_paths(contract)
-        requested_paths = _requested_field_paths(players_api._fetch_player_id_by_name)
+        requested_paths = _requested_field_paths(
+            players_api._fetch_player_id_by_name)
 
         self.assertTrue(requested_paths)
         self.assertTrue(requested_paths.issubset(documented_paths))
@@ -80,7 +81,8 @@ class UpstreamContractAlignmentTests(SimpleTestCase):
     def test_account_statsbydate_requested_fields_exist_in_contract(self):
         contract = _load_contract("wows-account-statsbydate.yaml")
         documented_paths = _documented_response_paths(contract)
-        requested_paths = _requested_field_paths(players_api._fetch_snapshot_data)
+        requested_paths = _requested_field_paths(
+            players_api._fetch_snapshot_data)
 
         self.assertTrue(requested_paths)
         self.assertTrue(requested_paths.issubset(documented_paths))
@@ -88,7 +90,8 @@ class UpstreamContractAlignmentTests(SimpleTestCase):
     def test_clans_accountinfo_requested_fields_exist_in_contract(self):
         contract = _load_contract("wows-clans-accountinfo.yaml")
         documented_paths = _documented_response_paths(contract)
-        requested_paths = _requested_field_paths(clans_api._fetch_clan_membership_for_player)
+        requested_paths = _requested_field_paths(
+            clans_api._fetch_clan_membership_for_player)
 
         self.assertTrue(requested_paths)
         self.assertTrue(requested_paths.issubset(documented_paths))

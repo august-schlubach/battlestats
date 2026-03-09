@@ -31,7 +31,8 @@ class Command(BaseCommand):
         batch_size = max(options['batch_size'], 1)
         missing_only = options['missing_only']
 
-        queryset = Player.objects.select_related('explorer_summary').order_by('id')
+        queryset = Player.objects.select_related(
+            'explorer_summary').order_by('id')
         if missing_only:
             queryset = queryset.filter(explorer_summary__isnull=True)
         if limit:
@@ -45,4 +46,5 @@ class Command(BaseCommand):
             if processed % batch_size == 0:
                 self.stdout.write(f'Processed {processed} players...')
 
-        self.stdout.write(self.style.SUCCESS(f'Backfilled explorer summaries for {processed} players.'))
+        self.stdout.write(self.style.SUCCESS(
+            f'Backfilled explorer summaries for {processed} players.'))

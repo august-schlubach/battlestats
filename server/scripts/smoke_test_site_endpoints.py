@@ -51,9 +51,11 @@ def validate_case(case: SmokeCase, payload: Any) -> list[str]:
         if not isinstance(payload, list):
             return [f"expected list payload, got {type(payload).__name__}"]
         if case.min_items is not None and len(payload) < case.min_items:
-            errors.append(f"expected at least {case.min_items} items, got {len(payload)}")
+            errors.append(
+                f"expected at least {case.min_items} items, got {len(payload)}")
         if case.exact_items is not None and len(payload) != case.exact_items:
-            errors.append(f"expected exactly {case.exact_items} items, got {len(payload)}")
+            errors.append(
+                f"expected exactly {case.exact_items} items, got {len(payload)}")
         return errors
 
     if case.json_type == "dict":
@@ -88,7 +90,8 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
     pending_seen = False
 
     for attempt in range(attempts):
-        status_code, headers, payload = fetch_json(base_url, case.path, timeout)
+        status_code, headers, payload = fetch_json(
+            base_url, case.path, timeout)
         last_status = status_code
         last_payload = payload
 
@@ -115,15 +118,19 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
 
     pending_note = " after pending refresh" if pending_seen else ""
     errors = validate_case(case, last_payload)
-    detail = "; ".join(errors) if errors else f"payload validation failed{pending_note}"
+    detail = "; ".join(
+        errors) if errors else f"payload validation failed{pending_note}"
     return False, f"{case.name}: {detail}"
 
 
 def build_cases() -> list[SmokeCase]:
     return [
-        SmokeCase("landing_clans", "/api/landing/clans/", json_type="list", min_items=1),
-        SmokeCase("landing_players", "/api/landing/players/", json_type="list", min_items=1),
-        SmokeCase("landing_recent", "/api/landing/recent/", json_type="list", min_items=1),
+        SmokeCase("landing_clans", "/api/landing/clans/",
+                  json_type="list", min_items=1),
+        SmokeCase("landing_players", "/api/landing/players/",
+                  json_type="list", min_items=1),
+        SmokeCase("landing_recent", "/api/landing/recent/",
+                  json_type="list", min_items=1),
         SmokeCase(
             "player_summary_shinn000",
             "/api/fetch/player_summary/1000270433/",
@@ -131,14 +138,22 @@ def build_cases() -> list[SmokeCase]:
             required_keys=("player_id", "name", "pvp_ratio"),
             exact_key_values={"name": "Shinn000"},
         ),
-        SmokeCase("randoms_maraxus1", "/api/fetch/randoms_data/1000954803/", json_type="list", min_items=1),
-        SmokeCase("tier_secap", "/api/fetch/tier_data/1000663088/", json_type="list", min_items=1),
-        SmokeCase("type_fourgate", "/api/fetch/type_data/1014916452/", json_type="list", min_items=1),
-        SmokeCase("activity_fourgate", "/api/fetch/activity_data/1014916452/", json_type="list", min_items=1),
-        SmokeCase("ranked_punkhunter25", "/api/fetch/ranked_data/1001243015/", json_type="list", min_items=1),
-        SmokeCase("ranked_empty_kevik70", "/api/fetch/ranked_data/1001712582/", json_type="list", exact_items=0),
-        SmokeCase("clan_data_naumachia", "/api/fetch/clan_data/1000055908:active", json_type="list", min_items=1),
-        SmokeCase("clan_members_naumachia", "/api/fetch/clan_members/1000055908/", json_type="list", min_items=1),
+        SmokeCase("randoms_maraxus1", "/api/fetch/randoms_data/1000954803/",
+                  json_type="list", min_items=1),
+        SmokeCase("tier_secap", "/api/fetch/tier_data/1000663088/",
+                  json_type="list", min_items=1),
+        SmokeCase("type_fourgate", "/api/fetch/type_data/1014916452/",
+                  json_type="list", min_items=1),
+        SmokeCase("activity_fourgate", "/api/fetch/activity_data/1014916452/",
+                  json_type="list", min_items=1),
+        SmokeCase("ranked_punkhunter25", "/api/fetch/ranked_data/1001243015/",
+                  json_type="list", min_items=1),
+        SmokeCase("ranked_empty_kevik70", "/api/fetch/ranked_data/1001712582/",
+                  json_type="list", exact_items=0),
+        SmokeCase("clan_data_naumachia", "/api/fetch/clan_data/1000055908:active",
+                  json_type="list", min_items=1),
+        SmokeCase("clan_members_naumachia",
+                  "/api/fetch/clan_members/1000055908/", json_type="list", min_items=1),
         SmokeCase(
             "clan_battles_naumachia",
             "/api/fetch/clan_battle_seasons/1000055908/",
@@ -146,7 +161,8 @@ def build_cases() -> list[SmokeCase]:
             min_items=1,
             retry_on_pending=True,
         ),
-        SmokeCase("wr_distribution", "/api/fetch/wr_distribution/", json_type="list", min_items=1),
+        SmokeCase("wr_distribution", "/api/fetch/wr_distribution/",
+                  json_type="list", min_items=1),
         SmokeCase(
             "player_distribution_win_rate",
             "/api/fetch/player_distribution/win_rate/",
@@ -171,7 +187,8 @@ def build_cases() -> list[SmokeCase]:
             json_type="dict",
             required_keys=("players", "clans"),
         ),
-        SmokeCase("player_missing_404", "/api/player/PlayerThatWillNeverExist/", expected_status=404),
+        SmokeCase("player_missing_404",
+                  "/api/player/PlayerThatWillNeverExist/", expected_status=404),
         SmokeCase(
             "clan_filter_invalid_400",
             "/api/fetch/clan_data/1000055908:bogus",
@@ -183,9 +200,12 @@ def build_cases() -> list[SmokeCase]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Smoke test live Battlestats API endpoints.")
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="Base URL for the running app.")
-    parser.add_argument("--timeout", type=float, default=20.0, help="Per-request timeout in seconds.")
+    parser = argparse.ArgumentParser(
+        description="Smoke test live Battlestats API endpoints.")
+    parser.add_argument("--base-url", default=DEFAULT_BASE_URL,
+                        help="Base URL for the running app.")
+    parser.add_argument("--timeout", type=float, default=20.0,
+                        help="Per-request timeout in seconds.")
     return parser.parse_args()
 
 

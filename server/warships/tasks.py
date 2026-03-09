@@ -27,7 +27,8 @@ RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
-    value = os.getenv("CLAN_BATTLE_WARM_CLAN_IDS", "1000055908") if raw_value is None else raw_value
+    value = os.getenv("CLAN_BATTLE_WARM_CLAN_IDS",
+                      "1000055908") if raw_value is None else raw_value
     return [clan_id.strip() for clan_id in str(value).split(",") if clan_id.strip()]
 
 
@@ -154,7 +155,8 @@ def update_type_data_task(player_id):
 def update_clan_battle_summary_task(self, clan_id):
     from warships.data import refresh_clan_battle_seasons_cache
 
-    logger.info("Starting update_clan_battle_summary_task for clan_id=%s", clan_id)
+    logger.info(
+        "Starting update_clan_battle_summary_task for clan_id=%s", clan_id)
     return _run_locked_task(
         "update_clan_battle_summary",
         clan_id,
@@ -169,7 +171,8 @@ def warm_clan_battle_summaries_task(self, clan_ids=None):
 
     configured_ids = clan_ids or _configured_clan_battle_warm_ids()
     if not configured_ids:
-        logger.info("Skipping warm_clan_battle_summaries_task because no clan ids are configured")
+        logger.info(
+            "Skipping warm_clan_battle_summaries_task because no clan ids are configured")
         return {"status": "skipped", "reason": "no-clans-configured"}
 
     results = []
@@ -182,7 +185,8 @@ def warm_clan_battle_summaries_task(self, clan_ids=None):
         )
         results.append({"clan_id": str(clan_id), **result})
 
-    logger.info("Finished warm_clan_battle_summaries_task for clan_ids=%s", configured_ids)
+    logger.info(
+        "Finished warm_clan_battle_summaries_task for clan_ids=%s", configured_ids)
     return {"status": "completed", "results": results}
 
 
@@ -191,11 +195,13 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None):
     from warships.clan_crawl import run_clan_crawl
 
     if not cache.add(CLAN_CRAWL_LOCK_KEY, self.request.id, timeout=CLAN_CRAWL_LOCK_TIMEOUT):
-        logger.warning("Skipping crawl_all_clans_task because another crawl is already running")
+        logger.warning(
+            "Skipping crawl_all_clans_task because another crawl is already running")
         return {"status": "skipped", "reason": "already-running"}
 
     try:
-        cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(), timeout=CLAN_CRAWL_LOCK_TIMEOUT)
+        cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(),
+                  timeout=CLAN_CRAWL_LOCK_TIMEOUT)
         logger.info(
             "Starting crawl_all_clans_task resume=%s dry_run=%s limit=%s",
             resume,
@@ -217,10 +223,12 @@ def ensure_crawl_all_clans_running_task():
 
     if lock_value is not None:
         if heartbeat is not None and now_ts - float(heartbeat) <= CLAN_CRAWL_HEARTBEAT_STALE_AFTER:
-            logger.info("Crawl watchdog found active crawl with fresh heartbeat")
+            logger.info(
+                "Crawl watchdog found active crawl with fresh heartbeat")
             return {"status": "skipped", "reason": "running"}
 
-        logger.warning("Crawl watchdog found stale crawl lock; clearing it and resuming crawl")
+        logger.warning(
+            "Crawl watchdog found stale crawl lock; clearing it and resuming crawl")
         cache.delete(CLAN_CRAWL_LOCK_KEY)
         cache.delete(CLAN_CRAWL_HEARTBEAT_KEY)
         crawl_all_clans_task.delay(resume=True)

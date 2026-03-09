@@ -65,7 +65,18 @@ Observed on `https://api.worldofwarships.com/wows/account/info/`:
 Representative response for `1001162884`:
 
 ```json
-{"status":"ok","meta":{"count":1,"hidden":null},"data":{"1001162884":{"hidden_profile":false,"statistics":{"pvp":{"battles":38927}},"nickname":"deathdemon67","last_battle_time":1773014396}}}
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": {
+    "1001162884": {
+      "hidden_profile": false,
+      "statistics": { "pvp": { "battles": 38927 } },
+      "nickname": "deathdemon67",
+      "last_battle_time": 1773014396
+    }
+  }
+}
 ```
 
 ### 4. Live `account/statsbydate` did not return usable PvP slices
@@ -79,7 +90,11 @@ Observed on `https://api.worldofwarships.com/wows/account/statsbydate/` for the 
 Representative response:
 
 ```json
-{"status":"ok","meta":{"count":1,"hidden":null},"data":{"1001162884":{"pvp":null}}}
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": { "1001162884": { "pvp": null } }
+}
 ```
 
 Explicit recent-date test also returned null:
@@ -91,7 +106,11 @@ https://api.worldofwarships.com/wows/account/statsbydate/?application_id=APP_ID&
 Observed response shape:
 
 ```json
-{"status":"ok","meta":{"count":1,"hidden":null},"data":{"1001162884":{"pvp":null}}}
+{
+  "status": "ok",
+  "meta": { "count": 1, "hidden": null },
+  "data": { "1001162884": { "pvp": null } }
+}
 ```
 
 ## Reproduction Steps

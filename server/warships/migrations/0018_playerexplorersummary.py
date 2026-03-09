@@ -14,36 +14,46 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name='PlayerExplorerSummary',
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('id', models.BigAutoField(auto_created=True,
+                 primary_key=True, serialize=False, verbose_name='ID')),
                 ('battles_last_29_days', models.IntegerField(blank=True, null=True)),
                 ('wins_last_29_days', models.IntegerField(blank=True, null=True)),
-                ('active_days_last_29_days', models.IntegerField(blank=True, null=True)),
+                ('active_days_last_29_days',
+                 models.IntegerField(blank=True, null=True)),
                 ('recent_win_rate', models.FloatField(blank=True, null=True)),
-                ('activity_trend_direction', models.CharField(blank=True, max_length=16, null=True)),
+                ('activity_trend_direction', models.CharField(
+                    blank=True, max_length=16, null=True)),
                 ('ships_played_total', models.IntegerField(blank=True, null=True)),
                 ('ship_type_spread', models.IntegerField(blank=True, null=True)),
                 ('tier_spread', models.IntegerField(blank=True, null=True)),
-                ('ranked_seasons_participated', models.IntegerField(blank=True, null=True)),
+                ('ranked_seasons_participated',
+                 models.IntegerField(blank=True, null=True)),
                 ('latest_ranked_battles', models.IntegerField(blank=True, null=True)),
-                ('highest_ranked_league_recent', models.CharField(blank=True, max_length=32, null=True)),
+                ('highest_ranked_league_recent', models.CharField(
+                    blank=True, max_length=32, null=True)),
                 ('refreshed_at', models.DateTimeField(auto_now=True)),
-                ('player', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='explorer_summary', to='warships.player')),
+                ('player', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE,
+                 related_name='explorer_summary', to='warships.player')),
             ],
         ),
         migrations.AddIndex(
             model_name='playerexplorersummary',
-            index=models.Index(fields=['battles_last_29_days'], name='explorer_battles29_idx'),
+            index=models.Index(
+                fields=['battles_last_29_days'], name='explorer_battles29_idx'),
         ),
         migrations.AddIndex(
             model_name='playerexplorersummary',
-            index=models.Index(fields=['active_days_last_29_days'], name='explorer_active29_idx'),
+            index=models.Index(
+                fields=['active_days_last_29_days'], name='explorer_active29_idx'),
         ),
         migrations.AddIndex(
             model_name='playerexplorersummary',
-            index=models.Index(fields=['ships_played_total'], name='explorer_ships_idx'),
+            index=models.Index(
+                fields=['ships_played_total'], name='explorer_ships_idx'),
         ),
         migrations.AddIndex(
             model_name='playerexplorersummary',
-            index=models.Index(fields=['ranked_seasons_participated'], name='explorer_ranked_idx'),
+            index=models.Index(
+                fields=['ranked_seasons_participated'], name='explorer_ranked_idx'),
         ),
     ]

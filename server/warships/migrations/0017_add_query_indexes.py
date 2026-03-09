@@ -18,30 +18,37 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name='player',
-            index=models.Index(fields=['is_hidden', 'last_battle_date'], name='player_hidden_battle_idx'),
+            index=models.Index(
+                fields=['is_hidden', 'last_battle_date'], name='player_hidden_battle_idx'),
         ),
         migrations.AddIndex(
             model_name='player',
-            index=models.Index(fields=['last_lookup'], name='player_last_lookup_idx'),
+            index=models.Index(fields=['last_lookup'],
+                               name='player_last_lookup_idx'),
         ),
         migrations.AddIndex(
             model_name='player',
-            index=models.Index(fields=['clan', 'last_battle_date'], name='player_clan_battle_idx'),
+            index=models.Index(
+                fields=['clan', 'last_battle_date'], name='player_clan_battle_idx'),
         ),
         migrations.AddIndex(
             model_name='player',
-            index=models.Index(fields=['pvp_battles', 'pvp_ratio'], name='player_battles_ratio_idx'),
+            index=models.Index(
+                fields=['pvp_battles', 'pvp_ratio'], name='player_battles_ratio_idx'),
         ),
         migrations.AddIndex(
             model_name='player',
-            index=models.Index(fields=['pvp_battles', 'pvp_survival_rate'], name='player_battles_surv_idx'),
+            index=models.Index(
+                fields=['pvp_battles', 'pvp_survival_rate'], name='player_battles_surv_idx'),
         ),
         migrations.AddIndex(
             model_name='player',
-            index=models.Index(django.db.models.functions.text.Lower('name'), name='player_name_lower_idx'),
+            index=models.Index(django.db.models.functions.text.Lower(
+                'name'), name='player_name_lower_idx'),
         ),
         migrations.AddIndex(
             model_name='clan',
-            index=models.Index(fields=['last_lookup'], name='clan_last_lookup_idx'),
+            index=models.Index(fields=['last_lookup'],
+                               name='clan_last_lookup_idx'),
         ),
     ]

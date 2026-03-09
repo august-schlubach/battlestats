@@ -313,7 +313,8 @@ def fetch_player_explorer_rows(
     ranked: str = 'all',
     min_pvp_battles: int = 0,
 ) -> list[dict]:
-    players = Player.objects.exclude(name='').select_related('explorer_summary').all()
+    players = Player.objects.exclude(
+        name='').select_related('explorer_summary').all()
 
     if query:
         players = players.filter(name__icontains=query)
@@ -776,7 +777,8 @@ def fetch_player_population_distribution(metric: str) -> dict:
     )
 
     if config['scale'] == 'log':
-        bins = _build_explicit_distribution_bins(qs, field_name, config['bin_edges'])
+        bins = _build_explicit_distribution_bins(
+            qs, field_name, config['bin_edges'])
     else:
         bins = _build_linear_distribution_bins(
             qs,
@@ -811,6 +813,7 @@ def fetch_wr_distribution() -> list[dict]:
         }
         for row in payload['bins']
     ]
+
 
 RANKED_SEASONS_CACHE_KEY = 'ranked:seasons:metadata'
 RANKED_SEASONS_CACHE_TTL = 86400  # 24 hours in seconds
