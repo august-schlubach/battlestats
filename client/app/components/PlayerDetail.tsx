@@ -234,17 +234,19 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 </div>
                             </DeferredSection>
 
-                            <DeferredSection
-                                className="mt-6"
-                                minHeight={204}
-                                placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
-                            >
-                                <div>
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Battles Played Distribution</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Shows where this player&apos;s PvP battle count falls across the tracked player base.</p>
-                                    <BattlesDistributionSVG playerBattles={player.pvp_battles} />
-                                </div>
-                            </DeferredSection>
+                            {player.pvp_battles >= 150 ? (
+                                <DeferredSection
+                                    className="mt-6"
+                                    minHeight={204}
+                                    placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
+                                >
+                                    <div>
+                                        <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Battles Played Distribution</h3>
+                                        <p className="mb-2 text-xs text-[#6baed6]">Shows where this player&apos;s PvP battle count falls across the tracked player base.</p>
+                                        <BattlesDistributionSVG playerBattles={player.pvp_battles} />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
 
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>

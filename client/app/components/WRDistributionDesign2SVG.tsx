@@ -56,6 +56,10 @@ const selectColorByWR = (winRatio: number): string => {
 
 const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
 
+const clampToDomain = (value: number, domain: CorrelationDomain): number => {
+    return Math.min(Math.max(value, domain.min), domain.max);
+};
+
 const interpolateTrendValue = (trend: CorrelationTrendPoint[], targetX: number): number | null => {
     if (!trend.length) {
         return null;
@@ -274,7 +278,8 @@ const drawChart = (
     const expectedSurvival = interpolateTrendValue(payload.trend, playerWR);
     const survivalDelta = expectedSurvival == null ? null : playerSurvivalRate - expectedSurvival;
     const playerColor = selectColorByWR(playerWR);
-    const playerX = x(playerWR);
+    const plottedPlayerWR = clampToDomain(playerWR, payload.x_domain);
+    const playerX = x(plottedPlayerWR);
     const playerY = y(playerSurvivalRate);
     const labelX = playerX > width * 0.7 ? playerX - 8 : playerX + 8;
     const labelAnchor = playerX > width * 0.7 ? 'end' : 'start';
