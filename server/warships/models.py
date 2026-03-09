@@ -40,6 +40,8 @@ class Player(models.Model):
     ranked_json = models.JSONField(null=True, blank=True)
     ranked_updated_at = models.DateTimeField(null=True, blank=True)
 
+    verdict = models.CharField(max_length=20, null=True, blank=True)
+
     def __str__(self):
         clan_name = self.clan.name if self.clan else "No Clan"
         return f"{self.name} ({self.player_id}) {clan_name}"
@@ -124,6 +126,7 @@ class PlayerExplorerSummary(models.Model):
     recent_win_rate = models.FloatField(null=True, blank=True)
     activity_trend_direction = models.CharField(
         max_length=16, null=True, blank=True)
+    kill_ratio = models.FloatField(null=True, blank=True)
     ships_played_total = models.IntegerField(null=True, blank=True)
     ship_type_spread = models.IntegerField(null=True, blank=True)
     tier_spread = models.IntegerField(null=True, blank=True)

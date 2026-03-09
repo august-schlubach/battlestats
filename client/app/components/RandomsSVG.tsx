@@ -654,7 +654,6 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 </div>
                 <div className="mt-3 mb-1 flex items-center justify-between gap-4">
                     <div className="font-semibold text-[#334155]">Tier</div>
-                    <div className="text-xs text-[#94a3b8]">Multiple selections are supported.</div>
                 </div>
                 <div className="flex flex-wrap gap-1">
                     <button

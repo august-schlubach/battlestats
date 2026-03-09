@@ -155,6 +155,70 @@ def _calculate_activity_trend_direction(activity_rows: list[dict]) -> str:
     return 'flat'
 
 
+def _coerce_battle_rows(battles_rows: Any) -> list[dict]:
+    if not isinstance(battles_rows, list):
+        return []
+
+    return [row for row in battles_rows if isinstance(row, dict)]
+
+
+def _calculate_player_kill_ratio(battle_rows: list[dict]) -> Optional[float]:
+    total_frags = 0.0
+    total_battles = 0
+
+    for row in battle_rows:
+        battles = int(row.get('pvp_battles', 0) or 0)
+        if battles <= 0:
+            continue
+
+        frags = row.get('frags')
+        if frags is not None:
+            total_frags += float(frags or 0)
+        else:
+            total_frags += float(row.get('kdr', 0) or 0) * battles
+        total_battles += battles
+
+    if total_battles <= 0:
+        return None
+
+    return round(total_frags / total_battles, 2)
+
+
+def _summary_has_battle_data(player: Player, battle_rows: list[dict]) -> bool:
+    if battle_rows:
+        return True
+
+    return (player.pvp_battles or 0) <= 0
+
+
+def _explorer_summary_needs_refresh(player: Player) -> bool:
+    explorer_summary = getattr(player, 'explorer_summary', None)
+    if explorer_summary is None:
+        return True
+
+    battle_rows = _coerce_battle_rows(player.battles_json)
+    has_battle_data = _summary_has_battle_data(player, battle_rows)
+    played_rows = [
+        row for row in battle_rows
+        if int(row.get('pvp_battles', 0) or 0) > 0
+    ]
+
+    expected_ships_played_total = len(played_rows) if has_battle_data else None
+    expected_kill_ratio = _calculate_player_kill_ratio(
+        battle_rows) if has_battle_data else None
+
+    if explorer_summary.ships_played_total != expected_ships_played_total:
+        return True
+    if explorer_summary.kill_ratio != expected_kill_ratio:
+        return True
+    if explorer_summary.ranked_seasons_participated is None and isinstance(player.ranked_json, list):
+        return True
+    if explorer_summary.battles_last_29_days is None and isinstance(player.activity_json, list):
+        return True
+
+    return False
+
+
 def build_player_summary(
     player: Player,
     activity_rows: Any = None,
@@ -190,17 +254,12 @@ def build_player_summary(
         'latest_ranked_battles': None,
         'highest_ranked_league_recent': None,
     }
-    # Calculate player-level kill ratio (KR) as total frags / total pvp_battles
-    total_frags = 0
-    total_pvp_battles = 0
-    battles_source = battles_rows if battles_rows is not None else player.battles_json
-    if isinstance(battles_source, list):
-        for row in battles_source:
-            if isinstance(row, dict):
-                total_frags += int(row.get('frags', 0) or 0)
-                total_pvp_battles += int(row.get('pvp_battles', 0) or 0)
-    kill_ratio = round(total_frags / total_pvp_battles, 2) if total_pvp_battles > 0 else None
-    summary['kill_ratio'] = kill_ratio
+    normalized_battles_rows = _coerce_battle_rows(
+        battles_rows if battles_rows is not None else player.battles_json
+    )
+    has_battle_data = _summary_has_battle_data(player, normalized_battles_rows)
+    summary['kill_ratio'] = _calculate_player_kill_ratio(
+        normalized_battles_rows) if has_battle_data else None
 
     if player.is_hidden:
         return summary
@@ -213,6 +272,7 @@ def build_player_summary(
             'active_days_last_29_days': explorer_summary.active_days_last_29_days,
             'recent_win_rate': explorer_summary.recent_win_rate,
             'activity_trend_direction': explorer_summary.activity_trend_direction,
+            'kill_ratio': explorer_summary.kill_ratio,
             'ships_played_total': explorer_summary.ships_played_total,
             'ship_type_spread': explorer_summary.ship_type_spread,
             'tier_spread': explorer_summary.tier_spread,
@@ -229,10 +289,6 @@ def build_player_summary(
     wins_last_29_days = sum(row['wins'] for row in normalized_activity_rows)
     active_days_last_29_days = sum(
         1 for row in normalized_activity_rows if row['battles'] > 0)
-
-    normalized_battles_rows = battles_rows if battles_rows is not None else player.battles_json
-    if not isinstance(normalized_battles_rows, list):
-        normalized_battles_rows = []
 
     played_rows = [
         row for row in normalized_battles_rows
@@ -256,9 +312,9 @@ def build_player_summary(
         'active_days_last_29_days': active_days_last_29_days,
         'recent_win_rate': round(wins_last_29_days / battles_last_29_days, 3) if battles_last_29_days > 0 else None,
         'activity_trend_direction': _calculate_activity_trend_direction(normalized_activity_rows),
-        'ships_played_total': len(played_rows),
-        'ship_type_spread': ship_type_spread,
-        'tier_spread': tier_spread,
+        'ships_played_total': len(played_rows) if has_battle_data else None,
+        'ship_type_spread': ship_type_spread if has_battle_data else None,
+        'tier_spread': tier_spread if has_battle_data else None,
         'ranked_seasons_participated': len(normalized_ranked_rows),
         'latest_ranked_battles': int(latest_ranked_row.get('total_battles', 0) or 0) if latest_ranked_row else None,
         'highest_ranked_league_recent': latest_ranked_row.get('highest_league_name') if latest_ranked_row else None,
@@ -352,7 +408,7 @@ def fetch_player_explorer_rows(
 
     rows = []
     for player in players:
-        if not hasattr(player, 'explorer_summary'):
+        if _explorer_summary_needs_refresh(player):
             refresh_player_explorer_summary(player)
         rows.append(build_player_summary(player))
 
@@ -1616,6 +1672,16 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
             "survived_battles", 0) / player.pvp_battles) * 100, 2) if player.pvp_battles else 0
         player.wins_survival_rate = round((pvp_stats.get(
             "survived_wins", 0) / player.pvp_wins) * 100, 2) if player.pvp_wins else 0
+
+        # Compute player verdict based on WR and survival rate
+        if player.pvp_battles < 100:
+            player.verdict = 'Recruit'
+        elif player.pvp_ratio > 52:
+            player.verdict = 'Daredevil' if player.pvp_survival_rate < 33 else 'Warrior'
+        elif player.pvp_ratio >= 48:
+            player.verdict = 'Jetsam' if player.pvp_survival_rate < 33 else 'Flotsam'
+        else:
+            player.verdict = 'Potato' if player.pvp_survival_rate < 33 else 'Survivor'
     else:
         player.total_battles = 0
         player.pvp_battles = 0
@@ -1636,6 +1702,7 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         player.randoms_updated_at = None
         player.ranked_json = None
         player.ranked_updated_at = None
+        player.verdict = None
 
     player.last_fetch = datetime.now()
     player.save()

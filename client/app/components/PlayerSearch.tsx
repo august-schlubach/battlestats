@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import ClanDetail from './ClanDetail';
 import PlayerDetail from './PlayerDetail';
@@ -54,6 +54,7 @@ interface PlayerData {
     clan_name: string;
     clan_tag: string | null;
     clan_id: number;
+    verdict: string | null;
 }
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -84,6 +85,7 @@ const SEARCH_DEBOUNCE_MS = 180;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SEARCH_SUGGESTIONS_ID = 'player-search-suggestions';
+const SHOW_PLAYER_EXPLORER = false;
 
 const PlayerSearch: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
@@ -203,11 +205,11 @@ const PlayerSearch: React.FC = () => {
         handleSearch();
     };
 
-    const handleSelectClan = (clan: LandingClan) => {
+    const handleSelectClan = useCallback((clan: LandingClan) => {
         setSelectedClan(clan);
         setPlayerData(null);
         setError('');
-    };
+    }, []);
 
     const handleSelectClanById = async (clanId: number, clanName: string) => {
         const existingClan = clans.find((clan) => clan.clan_id === clanId);
@@ -244,6 +246,8 @@ const PlayerSearch: React.FC = () => {
             });
         }
     };
+
+    const visibleLandingClans = useMemo(() => clans.slice(0, LANDING_LIMIT), [clans]);
 
     const handleSelectMember = async (memberName: string) => {
         setSearchTerm(memberName);
@@ -445,13 +449,13 @@ const PlayerSearch: React.FC = () => {
                             <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Clans</h3>
                             <div className="mt-3">
                                 <LandingClanSVG
-                                    clans={clans.slice(0, LANDING_LIMIT)}
+                                    clans={visibleLandingClans}
                                     heatmapClans={clans}
                                     onSelectClan={handleSelectClan}
                                 />
                             </div>
                             <p className="mt-6 text-sm leading-7 text-[#4292c6]">
-                                {clans.slice(0, LANDING_LIMIT).map((clan) => (
+                                {visibleLandingClans.map((clan) => (
                                     <button
                                         key={clan.clan_id}
                                         onClick={() => handleSelectClan(clan)}
@@ -515,7 +519,7 @@ const PlayerSearch: React.FC = () => {
                         </div>
                     )}
 
-                    <PlayerExplorer onSelectMember={handleSelectMember} />
+                    {SHOW_PLAYER_EXPLORER ? <PlayerExplorer onSelectMember={handleSelectMember} /> : null}
                 </div>
             )}
         </div>
