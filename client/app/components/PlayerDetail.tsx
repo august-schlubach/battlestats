@@ -149,7 +149,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             </div>
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Seasons</h3>
-                                <p className="mb-2 text-xs text-[#6baed6]">Recent ranked season performance, including league finish and best sprint.</p>
+                                <p className="mb-2 text-xs text-[#6baed6]">Historical ranked season performance, including league finish.</p>
                                 <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <div className="mt-8">

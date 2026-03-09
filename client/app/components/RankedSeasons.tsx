@@ -40,32 +40,6 @@ const leagueColors: Record<string, string> = {
     Bronze: 'border-orange-300 bg-orange-50 text-orange-800',
 };
 
-const formatTimestamp = (timestamp: string | null): string => {
-    if (!timestamp) {
-        return 'unknown';
-    }
-
-    const parsed = new Date(timestamp);
-    if (Number.isNaN(parsed.getTime())) {
-        return 'unknown';
-    }
-
-    return parsed.toLocaleString();
-};
-
-const getFreshnessStatus = (timestamp: string | null): 'fresh' | 'stale' | 'unknown' => {
-    if (!timestamp) {
-        return 'unknown';
-    }
-
-    const updatedAt = new Date(timestamp).getTime();
-    if (Number.isNaN(updatedAt)) {
-        return 'unknown';
-    }
-
-    return Date.now() - updatedAt <= 24 * 60 * 60 * 1000 ? 'fresh' : 'stale';
-};
-
 const formatWinRate = (winRate: number): string => `${(winRate * 100).toFixed(1)}%`;
 
 const getWinRateColorClass = (winRate: number): string => {
@@ -121,7 +95,6 @@ const formatDateRange = (startDate: string | null, endDate: string | null): stri
 
 const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = false }) => {
     const [seasons, setSeasons] = useState<RankedSeason[]>([]);
-    const [rankedUpdatedAt, setRankedUpdatedAt] = useState<string | null>(null);
     const [isChartLoading, setIsChartLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [sortKey, setSortKey] = useState<SortKey>('season');
@@ -146,7 +119,6 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 }
 
                 setSeasons(result.slice().sort((left, right) => right.season_id - left.season_id));
-                setRankedUpdatedAt(response.headers.get('X-Ranked-Updated-At'));
             } catch (fetchError) {
                 if (!isMounted) {
                     return;
@@ -155,7 +127,6 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 console.error('Error fetching ranked data:', fetchError);
                 setError('Unable to load ranked data right now.');
                 setSeasons([]);
-                setRankedUpdatedAt(null);
             } finally {
                 if (isMounted) {
                     setIsChartLoading(false);
@@ -170,7 +141,6 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
         };
     }, [playerId]);
 
-    const rankedFreshness = getFreshnessStatus(rankedUpdatedAt);
     const shouldGrayOut = isLoading || isChartLoading;
     const sortedSeasons = seasons.slice().sort((left, right) => {
         let comparison = 0;
@@ -190,6 +160,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
         return sortDirection === 'asc' ? comparison : -comparison;
     });
     const visibleSeasons = sortedSeasons.slice(0, 6);
+    const shouldShowTable = shouldGrayOut || visibleSeasons.length > 0;
 
     const handleSort = (nextKey: SortKey): void => {
         if (sortKey === nextKey) {
@@ -211,14 +182,6 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
 
     return (
         <div>
-            <div className="mb-2 text-xs text-gray-600">
-                Ranked data last refreshed: {formatTimestamp(rankedUpdatedAt)}
-                {' '}
-                <span className={rankedFreshness === 'fresh' ? 'text-green-700' : rankedFreshness === 'stale' ? 'text-red-700' : 'text-gray-500'}>
-                    {rankedFreshness === 'fresh' ? 'fresh' : rankedFreshness === 'stale' ? 'stale' : 'unknown'}
-                </span>
-            </div>
-
             {error ? (
                 <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                     {error}
@@ -229,74 +192,76 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 <p className="text-sm text-gray-500">No ranked seasons found for this player.</p>
             ) : null}
 
-            <div className="relative">
-                <div className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'} aria-busy={shouldGrayOut}>
-                    <div className="overflow-x-auto rounded-lg border border-[#c6dbef] bg-white">
-                        <div className="max-h-[21rem] overflow-y-auto">
-                            <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
-                                <thead className="sticky top-0 bg-[#f0f7ff]">
-                                <tr>
-                                    <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
-                                        <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('season')}>
-                                            Season <span aria-hidden="true">{getSortMarker('season')}</span>
-                                        </button>
-                                    </th>
-                                    <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
-                                        <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('highestRank')}>
-                                            Highest Rank <span aria-hidden="true">{getSortMarker('highestRank')}</span>
-                                        </button>
-                                    </th>
-                                    <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
-                                        <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('sprints')}>
-                                            Sprints <span aria-hidden="true">{getSortMarker('sprints')}</span>
-                                        </button>
-                                    </th>
-                                    <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
-                                        <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('wins')}>
-                                            Wins <span aria-hidden="true">{getSortMarker('wins')}</span>
-                                        </button>
-                                    </th>
-                                    <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
-                                        <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('winRate')}>
-                                            WR <span aria-hidden="true">{getSortMarker('winRate')}</span>
-                                        </button>
-                                    </th>
-                                </tr>
-                                </thead>
-                                <tbody className="divide-y divide-[#edf4fb]">
-                                {visibleSeasons.map((season) => {
-                                    const badgeClassName = leagueColors[season.highest_league_name] || leagueColors.Bronze;
-
-                                    return (
-                                        <tr key={season.season_id} className="align-top">
-                                            <td className="px-3 py-3 text-[#084594]">
-                                                <p className="font-semibold">{season.season_label} - {season.season_name}</p>
-                                                <p className="mt-1 text-xs text-[#6baed6]">{formatDateRange(season.start_date, season.end_date)}</p>
-                                            </td>
-                                            <td className="px-3 py-3">
-                                                <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badgeClassName}`}>
-                                                    {season.highest_league_name}
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.sprints_played}</td>
-                                            <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_wins.toLocaleString()}</td>
-                                            <td className={`px-3 py-3 text-right font-semibold ${getWinRateColorClass(season.win_rate)}`}>{formatWinRate(season.win_rate)}</td>
+            {shouldShowTable ? (
+                <div className="relative">
+                    <div className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'} aria-busy={shouldGrayOut}>
+                        <div className="overflow-x-auto rounded-lg border border-[#c6dbef] bg-white">
+                            <div className="max-h-[21rem] overflow-y-auto">
+                                <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
+                                    <thead className="sticky top-0 bg-[#f0f7ff]">
+                                        <tr>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('season')}>
+                                                    Season <span aria-hidden="true">{getSortMarker('season')}</span>
+                                                </button>
+                                            </th>
+                                            <th scope="col" className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                <button type="button" className="inline-flex items-center gap-1" onClick={() => handleSort('highestRank')}>
+                                                    Highest Rank <span aria-hidden="true">{getSortMarker('highestRank')}</span>
+                                                </button>
+                                            </th>
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('sprints')}>
+                                                    Sprints <span aria-hidden="true">{getSortMarker('sprints')}</span>
+                                                </button>
+                                            </th>
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('wins')}>
+                                                    Wins <span aria-hidden="true">{getSortMarker('wins')}</span>
+                                                </button>
+                                            </th>
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('winRate')}>
+                                                    WR <span aria-hidden="true">{getSortMarker('winRate')}</span>
+                                                </button>
+                                            </th>
                                         </tr>
-                                    );
-                                })}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody className="divide-y divide-[#edf4fb]">
+                                        {visibleSeasons.map((season) => {
+                                            const badgeClassName = leagueColors[season.highest_league_name] || leagueColors.Bronze;
+
+                                            return (
+                                                <tr key={season.season_id} className="align-top">
+                                                    <td className="px-3 py-3 text-[#084594]">
+                                                        <p className="font-semibold">{season.season_label} - {season.season_name}</p>
+                                                        <p className="mt-1 text-xs text-[#6baed6]">{formatDateRange(season.start_date, season.end_date)}</p>
+                                                    </td>
+                                                    <td className="px-3 py-3">
+                                                        <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badgeClassName}`}>
+                                                            {season.highest_league_name}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.sprints_played}</td>
+                                                    <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_wins.toLocaleString()}</td>
+                                                    <td className={`px-3 py-3 text-right font-semibold ${getWinRateColorClass(season.win_rate)}`}>{formatWinRate(season.win_rate)}</td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
+                    {shouldGrayOut ? (
+                        <div className="absolute inset-0 flex items-center justify-center rounded bg-gray-100/65">
+                            <span className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600">
+                                Loading ranked data...
+                            </span>
+                        </div>
+                    ) : null}
                 </div>
-                {shouldGrayOut ? (
-                    <div className="absolute inset-0 flex items-center justify-center rounded bg-gray-100/65">
-                        <span className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600">
-                            Loading ranked data...
-                        </span>
-                    </div>
-                ) : null}
-            </div>
+            ) : null}
         </div>
     );
 };

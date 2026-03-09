@@ -1,6 +1,8 @@
 from __future__ import absolute_import, unicode_literals
 import logging
 
+from django.core.cache import cache
+
 from battlestats.celery import app
 
 
@@ -10,6 +12,13 @@ TASK_OPTS = {
     "soft_time_limit": 540,
     "ignore_result": True,
 }
+CRAWL_TASK_OPTS = {
+    "time_limit": 6 * 60 * 60,
+    "soft_time_limit": 5 * 60 * 60 + 45 * 60,
+    "ignore_result": True,
+}
+CLAN_CRAWL_LOCK_KEY = "warships:tasks:crawl_all_clans:lock"
+CLAN_CRAWL_LOCK_TIMEOUT = 8 * 60 * 60
 
 
 @app.task(**TASK_OPTS)
@@ -87,3 +96,25 @@ def update_type_data_task(player_id):
     from warships.data import update_type_data
     logger.info("Starting update_type_data_task for player_id=%s", player_id)
     update_type_data(player_id=player_id)
+
+
+@app.task(bind=True, **CRAWL_TASK_OPTS)
+def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None):
+    from warships.clan_crawl import run_clan_crawl
+
+    if not cache.add(CLAN_CRAWL_LOCK_KEY, self.request.id, timeout=CLAN_CRAWL_LOCK_TIMEOUT):
+        logger.warning("Skipping crawl_all_clans_task because another crawl is already running")
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        logger.info(
+            "Starting crawl_all_clans_task resume=%s dry_run=%s limit=%s",
+            resume,
+            dry_run,
+            limit,
+        )
+        summary = run_clan_crawl(resume=resume, dry_run=dry_run, limit=limit)
+        logger.info("Finished crawl_all_clans_task: %s", summary)
+        return {"status": "completed", **summary}
+    finally:
+        cache.delete(CLAN_CRAWL_LOCK_KEY)

@@ -23,7 +23,6 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId, isLoading = false }) 
     const [selectedTiers, setSelectedTiers] = useState<number[]>([]);
     const [isChartLoading, setIsChartLoading] = useState(false);
     const [randomsUpdatedAt, setRandomsUpdatedAt] = useState<string | null>(null);
-    const [battlesUpdatedAt, setBattlesUpdatedAt] = useState<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Fetch ALL ships once
@@ -35,7 +34,6 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId, isLoading = false }) 
                 const result: RandomsRow[] = await response.json();
                 setAllShips(result);
                 setRandomsUpdatedAt(response.headers.get('X-Randoms-Updated-At'));
-                setBattlesUpdatedAt(response.headers.get('X-Battles-Updated-At'));
 
                 const types = Array.from(new Set(result.map((r) => r.ship_type)));
                 const tiers = Array.from(new Set(result.map((r) => r.ship_tier))).sort((a, b) => b - a);
@@ -248,7 +246,6 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({ playerId, isLoading = false }) 
                 <span className={randomsFreshness === 'fresh' ? 'text-green-700' : randomsFreshness === 'stale' ? 'text-red-700' : 'text-gray-500'}>
                     {randomsFreshness === 'fresh' ? 'fresh' : randomsFreshness === 'stale' ? 'stale' : 'unknown'}
                 </span>
-                {battlesUpdatedAt ? ` (battles cache: ${formatTimestamp(battlesUpdatedAt)})` : ''}
             </div>
             <div className="mb-2 text-sm">
                 <div className="mb-1 font-semibold">Ship Type</div>
