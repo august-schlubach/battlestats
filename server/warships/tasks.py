@@ -19,24 +19,58 @@ CRAWL_TASK_OPTS = {
 }
 CLAN_CRAWL_LOCK_KEY = "warships:tasks:crawl_all_clans:lock"
 CLAN_CRAWL_LOCK_TIMEOUT = 8 * 60 * 60
+RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 
 
-@app.task(**TASK_OPTS)
-def update_clan_data_task(clan_id):
+def _task_lock_key(task_name: str, resource_id: object) -> str:
+    return f"warships:tasks:{task_name}:{resource_id}:lock"
+
+
+def _run_locked_task(task_name: str, resource_id: object, request_id: str, callback):
+    lock_key = _task_lock_key(task_name, resource_id)
+    if not cache.add(lock_key, request_id, timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping %s for resource=%s because another refresh is already running",
+            task_name,
+            resource_id,
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        callback()
+        return {"status": "completed"}
+    finally:
+        cache.delete(lock_key)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def update_clan_data_task(self, clan_id):
     from warships.data import update_clan_data
+
     logger.info("Starting update_clan_data_task for clan_id=%s", clan_id)
-    update_clan_data(clan_id=clan_id)
+    return _run_locked_task(
+        "update_clan_data",
+        clan_id,
+        self.request.id,
+        lambda: update_clan_data(clan_id=clan_id),
+    )
 
 
-@app.task(**TASK_OPTS)
-def update_clan_members_task(clan_id):
+@app.task(bind=True, **TASK_OPTS)
+def update_clan_members_task(self, clan_id):
     from warships.data import update_clan_members
+
     logger.info("Starting update_clan_members_task for clan_id=%s", clan_id)
-    update_clan_members(clan_id=clan_id)
+    return _run_locked_task(
+        "update_clan_members",
+        clan_id,
+        self.request.id,
+        lambda: update_clan_members(clan_id=clan_id),
+    )
 
 
-@app.task(**TASK_OPTS)
-def update_player_data_task(player_id, force_refresh=False):
+@app.task(bind=True, **TASK_OPTS)
+def update_player_data_task(self, player_id, force_refresh=False):
     from warships.data import update_player_data
     from warships.models import Player
 
@@ -45,8 +79,17 @@ def update_player_data_task(player_id, force_refresh=False):
         player_id,
         force_refresh,
     )
-    player = Player.objects.get(player_id=player_id)
-    update_player_data(player=player, force_refresh=force_refresh)
+
+    def _refresh_player():
+        player = Player.objects.get(player_id=player_id)
+        update_player_data(player=player, force_refresh=force_refresh)
+
+    return _run_locked_task(
+        "update_player_data",
+        player_id,
+        self.request.id,
+        _refresh_player,
+    )
 
 
 @app.task(**TASK_OPTS)

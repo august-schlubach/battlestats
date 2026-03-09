@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.core.cache import cache
 from django.utils import timezone
 
 from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data
@@ -167,6 +168,31 @@ class PlayerDataHardeningTests(TestCase):
         self.assertEqual(player.name, "StableCaptain")
         self.assertEqual(player.total_battles, 77)
 
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_invalidates_landing_players_cache(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+    ):
+        player = Player.objects.create(
+            name="CachedCaptain",
+            player_id=9191,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        cache.set("landing:players", [{"name": "stale"}], 60)
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 9191,
+            "nickname": "CachedCaptain",
+            "hidden_profile": False,
+            "statistics": {"battles": 10, "pvp": {"battles": 8, "wins": 4, "losses": 4}},
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        self.assertIsNone(cache.get("landing:players"))
+
     @patch("warships.data._fetch_clan_data")
     def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):
         clan = Clan.objects.create(
@@ -183,3 +209,30 @@ class PlayerDataHardeningTests(TestCase):
         self.assertEqual(clan.name, "ExistingClan")
         self.assertEqual(clan.tag, "EC")
         self.assertEqual(clan.members_count, 33)
+
+    @patch("warships.data._fetch_clan_member_ids", return_value=[])
+    @patch("warships.data._fetch_clan_data")
+    def test_update_clan_data_invalidates_landing_clans_cache(
+        self,
+        mock_fetch_clan_data,
+        _mock_fetch_member_ids,
+    ):
+        clan = Clan.objects.create(
+            clan_id=556,
+            name="CacheClan",
+            tag="CC",
+            members_count=12,
+        )
+        cache.set("landing:clans", [{"name": "stale"}], 60)
+        mock_fetch_clan_data.return_value = {
+            "name": "CacheClan",
+            "tag": "CC",
+            "members_count": 12,
+            "description": "updated",
+            "leader_id": 1,
+            "leader_name": "Boss",
+        }
+
+        update_clan_data(clan.clan_id)
+
+        self.assertIsNone(cache.get("landing:clans"))

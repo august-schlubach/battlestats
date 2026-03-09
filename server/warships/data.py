@@ -489,14 +489,12 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict) -> list:
         total_battles = 0
         total_wins = 0
         highest_league = 99  # lower = better (1=Gold)
-        sprints_played = 0
         best_sprint = None
         sprint_details = []
 
         for sprint_key, leagues in sprints.items():
             if leagues is None:
                 continue
-            sprints_played += 1
             sprint_battles = 0
             sprint_wins = 0
             sprint_best_league = 99
@@ -568,7 +566,6 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict) -> list:
             'total_battles': total_battles,
             'total_wins': total_wins,
             'win_rate': win_rate,
-            'sprints_played': sprints_played,
             'best_sprint': best_sprint,
             'sprints': sorted(sprint_details, key=lambda x: x['sprint_number']),
         })
@@ -779,7 +776,8 @@ def update_clan_data(clan_id: str) -> None:
 
     data = _fetch_clan_data(clan_id)
     if not data:
-        logging.warning("Skipping clan update because upstream returned no data for clan_id=%s", clan_id)
+        logging.warning(
+            "Skipping clan update because upstream returned no data for clan_id=%s", clan_id)
         return
 
     clan.members_count = data.get('members_count', 0)
@@ -790,6 +788,7 @@ def update_clan_data(clan_id: str) -> None:
     clan.leader_name = data.get('leader_name', '')
     clan.last_fetch = datetime.now()
     clan.save()
+    cache.delete('landing:clans')
     _invalidate_clan_battle_summary_cache(clan_id)
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
@@ -836,6 +835,7 @@ def update_clan_members(clan_id: str) -> None:
 
         update_player_data(player)
 
+    cache.delete('landing:clans')
     _invalidate_clan_battle_summary_cache(clan_id)
 
 
@@ -923,6 +923,7 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
 
     player.last_fetch = datetime.now()
     player.save()
+    cache.delete('landing:players')
     logging.info(f"Updated player personal data: {player.name}")
 
 
