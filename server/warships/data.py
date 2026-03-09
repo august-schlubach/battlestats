@@ -14,6 +14,34 @@ from warships.tasks import update_tiers_data_task, update_type_data_task
 logging.basicConfig(level=logging.INFO)
 
 
+PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD = 100
+PLAYSTYLE_ASSASSIN_WR_THRESHOLD = 60.0
+PLAYSTYLE_WARRIOR_WR_THRESHOLD = 52.0
+PLAYSTYLE_FLOTSAM_WR_THRESHOLD = 48.0
+PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD = 33.0
+
+
+def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_survival_rate: Optional[float]) -> Optional[str]:
+    if pvp_battles < PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD:
+        return 'Recruit'
+
+    if pvp_ratio is None or pvp_survival_rate is None:
+        return None
+
+    # 60% WR lines up with the WoWS unicum band and is high enough to feel elite
+    # without pushing the label into super-unicum rarity.
+    if pvp_ratio >= PLAYSTYLE_ASSASSIN_WR_THRESHOLD:
+        return 'Assassin'
+
+    if pvp_ratio > PLAYSTYLE_WARRIOR_WR_THRESHOLD:
+        return 'Daredevil' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Warrior'
+
+    if pvp_ratio >= PLAYSTYLE_FLOTSAM_WR_THRESHOLD:
+        return 'Jetsam' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Flotsam'
+
+    return 'Potato' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Survivor'
+
+
 def _coerce_activity_rows(activity_rows: Any) -> list[dict]:
     if not isinstance(activity_rows, list):
         return []
@@ -1673,15 +1701,11 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
         player.wins_survival_rate = round((pvp_stats.get(
             "survived_wins", 0) / player.pvp_wins) * 100, 2) if player.pvp_wins else 0
 
-        # Compute player verdict based on WR and survival rate
-        if player.pvp_battles < 100:
-            player.verdict = 'Recruit'
-        elif player.pvp_ratio > 52:
-            player.verdict = 'Daredevil' if player.pvp_survival_rate < 33 else 'Warrior'
-        elif player.pvp_ratio >= 48:
-            player.verdict = 'Jetsam' if player.pvp_survival_rate < 33 else 'Flotsam'
-        else:
-            player.verdict = 'Potato' if player.pvp_survival_rate < 33 else 'Survivor'
+        player.verdict = compute_player_verdict(
+            pvp_battles=player.pvp_battles,
+            pvp_ratio=player.pvp_ratio,
+            pvp_survival_rate=player.pvp_survival_rate,
+        )
     else:
         player.total_battles = 0
         player.pvp_battles = 0

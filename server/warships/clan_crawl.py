@@ -136,6 +136,8 @@ def save_clan(info: Dict) -> Clan:
 
 
 def save_player(player_data: Dict, clan: Clan) -> None:
+    from warships.data import compute_player_verdict, refresh_player_explorer_summary
+
     if player_data is None:
         return
 
@@ -164,6 +166,7 @@ def save_player(player_data: Dict, clan: Clan) -> None:
 
     if player_data.get("hidden_profile"):
         player.is_hidden = True
+        player.verdict = None
     else:
         player.is_hidden = False
         stats = player_data.get("statistics") or {}
@@ -180,11 +183,14 @@ def save_player(player_data: Dict, clan: Clan) -> None:
             if pvp.get("battles")
             else None
         )
+        player.verdict = compute_player_verdict(
+            pvp_battles=player.pvp_battles,
+            pvp_ratio=player.pvp_ratio,
+            pvp_survival_rate=player.pvp_survival_rate,
+        )
 
     player.last_fetch = _now()
     player.save()
-
-    from warships.data import refresh_player_explorer_summary
 
     refresh_player_explorer_summary(player)
 

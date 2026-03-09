@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -275,6 +275,10 @@ class RankedDataRefreshTests(TestCase):
 
 
 class PlayerDataHardeningTests(TestCase):
+    def test_compute_player_verdict_uses_assassin_for_unicum_band(self):
+        self.assertEqual(compute_player_verdict(500, 60.0, 34.0), "Assassin")
+        self.assertEqual(compute_player_verdict(500, 64.8, 28.0), "Assassin")
+
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_hidden_profile_clears_cached_views(
@@ -351,6 +355,41 @@ class PlayerDataHardeningTests(TestCase):
         update_player_data(player, force_refresh=True)
 
         self.assertIsNone(cache.get("landing:players"))
+
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_assigns_assassin_playstyle_at_unicum_threshold(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+    ):
+        player = Player.objects.create(
+            name="AssassinCandidate",
+            player_id=9292,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 9292,
+            "nickname": "AssassinCandidate",
+            "hidden_profile": False,
+            "statistics": {
+                "battles": 2000,
+                "pvp": {
+                    "battles": 1800,
+                    "wins": 1080,
+                    "losses": 720,
+                    "survived_battles": 500,
+                    "survived_wins": 350,
+                },
+            },
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.pvp_ratio, 60.0)
+        self.assertEqual(player.verdict, "Assassin")
 
 
 class PlayerExplorerSummaryTests(TestCase):
@@ -502,10 +541,38 @@ class PlayerExplorerSummaryTests(TestCase):
         summary = PlayerExplorerSummary.objects.get(player=player)
 
         self.assertEqual(player.clan, clan)
+        self.assertEqual(player.verdict, "Warrior")
         self.assertEqual(summary.player, player)
         self.assertEqual(summary.battles_last_29_days, 0)
         self.assertIsNone(summary.ships_played_total)
         self.assertIsNone(summary.kill_ratio)
+
+    def test_clan_crawl_save_player_assigns_assassin_to_top_end_players(self):
+        clan = Clan.objects.create(clan_id=9916, name="AssassinClan", tag="AC")
+
+        save_player(
+            {
+                "account_id": 9916,
+                "nickname": "AssassinCrawler",
+                "created_at": int((timezone.now() - timedelta(days=700)).timestamp()),
+                "last_battle_time": int((timezone.now() - timedelta(days=1)).timestamp()),
+                "hidden_profile": False,
+                "statistics": {
+                    "battles": 5000,
+                    "pvp": {
+                        "battles": 4200,
+                        "wins": 2604,
+                        "losses": 1596,
+                        "survived_battles": 1200,
+                    },
+                },
+            },
+            clan,
+        )
+
+        player = Player.objects.get(player_id=9916)
+        self.assertEqual(player.pvp_ratio, 62.0)
+        self.assertEqual(player.verdict, "Assassin")
 
     @patch("warships.data._fetch_clan_data")
     def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):

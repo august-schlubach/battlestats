@@ -211,7 +211,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     <p className="mb-2 text-xs text-[#6baed6]">Design 2 uses a true bivariate view: darker tiles mean more players, the dark ridge shows the population trend, and the marker shows whether this player survives more or less often than peers with a similar win rate. The prior overlay view is preserved in code as design 1.</p>
                                     <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
                                     {player.verdict && (
-                                        <p className="mt-2 text-sm font-medium text-[#334155]">Verdict: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
+                                        <p className="mt-2 text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
                                     )}
                                 </div>
                             </DeferredSection>
