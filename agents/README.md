@@ -2,6 +2,8 @@
 
 This directory defines role personas used to coordinate AI-assisted development.
 
+See `agents/langgraph-usage-note.md` for when it makes sense to use the repo's LangGraph workflow versus a direct implementation request.
+
 ## Recommended Structure
 
 - One role spec per file (already set up).

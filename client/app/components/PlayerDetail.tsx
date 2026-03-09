@@ -152,7 +152,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p className="mb-2 text-xs text-[#6baed6]">Recent ranked season performance, including league finish and best sprint.</p>
                                 <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
-                            <div className="mt-4">
+                            <div className="mt-8">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Tier</h3>
                                 <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate grouped by ship tier.</p>
                                 <TierSVG playerId={player.player_id} />
