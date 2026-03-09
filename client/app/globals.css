@@ -20,23 +20,23 @@ body {
 
 .clan-player-pulse-ring {
   transform-origin: center;
-  animation: clan-player-pulse 2.8s ease-in-out infinite;
+  animation: clan-player-pulse 3.6s ease-in-out infinite;
 }
 
 @keyframes clan-player-pulse {
   0% {
     opacity: 0.28;
-    transform: scale(0.92);
+    transform: scale(0.96);
   }
 
   50% {
     opacity: 0.92;
-    transform: scale(1.18);
+    transform: scale(1.09);
   }
 
   100% {
     opacity: 0.28;
-    transform: scale(0.92);
+    transform: scale(0.96);
   }
 }
 
