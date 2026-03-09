@@ -97,6 +97,7 @@ class RandomsDataRefreshTests(TestCase):
             p.randoms_json = [
                 {
                     "ship_name": "Fresh Ship",
+                    "ship_chart_name": "Fresh Ship",
                     "ship_type": "Cruiser",
                     "ship_tier": 10,
                     "pvp_battles": 99,
@@ -112,6 +113,7 @@ class RandomsDataRefreshTests(TestCase):
         rows = fetch_randoms_data(player.player_id)
 
         self.assertEqual(rows[0]["ship_name"], "Fresh Ship")
+        self.assertEqual(rows[0]["ship_chart_name"], "Fresh Ship")
         mock_update_battle_data.assert_called_once_with(player.player_id)
         mock_update_randoms_data.assert_called_once_with(player.player_id)
 
@@ -132,6 +134,24 @@ class RandomsDataRefreshTests(TestCase):
 
         self.assertEqual([row["ship_name"]
                          for row in player.randoms_json], ["High", "Low"])
+        self.assertEqual([row["ship_chart_name"]
+                         for row in player.randoms_json], ["High", "Low"])
+
+    def test_update_randoms_data_adds_abbreviated_chart_name(self):
+        player = Player.objects.create(
+            name="LongNameUser",
+            player_id=4460,
+            battles_json=[
+                {"ship_name": "Admiral Graf Spee", "ship_type": "Cruiser", "ship_tier": 6,
+                    "pvp_battles": 12, "win_ratio": 0.58, "wins": 7},
+            ],
+        )
+
+        update_randoms_data(player.player_id)
+        player.refresh_from_db()
+
+        self.assertEqual(
+            player.randoms_json[0]["ship_chart_name"], "Adm. Graf Spee")
 
 
 class AggregateChartDataTests(TestCase):

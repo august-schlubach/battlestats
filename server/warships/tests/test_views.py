@@ -375,6 +375,52 @@ class ApiContractTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_player_correlation_distribution_returns_wr_survival_payload(self):
+        Player.objects.create(
+            name="CorrelationOne",
+            player_id=8821,
+            is_hidden=False,
+            pvp_battles=1000,
+            pvp_ratio=52.0,
+            pvp_survival_rate=34.0,
+        )
+        Player.objects.create(
+            name="CorrelationTwo",
+            player_id=8822,
+            is_hidden=False,
+            pvp_battles=2200,
+            pvp_ratio=58.0,
+            pvp_survival_rate=42.0,
+        )
+        Player.objects.create(
+            name="CorrelationHidden",
+            player_id=8823,
+            is_hidden=True,
+            pvp_battles=2800,
+            pvp_ratio=61.0,
+            pvp_survival_rate=48.0,
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/win_rate_survival/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "win_rate_survival")
+        self.assertEqual(payload["label"], "Win Rate vs Survival")
+        self.assertEqual(payload["x_label"], "Win Rate")
+        self.assertEqual(payload["y_label"], "Survival Rate")
+        self.assertEqual(payload["tracked_population"], 2)
+        self.assertTrue(payload["correlation"]
+                        is None or payload["correlation"] > 0)
+        self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
+        self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
+
+    def test_player_correlation_distribution_rejects_unknown_metric(self):
+        response = self.client.get("/api/fetch/player_correlation/not-real/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_players_explorer_sorts_by_recent_battles_desc_and_filters_ranked(self):
         now = timezone.now()
         Player.objects.create(
@@ -548,6 +594,7 @@ class ApiThrottleTests(TestCase):
             battles_json=[
                 {
                     "ship_name": "Test Ship",
+                    "ship_chart_name": "Test Ship",
                     "ship_type": "Destroyer",
                     "ship_tier": 8,
                     "pvp_battles": 25,
@@ -558,6 +605,7 @@ class ApiThrottleTests(TestCase):
             randoms_json=[
                 {
                     "ship_name": "Test Ship",
+                    "ship_chart_name": "Test Ship",
                     "ship_type": "Destroyer",
                     "ship_tier": 8,
                     "pvp_battles": 25,
@@ -572,6 +620,7 @@ class ApiThrottleTests(TestCase):
         response = self.client.get("/api/fetch/randoms_data/321/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["ship_chart_name"], "Test Ship")
         self.assertIn("X-Randoms-Updated-At", response)
         self.assertIn("X-Battles-Updated-At", response)
 

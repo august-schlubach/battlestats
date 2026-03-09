@@ -1,0 +1,395 @@
+import React, { useEffect, useRef } from 'react';
+import * as d3 from 'd3';
+
+type D3Selection = ReturnType<typeof d3.select>;
+
+interface WRDistributionDesign2Props {
+    playerWR: number;
+    playerSurvivalRate?: number | null;
+    svgWidth?: number;
+    svgHeight?: number;
+}
+
+interface CorrelationDomain {
+    min: number;
+    max: number;
+    bin_width: number;
+}
+
+interface CorrelationTile {
+    x_min: number;
+    x_max: number;
+    y_min: number;
+    y_max: number;
+    count: number;
+}
+
+interface CorrelationTrendPoint {
+    x: number;
+    y: number;
+    count: number;
+}
+
+interface CorrelationPayload {
+    metric: 'win_rate_survival';
+    label: string;
+    x_label: string;
+    y_label: string;
+    tracked_population: number;
+    correlation: number | null;
+    x_domain: CorrelationDomain;
+    y_domain: CorrelationDomain;
+    tiles: CorrelationTile[];
+    trend: CorrelationTrendPoint[];
+}
+
+const selectColorByWR = (winRatio: number): string => {
+    if (winRatio > 65) return '#810c9e';
+    if (winRatio >= 60) return '#D042F3';
+    if (winRatio >= 56) return '#3182bd';
+    if (winRatio >= 54) return '#74c476';
+    if (winRatio >= 52) return '#a1d99b';
+    if (winRatio >= 50) return '#fed976';
+    if (winRatio >= 45) return '#fd8d3c';
+    return '#a50f15';
+};
+
+const formatPercent = (value: number): string => `${value.toFixed(1)}%`;
+
+const interpolateTrendValue = (trend: CorrelationTrendPoint[], targetX: number): number | null => {
+    if (!trend.length) {
+        return null;
+    }
+
+    if (targetX <= trend[0].x) {
+        return trend[0].y;
+    }
+
+    if (targetX >= trend[trend.length - 1].x) {
+        return trend[trend.length - 1].y;
+    }
+
+    for (let index = 1; index < trend.length; index += 1) {
+        const left = trend[index - 1];
+        const right = trend[index];
+        if (targetX > right.x) {
+            continue;
+        }
+
+        const span = right.x - left.x;
+        if (span === 0) {
+            return right.y;
+        }
+
+        const t = (targetX - left.x) / span;
+        return left.y + ((right.y - left.y) * t);
+    }
+
+    return null;
+};
+
+const formatDelta = (value: number | null): string => {
+    if (value == null) {
+        return 'Trend unavailable';
+    }
+
+    const sign = value >= 0 ? '+' : '';
+    return `${sign}${value.toFixed(1)} pts vs trend`;
+};
+
+const drawErrorState = (containerElement: HTMLDivElement, message: string) => {
+    const container = d3.select(containerElement);
+    container.selectAll('*').remove();
+
+    const svg = container
+        .append('svg')
+        .attr('width', 600)
+        .attr('height', 120)
+        .append('g')
+        .attr('transform', 'translate(16, 24)');
+
+    svg.append('text')
+        .attr('x', 0)
+        .attr('y', 16)
+        .style('fill', '#6b7280')
+        .style('font-size', '12px')
+        .text(message);
+};
+
+const appendSummaryBlock = (
+    svgRoot: D3Selection,
+    marginLeft: number,
+    width: number,
+    payload: CorrelationPayload,
+    expectedSurvival: number | null,
+    survivalDelta: number | null,
+) => {
+    const header = svgRoot.append('g').attr('transform', `translate(${marginLeft + width - 6}, 10)`);
+    const headerText = header.append('text')
+        .attr('x', 0)
+        .attr('y', 0)
+        .attr('text-anchor', 'end')
+        .attr('dominant-baseline', 'hanging');
+
+    headerText.append('tspan')
+        .style('font-size', '11px')
+        .style('font-weight', '700')
+        .style('fill', '#334155')
+        .text(payload.correlation == null ? 'r unavailable' : `r = ${payload.correlation.toFixed(2)}`);
+
+    headerText.append('tspan')
+        .style('font-size', '10px')
+        .style('font-weight', '400')
+        .style('fill', '#94a3b8')
+        .text('  •  ');
+
+    headerText.append('tspan')
+        .style('font-size', '10px')
+        .style('font-weight', '400')
+        .style('fill', '#475569')
+        .text(expectedSurvival == null ? 'Expected survival unavailable' : `Expected survival ${formatPercent(expectedSurvival)}`);
+
+    headerText.append('tspan')
+        .style('font-size', '10px')
+        .style('font-weight', '400')
+        .style('fill', '#94a3b8')
+        .text('  •  ');
+
+    headerText.append('tspan')
+        .style('font-size', '10px')
+        .style('font-weight', '700')
+        .style('fill', survivalDelta != null ? (survivalDelta >= 0 ? '#166534' : '#991b1b') : '#64748b')
+        .text(formatDelta(survivalDelta));
+};
+
+const drawChart = (
+    containerElement: HTMLDivElement,
+    payload: CorrelationPayload,
+    playerWR: number,
+    playerSurvivalRate: number,
+    svgWidth: number,
+    svgHeight: number,
+) => {
+    const margin = { top: 38, right: 18, bottom: 34, left: 44 };
+    const width = svgWidth - margin.left - margin.right;
+    const height = svgHeight - margin.top - margin.bottom;
+
+    const container = d3.select(containerElement);
+    container.selectAll('*').remove();
+
+    const svgRoot = container
+        .append('svg')
+        .attr('width', svgWidth)
+        .attr('height', svgHeight);
+
+    const svg = svgRoot
+        .append('g')
+        .attr('transform', `translate(${margin.left}, ${margin.top})`);
+
+    if (!payload.tiles.length) {
+        svg.append('text')
+            .attr('x', 0)
+            .attr('y', 16)
+            .style('fill', '#6b7280')
+            .style('font-size', '12px')
+            .text('No correlation data available.');
+        return;
+    }
+
+    const x = d3.scaleLinear()
+        .domain([payload.x_domain.min, payload.x_domain.max])
+        .range([0, width]);
+
+    const y = d3.scaleLinear()
+        .domain([payload.y_domain.min, payload.y_domain.max])
+        .range([height, 0]);
+
+    const maxTileCount = d3.max(payload.tiles, (tile: CorrelationTile) => tile.count) || 1;
+    const tileOpacity = d3.scaleSqrt()
+        .domain([0, maxTileCount])
+        .range([0.08, 0.9]);
+
+    svg.append('g')
+        .attr('transform', `translate(0, ${height})`)
+        .style('color', '#64748b')
+        .call(d3.axisBottom(x).ticks(8).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
+        .selectAll('text')
+        .style('font-size', '10px');
+
+    svg.append('g')
+        .style('color', '#64748b')
+        .call(d3.axisLeft(y).ticks(7).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
+        .selectAll('text')
+        .style('font-size', '10px');
+
+    svg.append('g')
+        .attr('class', 'grid-lines')
+        .call(d3.axisLeft(y).ticks(7).tickSize(-width).tickFormat(() => ''))
+        .selectAll('line')
+        .style('stroke', '#e2e8f0')
+        .style('stroke-width', 1);
+    svg.select('.grid-lines')?.select('.domain')?.remove();
+
+    svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', height + 32)
+        .attr('text-anchor', 'middle')
+        .style('fill', '#64748b')
+        .style('font-size', '10px')
+        .text(payload.x_label);
+
+    svg.append('text')
+        .attr('transform', 'rotate(-90)')
+        .attr('x', -height / 2)
+        .attr('y', -34)
+        .attr('text-anchor', 'middle')
+        .style('fill', '#64748b')
+        .style('font-size', '10px')
+        .text(payload.y_label);
+
+    svg.append('g')
+        .selectAll('rect')
+        .data(payload.tiles)
+        .enter()
+        .append('rect')
+        .attr('x', (tile: CorrelationTile) => x(tile.x_min))
+        .attr('y', (tile: CorrelationTile) => y(tile.y_max))
+        .attr('width', (tile: CorrelationTile) => Math.max(1, x(tile.x_max) - x(tile.x_min)))
+        .attr('height', (tile: CorrelationTile) => Math.max(1, y(tile.y_min) - y(tile.y_max)))
+        .attr('fill', '#2171b5')
+        .attr('opacity', (tile: CorrelationTile) => tileOpacity(tile.count));
+
+    const trendLine = d3.line()
+        .x((point: CorrelationTrendPoint) => x(point.x))
+        .y((point: CorrelationTrendPoint) => y(point.y))
+        .curve(d3.curveMonotoneX);
+
+    svg.append('path')
+        .datum(payload.trend)
+        .attr('fill', 'none')
+        .attr('stroke', '#1e293b')
+        .attr('stroke-width', 1.75)
+        .attr('d', trendLine);
+
+    const expectedSurvival = interpolateTrendValue(payload.trend, playerWR);
+    const survivalDelta = expectedSurvival == null ? null : playerSurvivalRate - expectedSurvival;
+    const playerColor = selectColorByWR(playerWR);
+    const playerX = x(playerWR);
+    const playerY = y(playerSurvivalRate);
+    const labelX = playerX > width * 0.7 ? playerX - 8 : playerX + 8;
+    const labelAnchor = playerX > width * 0.7 ? 'end' : 'start';
+    const labelY = playerY < height * 0.35 ? playerY + 28 : playerY - 18;
+
+    svg.append('line')
+        .attr('x1', playerX)
+        .attr('x2', playerX)
+        .attr('y1', height)
+        .attr('y2', playerY)
+        .attr('stroke', '#94a3b8')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '3,3');
+
+    svg.append('line')
+        .attr('x1', 0)
+        .attr('x2', playerX)
+        .attr('y1', playerY)
+        .attr('y2', playerY)
+        .attr('stroke', '#94a3b8')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '3,3');
+
+    svg.append('circle')
+        .attr('cx', playerX)
+        .attr('cy', playerY)
+        .attr('r', 5.5)
+        .attr('fill', playerColor)
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1.75);
+
+    const label = svg.append('g').attr('transform', `translate(${labelX}, ${labelY})`);
+    const labelText = label.append('text')
+        .attr('text-anchor', labelAnchor)
+        .attr('dominant-baseline', 'middle');
+
+    labelText.append('tspan')
+        .style('font-size', '11px')
+        .style('font-weight', '700')
+        .style('fill', playerColor)
+        .text(`${formatPercent(playerWR)} / ${formatPercent(playerSurvivalRate)}`);
+
+    labelText.append('tspan')
+        .attr('x', 0)
+        .attr('dy', 14)
+        .style('font-size', '10px')
+        .style('font-weight', '400')
+        .style('fill', survivalDelta == null ? '#64748b' : (survivalDelta >= 0 ? '#166534' : '#991b1b'))
+        .text(formatDelta(survivalDelta));
+
+    const labelNode = labelText.node();
+    if (labelNode) {
+        const bbox = labelNode.getBBox();
+        label.insert('rect', 'text')
+            .attr('x', bbox.x - 6)
+            .attr('y', bbox.y - 3)
+            .attr('width', bbox.width + 12)
+            .attr('height', bbox.height + 6)
+            .attr('rx', 4)
+            .attr('fill', 'rgba(255, 255, 255, 0.94)')
+            .attr('stroke', '#cbd5e1');
+    }
+
+    appendSummaryBlock(svgRoot, margin.left, width, payload, expectedSurvival, survivalDelta);
+
+    svg.append('text')
+        .attr('x', width)
+        .attr('y', height + 32)
+        .attr('text-anchor', 'end')
+        .style('fill', '#94a3b8')
+        .style('font-size', '10px')
+        .text(`tiles: ${payload.x_domain.bin_width.toFixed(1)} x ${payload.y_domain.bin_width.toFixed(1)} pts`);
+};
+
+const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
+    playerWR,
+    playerSurvivalRate = null,
+    svgWidth = 600,
+    svgHeight = 248,
+}) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const containerElement = containerRef.current;
+        if (!containerElement || playerSurvivalRate == null) {
+            return;
+        }
+
+        const abortController = new AbortController();
+
+        const load = async () => {
+            try {
+                const response = await fetch('http://localhost:8888/api/fetch/player_correlation/win_rate_survival/', { signal: abortController.signal });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const payload: CorrelationPayload = await response.json();
+                if (abortController.signal.aborted) {
+                    return;
+                }
+
+                drawChart(containerElement, payload, playerWR, playerSurvivalRate, svgWidth, svgHeight);
+            } catch {
+                if (!abortController.signal.aborted) {
+                    drawErrorState(containerElement, 'Unable to load win rate and survival chart.');
+                }
+            }
+        };
+
+        load();
+        return () => abortController.abort();
+    }, [playerSurvivalRate, playerWR, svgHeight, svgWidth]);
+
+    return <div ref={containerRef}></div>;
+};
+
+export default WRDistributionDesign2SVG;

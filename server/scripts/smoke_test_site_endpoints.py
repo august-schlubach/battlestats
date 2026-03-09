@@ -182,6 +182,15 @@ def build_cases() -> list[SmokeCase]:
             min_nested_items=1,
         ),
         SmokeCase(
+            "player_correlation_win_rate_survival",
+            "/api/fetch/player_correlation/win_rate_survival/",
+            json_type="dict",
+            required_keys=("metric", "tracked_population", "tiles", "trend"),
+            exact_key_values={"metric": "win_rate_survival"},
+            nested_list_key="tiles",
+            min_nested_items=1,
+        ),
+        SmokeCase(
             "stats",
             "/api/stats/",
             json_type="dict",

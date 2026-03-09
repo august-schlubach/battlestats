@@ -3,7 +3,7 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.test import TestCase, override_settings
 
-from warships.api.ships import _fetch_ship_info
+from warships.api.ships import _fetch_ship_info, build_ship_chart_name
 from warships.models import Ship
 
 
@@ -52,4 +52,9 @@ class ShipInfoApiTests(TestCase):
         self.assertEqual(ship.ship_type, "Destroyer")
         self.assertEqual(ship.tier, 10)
         self.assertEqual(ship.nation, "ussr")
+        self.assertEqual(ship.chart_name, "Khabarovsk")
         mock_make_api_request.assert_called_once()
+
+    def test_build_ship_chart_name_abbreviates_long_names(self):
+        self.assertEqual(build_ship_chart_name(
+            "Admiral Graf Spee"), "Adm. Graf Spee")

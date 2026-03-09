@@ -2,9 +2,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 import logging
+import math
 from django.core.cache import cache
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
-from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player
+from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, build_ship_chart_name
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
@@ -176,6 +177,7 @@ def build_player_summary(
         'pvp_ratio': player.pvp_ratio,
         'pvp_battles': player.pvp_battles,
         'pvp_survival_rate': player.pvp_survival_rate,
+        'kill_ratio': None,
         'battles_last_29_days': None,
         'wins_last_29_days': None,
         'active_days_last_29_days': None,
@@ -188,6 +190,17 @@ def build_player_summary(
         'latest_ranked_battles': None,
         'highest_ranked_league_recent': None,
     }
+    # Calculate player-level kill ratio (KR) as total frags / total pvp_battles
+    total_frags = 0
+    total_pvp_battles = 0
+    battles_source = battles_rows if battles_rows is not None else player.battles_json
+    if isinstance(battles_source, list):
+        for row in battles_source:
+            if isinstance(row, dict):
+                total_frags += int(row.get('frags', 0) or 0)
+                total_pvp_battles += int(row.get('pvp_battles', 0) or 0)
+    kill_ratio = round(total_frags / total_pvp_battles, 2) if total_pvp_battles > 0 else None
+    summary['kill_ratio'] = kill_ratio
 
     if player.is_hidden:
         return summary
@@ -281,6 +294,7 @@ def refresh_player_explorer_summary(
             'ranked_seasons_participated': summary['ranked_seasons_participated'],
             'latest_ranked_battles': summary['latest_ranked_battles'],
             'highest_ranked_league_recent': summary['highest_ranked_league_recent'],
+            'kill_ratio': summary['kill_ratio'],
         },
     )
 
@@ -370,6 +384,7 @@ def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[
         rows.append({
             'pvp_battles': int(row.get('pvp_battles', 0) or 0),
             'ship_name': ship_name,
+            'ship_chart_name': row.get('ship_chart_name') or build_ship_chart_name(str(ship_name)),
             'ship_type': ship_type,
             'ship_tier': ship_tier,
             'win_ratio': float(row.get('win_ratio', 0) or 0),
@@ -454,7 +469,9 @@ def update_battle_data(player_id: str) -> None:
         distance = ship['distance']
 
         ship_info = {
+            'ship_id': ship_model.ship_id,
             'ship_name': ship_model.name,
+            'ship_chart_name': ship_model.chart_name or build_ship_chart_name(ship_model.name),
             'ship_tier': ship_model.tier,
             'all_battles': battles,
             'distance': distance,
@@ -675,6 +692,7 @@ def update_activity_data(player_id: int) -> None:
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
 
 PLAYER_DISTRIBUTION_CACHE_TTL = 3600  # 1 hour
+PLAYER_CORRELATION_CACHE_TTL = 3600  # 1 hour
 PLAYER_DISTRIBUTION_CONFIGS = {
     'win_rate': {
         'label': 'Win Rate',
@@ -709,9 +727,26 @@ PLAYER_DISTRIBUTION_CONFIGS = {
     },
 }
 
+PLAYER_WR_SURVIVAL_CORRELATION_CONFIG = {
+    'label': 'Win Rate vs Survival',
+    'x_label': 'Win Rate',
+    'y_label': 'Survival Rate',
+    'min_population_battles': 100,
+    'x_min': 35.0,
+    'x_max': 75.0,
+    'x_bin_width': 1.0,
+    'y_min': 15.0,
+    'y_max': 75.0,
+    'y_bin_width': 1.5,
+}
+
 
 def _player_distribution_cache_key(metric: str) -> str:
     return f'players:distribution:v1:{metric}'
+
+
+def _player_correlation_cache_key(metric: str) -> str:
+    return f'players:correlation:v1:{metric}'
 
 
 def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value_max: float, bin_width: float) -> list[dict]:
@@ -799,6 +834,131 @@ def fetch_player_population_distribution(metric: str) -> dict:
     }
 
     cache.set(cache_key, payload, PLAYER_DISTRIBUTION_CACHE_TTL)
+    return payload
+
+
+def _clamp_to_open_upper_bound(value: float, value_min: float, value_max: float) -> float:
+    epsilon = 1e-6
+    return min(max(value, value_min), value_max - epsilon)
+
+
+def _pearson_correlation(count: int, sum_x: float, sum_y: float, sum_xy: float, sum_x2: float, sum_y2: float) -> Optional[float]:
+    if count <= 1:
+        return None
+
+    numerator = (count * sum_xy) - (sum_x * sum_y)
+    denominator_left = (count * sum_x2) - (sum_x * sum_x)
+    denominator_right = (count * sum_y2) - (sum_y * sum_y)
+    denominator = math.sqrt(max(denominator_left, 0.0)
+                            * max(denominator_right, 0.0))
+    if denominator == 0:
+        return None
+
+    return numerator / denominator
+
+
+def fetch_player_wr_survival_correlation() -> dict:
+    cache_key = _player_correlation_cache_key('win_rate_survival')
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    config = PLAYER_WR_SURVIVAL_CORRELATION_CONFIG
+    x_min = config['x_min']
+    x_max = config['x_max']
+    x_bin_width = config['x_bin_width']
+    y_min = config['y_min']
+    y_max = config['y_max']
+    y_bin_width = config['y_bin_width']
+    x_bin_count = int((x_max - x_min) / x_bin_width)
+    y_bin_count = int((y_max - y_min) / y_bin_width)
+
+    tile_counts: dict[tuple[int, int], int] = {}
+    trend_sum_y = [0.0 for _ in range(x_bin_count)]
+    trend_counts = [0 for _ in range(x_bin_count)]
+
+    tracked_population = 0
+    sum_x = 0.0
+    sum_y = 0.0
+    sum_xy = 0.0
+    sum_x2 = 0.0
+    sum_y2 = 0.0
+
+    rows = Player.objects.filter(
+        is_hidden=False,
+        pvp_battles__gte=config['min_population_battles'],
+        pvp_ratio__isnull=False,
+        pvp_survival_rate__isnull=False,
+    ).values_list('pvp_ratio', 'pvp_survival_rate')
+
+    for win_rate, survival_rate in rows.iterator(chunk_size=5000):
+        if win_rate is None or survival_rate is None:
+            continue
+
+        x_value = float(win_rate)
+        y_value = float(survival_rate)
+
+        tracked_population += 1
+        sum_x += x_value
+        sum_y += y_value
+        sum_xy += x_value * y_value
+        sum_x2 += x_value * x_value
+        sum_y2 += y_value * y_value
+
+        x_clamped = _clamp_to_open_upper_bound(x_value, x_min, x_max)
+        y_clamped = _clamp_to_open_upper_bound(y_value, y_min, y_max)
+
+        x_index = min(int((x_clamped - x_min) / x_bin_width), x_bin_count - 1)
+        y_index = min(int((y_clamped - y_min) / y_bin_width), y_bin_count - 1)
+
+        tile_counts[(x_index, y_index)] = tile_counts.get(
+            (x_index, y_index), 0) + 1
+        trend_sum_y[x_index] += y_value
+        trend_counts[x_index] += 1
+
+    tiles = []
+    for (x_index, y_index), count in sorted(tile_counts.items()):
+        tiles.append({
+            'x_min': round(x_min + (x_index * x_bin_width), 4),
+            'x_max': round(x_min + ((x_index + 1) * x_bin_width), 4),
+            'y_min': round(y_min + (y_index * y_bin_width), 4),
+            'y_max': round(y_min + ((y_index + 1) * y_bin_width), 4),
+            'count': count,
+        })
+
+    trend = []
+    for index, count in enumerate(trend_counts):
+        if count == 0:
+            continue
+
+        trend.append({
+            'x': round(x_min + (index * x_bin_width) + (x_bin_width / 2), 4),
+            'y': round(trend_sum_y[index] / count, 4),
+            'count': count,
+        })
+
+    payload = {
+        'metric': 'win_rate_survival',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'tracked_population': tracked_population,
+        'correlation': round(_pearson_correlation(tracked_population, sum_x, sum_y, sum_xy, sum_x2, sum_y2), 4) if tracked_population > 1 else None,
+        'x_domain': {
+            'min': x_min,
+            'max': x_max,
+            'bin_width': x_bin_width,
+        },
+        'y_domain': {
+            'min': y_min,
+            'max': y_max,
+            'bin_width': y_bin_width,
+        },
+        'tiles': tiles,
+        'trend': trend,
+    }
+
+    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     return payload
 
 
@@ -1255,7 +1415,7 @@ def fetch_randoms_data(player_id: str) -> list:
         if not has_required_fields:
             update_randoms_data(player_id)
             player = Player.objects.get(player_id=player_id)
-            return player.randoms_json
+            return _extract_randoms_rows(player.randoms_json, limit=20)
 
         randoms_stale = not player.randoms_updated_at or datetime.now(
         ) - player.randoms_updated_at > timedelta(days=1)
@@ -1265,11 +1425,11 @@ def fetch_randoms_data(player_id: str) -> list:
             update_battle_data(player_id)
             update_randoms_data(player_id)
             player = Player.objects.get(player_id=player_id)
-        return player.randoms_json
+        return _extract_randoms_rows(player.randoms_json, limit=20)
     else:
         update_randoms_data(player_id)
         player = Player.objects.get(player_id=player_id)
-        return player.randoms_json
+        return _extract_randoms_rows(player.randoms_json, limit=20)
 
 
 def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:

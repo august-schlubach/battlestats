@@ -62,6 +62,7 @@ class Player(models.Model):
 
 class Ship(models.Model):
     name = models.CharField(max_length=200, null=False, blank=False)
+    chart_name = models.CharField(max_length=200, blank=True, default='')
     nation = models.CharField(max_length=200)
     ship_id = models.BigIntegerField(unique=True)
     ship_type = models.CharField(max_length=200)

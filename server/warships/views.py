@@ -15,10 +15,10 @@ from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
-    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer
-from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, \
+    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer
+from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
-    fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution
+    fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
@@ -176,13 +176,7 @@ def randoms_data(request, player_id: str) -> Response:
         player = Player.objects.filter(player_id=player_id).first()
         if not player or not player.battles_json:
             return Response([])
-        data = [
-            row for row in sorted(player.battles_json, key=lambda row: row.get('pvp_battles', 0), reverse=True)
-            if isinstance(row, dict)
-            and row.get('ship_name') is not None
-            and row.get('ship_type') is not None
-            and row.get('ship_tier') is not None
-        ]
+        data = _extract_randoms_rows(player.battles_json, limit=None)
     else:
         data = fetch_randoms_data(player_id)
 
@@ -237,6 +231,16 @@ def player_distribution(request, metric: str) -> Response:
         return Response({'detail': 'Unsupported player distribution metric.'}, status=status.HTTP_404_NOT_FOUND)
 
     return _validated_single_response(data, PlayerPopulationDistributionSerializer)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def player_correlation_distribution(request, metric: str) -> Response:
+    if metric != 'win_rate_survival':
+        return Response({'detail': 'Unsupported player correlation metric.'}, status=status.HTTP_404_NOT_FOUND)
+
+    data = fetch_player_wr_survival_correlation()
+    return _validated_single_response(data, PlayerCorrelationDistributionSerializer)
 
 
 @api_view(["GET"])

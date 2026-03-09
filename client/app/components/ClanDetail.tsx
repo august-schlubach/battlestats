@@ -1,6 +1,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
+import { resilientDynamicImport } from './resilientDynamicImport';
 
 interface ClanDetailProps {
     clan: {
@@ -22,17 +23,17 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
-const ClanSVG = dynamic(() => import('./ClanSVG'), {
+const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'ClanDetail-ClanSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan chart..." minHeight={400} />,
 });
 
-const ClanBattleSeasons = dynamic(() => import('./ClanBattleSeasons'), {
+const ClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasons'), 'ClanDetail-ClanBattleSeasons'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={240} />,
 });
 
-const ClanMembers = dynamic(() => import('./ClanMembers'), {
+const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'ClanDetail-ClanMembers'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
 });

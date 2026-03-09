@@ -1,6 +1,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
+import { resilientDynamicImport } from './resilientDynamicImport';
 
 interface PlayerDetailProps {
     player: {
@@ -42,42 +43,42 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
-const ClanSVG = dynamic(() => import('./ClanSVG'), {
+const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'PlayerDetail-ClanSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan chart..." minHeight={280} />,
 });
 
-const ClanMembers = dynamic(() => import('./ClanMembers'), {
+const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'PlayerDetail-ClanMembers'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
 });
 
-const RandomsSVG = dynamic(() => import('./RandomsSVG'), {
+const RandomsSVG = dynamic(() => resilientDynamicImport(() => import('./RandomsSVG'), 'PlayerDetail-RandomsSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading top ships..." minHeight={500} />,
 });
 
-const RankedSeasons = dynamic(() => import('./RankedSeasons'), {
+const RankedSeasons = dynamic(() => resilientDynamicImport(() => import('./RankedSeasons'), 'PlayerDetail-RankedSeasons'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading ranked seasons..." minHeight={220} />,
 });
 
-const TierSVG = dynamic(() => import('./TierSVG'), {
+const TierSVG = dynamic(() => resilientDynamicImport(() => import('./TierSVG'), 'PlayerDetail-TierSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading tier chart..." minHeight={334} />,
 });
 
-const TypeSVG = dynamic(() => import('./TypeSVG'), {
+const TypeSVG = dynamic(() => resilientDynamicImport(() => import('./TypeSVG'), 'PlayerDetail-TypeSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={210} />,
 });
 
-const WRDistributionSVG = dynamic(() => import('./WRDistributionSVG'), {
+const WRDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./WRDistributionSVG'), 'PlayerDetail-WRDistributionSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading win rate distribution..." minHeight={240} />,
 });
 
-const BattlesDistributionSVG = dynamic(() => import('./BattlesDistributionSVG'), {
+const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./BattlesDistributionSVG'), 'PlayerDetail-BattlesDistributionSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading battles distribution..." minHeight={240} />,
 });
@@ -201,12 +202,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
                             <DeferredSection
                                 className="mt-4"
-                                minHeight={204}
-                                placeholder={<LoadingPanel label="Preparing win rate distribution..." minHeight={204} />}
+                                minHeight={268}
+                                placeholder={<LoadingPanel label="Preparing win rate and survival chart..." minHeight={268} />}
                             >
                                 <div>
-                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Win Rate Distribution</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Blue shows win rate. The overlay shows survival rate against the same tracked population (100+ PvP battles).</p>
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Win Rate vs Survival</h3>
+                                    <p className="mb-2 text-xs text-[#6baed6]">Design 2 uses a true bivariate view: darker tiles mean more players, the dark ridge shows the population trend, and the marker shows whether this player survives more or less often than peers with a similar win rate. The prior overlay view is preserved in code as design 1.</p>
                                     <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
                                 </div>
                             </DeferredSection>
@@ -225,7 +226,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>
-                                <p className="mb-2 text-xs text-[#6baed6]">Compares wins and total battles for the most-played ships.</p>
+                                <p className="mb-2 text-xs text-[#6baed6]">Returns to the wins-versus-battles bar design, but with cleaner axis treatment, inline summary text, and styling aligned with the other player-page charts.</p>
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <div className="mt-4">

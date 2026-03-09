@@ -1,5 +1,6 @@
 import React from 'react';
-import PopulationDistributionSVG from './PopulationDistributionSVG';
+import WRDistributionDesign1SVG from './WRDistributionDesign1SVG';
+import WRDistributionDesign2SVG from './WRDistributionDesign2SVG';
 
 interface WRDistributionProps {
     playerWR: number;
@@ -11,18 +12,17 @@ const WRDistributionSVG: React.FC<WRDistributionProps> = ({
     playerWR,
     playerSurvivalRate = null,
     svgWidth = 600,
-    svgHeight = 184,
+    svgHeight = 248,
 }) => {
     return (
-        <PopulationDistributionSVG
-            primaryMetric="win_rate"
-            primaryValue={playerWR}
-            overlayMetric="survival_rate"
-            overlayValue={playerSurvivalRate}
+        <WRDistributionDesign2SVG
+            playerWR={playerWR}
+            playerSurvivalRate={playerSurvivalRate}
             svgWidth={svgWidth}
             svgHeight={svgHeight}
         />
     );
 };
 
+export { WRDistributionDesign1SVG, WRDistributionDesign2SVG };
 export default WRDistributionSVG;

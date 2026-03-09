@@ -58,6 +58,7 @@ class TypeDataSerializer(serializers.Serializer):
 class RandomsDataSerializer(serializers.Serializer):
     pvp_battles = serializers.IntegerField()
     ship_name = serializers.CharField()
+    ship_chart_name = serializers.CharField()
     ship_type = serializers.CharField()
     ship_tier = serializers.IntegerField()
     win_ratio = serializers.FloatField()
@@ -118,6 +119,7 @@ class ClanBattleSeasonSummarySerializer(serializers.Serializer):
 
 
 class PlayerSummarySerializer(serializers.Serializer):
+    kill_ratio = serializers.FloatField(allow_null=True)
     player_id = serializers.IntegerField()
     name = serializers.CharField()
     is_hidden = serializers.BooleanField()
@@ -162,7 +164,42 @@ class PlayerPopulationDistributionSerializer(serializers.Serializer):
     bins = PlayerPopulationDistributionBinSerializer(many=True)
 
 
+class PlayerCorrelationDomainSerializer(serializers.Serializer):
+    min = serializers.FloatField()
+    max = serializers.FloatField()
+    bin_width = serializers.FloatField()
+
+
+class PlayerCorrelationTileSerializer(serializers.Serializer):
+    x_min = serializers.FloatField()
+    x_max = serializers.FloatField()
+    y_min = serializers.FloatField()
+    y_max = serializers.FloatField()
+    count = serializers.IntegerField()
+
+
+class PlayerCorrelationTrendPointSerializer(serializers.Serializer):
+    x = serializers.FloatField()
+    y = serializers.FloatField()
+    count = serializers.IntegerField()
+
+
+class PlayerCorrelationDistributionSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    label = serializers.CharField()
+    x_label = serializers.CharField()
+    y_label = serializers.CharField()
+    tracked_population = serializers.IntegerField()
+    correlation = serializers.FloatField(allow_null=True)
+    x_domain = PlayerCorrelationDomainSerializer()
+    y_domain = PlayerCorrelationDomainSerializer()
+    tiles = PlayerCorrelationTileSerializer(many=True)
+    trend = PlayerCorrelationTrendPointSerializer(many=True)
+
+
 class PlayerExplorerRowSerializer(serializers.Serializer):
+    kill_ratio = serializers.FloatField(allow_null=True)
+    pvp_survival_rate = serializers.FloatField(allow_null=True)
     name = serializers.CharField()
     player_id = serializers.IntegerField()
     is_hidden = serializers.BooleanField()

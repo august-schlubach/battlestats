@@ -45,7 +45,7 @@ def _get_session() -> requests.Session:
     return session
 
 
-def make_api_request(endpoint: str, params: Dict[str, Any]) -> Optional[Any]:
+def _request_api_payload(endpoint: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not APP_ID:
         logger.error("WG_APP_ID environment variable is not set")
         return None
@@ -87,4 +87,22 @@ def make_api_request(endpoint: str, params: Dict[str, Any]) -> Optional[Any]:
         logger.error("Missing data payload for endpoint '%s'", clean_endpoint)
         return None
 
-    return data
+    return payload
+
+
+def make_api_request(endpoint: str, params: Dict[str, Any]) -> Optional[Any]:
+    payload = _request_api_payload(endpoint, params)
+    if payload is None:
+        return None
+    return payload.get("data")
+
+
+def make_api_request_with_meta(endpoint: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    payload = _request_api_payload(endpoint, params)
+    if payload is None:
+        return None
+
+    return {
+        "data": payload.get("data"),
+        "meta": payload.get("meta") or {},
+    }

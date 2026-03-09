@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import ClanDetail from './ClanDetail';
+import PlayerDetail from './PlayerDetail';
+import { resilientDynamicImport } from './resilientDynamicImport';
 
 interface LandingClan {
     clan_id: number;
@@ -62,20 +65,15 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
-const PlayerDetail = dynamic(() => import('./PlayerDetail'), {
-    loading: () => <LoadingPanel label="Loading player view..." minHeight={720} />,
-});
+const LandingClanSVG = dynamic(
+    () => resilientDynamicImport(() => import('./LandingClanSVG'), 'LandingClanSVG'),
+    {
+        ssr: false,
+        loading: () => <LoadingPanel label="Loading clan landscape..." minHeight={360} />,
+    },
+);
 
-const ClanDetail = dynamic(() => import('./ClanDetail'), {
-    loading: () => <LoadingPanel label="Loading clan view..." minHeight={560} />,
-});
-
-const LandingClanSVG = dynamic(() => import('./LandingClanSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading clan landscape..." minHeight={360} />,
-});
-
-const PlayerExplorer = dynamic(() => import('./PlayerExplorer'), {
+const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./PlayerExplorer'), 'PlayerExplorer'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading player explorer..." minHeight={360} />,
 });
@@ -448,6 +446,7 @@ const PlayerSearch: React.FC = () => {
                             <div className="mt-3">
                                 <LandingClanSVG
                                     clans={clans.slice(0, LANDING_LIMIT)}
+                                    heatmapClans={clans}
                                     onSelectClan={handleSelectClan}
                                 />
                             </div>
