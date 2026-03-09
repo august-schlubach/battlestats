@@ -183,14 +183,14 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses.toLocaleString()}</span></p>
                             </div>
 
-                            <div className="mt-5 border-t border-[#c6dbef] pt-5">
+                            <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>
                                 <p className="mb-2 text-xs text-[#6baed6]">Compares wins and total battles for the most-played ships.</p>
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Seasons</h3>
-                                <p className="mb-2 text-xs text-[#6baed6]">Historical ranked season performance, including league finish.</p>
+                                <p className="mb-3 text-xs text-[#6baed6]">Historical ranked season performance, including league finish.</p>
                                 <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <DeferredSection

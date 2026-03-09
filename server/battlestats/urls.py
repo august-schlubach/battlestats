@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, landing_clans, landing_players, landing_recent_players, player_name_suggestions
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, landing_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -25,6 +25,8 @@ urlpatterns = [
          randoms_data, name='fetch_randoms_data'),
     path('api/fetch/ranked_data/<str:player_id>/',
          ranked_data, name='fetch_ranked_data'),
+    path('api/fetch/player_summary/<str:player_id>/',
+         player_summary, name='fetch_player_summary'),
     path('api/fetch/clan_members/<str:clan_id>/',
          clan_members, name='fetch_clan_members'),
     path('api/fetch/clan_data/<str:clan_filter>',
@@ -39,6 +41,8 @@ urlpatterns = [
          player_name_suggestions, name='player_name_suggestions'),
     path('api/landing/recent/',
          landing_recent_players, name='landing_recent_players'),
+    path('api/players/explorer/',
+         players_explorer, name='players_explorer'),
 
 ]
 

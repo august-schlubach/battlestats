@@ -28,6 +28,17 @@ python manage.py run_agent_graph "add API caching around player detail fetch" --
 
 the current graph is a guarded workflow with planning, implementation notes, tool-boundary checks, verification gates, retry routing, and run summary.
 
+when Postgres settings are available, the graph now uses durable Postgres checkpoints instead of in-memory-only state. you can pin a run to a durable thread with `--workflow-id`:
+
+```bash
+python scripts/run_agent_graph.py \
+	"clan information does not hydrate on first player page load" \
+	--workflow-id clan-hydration-debug \
+	--json
+```
+
+to force an explicit checkpoint database URL, set `LANGGRAPH_CHECKPOINT_POSTGRES_URL`. if no Postgres checkpoint URL can be resolved, the workflow falls back to in-memory checkpoints.
+
 you can provide workflow context (verification state, touched files, retries) with a JSON file:
 
 ```bash

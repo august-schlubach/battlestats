@@ -23,6 +23,7 @@ djangorestframework = "*"
 kombu = "*"
 amqp = "*"
 langgraph = "*"
+langgraph-checkpoint-postgres = "==3.0.4"
 urllib3 = "==2.6.3"
 sqlparse = "==0.5.4"
 

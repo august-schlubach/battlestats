@@ -1,0 +1,110 @@
+id: wows.account.statsbydate
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/account/statsbydate/
+purpose: Return player statistics slices by date for recent days.
+docs_url: https://developers.wargaming.net/reference/all/wows/account/statsbydate/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    account_id:
+      required: true
+      type: integer
+      description: Player account identifier.
+    dates:
+      required: false
+      type: string
+      description: Comma-separated `YYYYMMDD` list. Docs state max 10 dates within a 28-day range.
+    access_token:
+      required: false
+      type: string
+      description: Token for private user data when applicable.
+    extra:
+      required: false
+      type: string
+      description: Docs mention `pve` as an extra field.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+      hidden: integer_or_null
+    data:
+      account_id_keyed_object: true
+  expected_data_shape:
+    pvp:
+      type: object_or_null
+      fields:
+        account_id: integer
+        battle_type: string
+        battles: integer
+        capture_points: integer
+        damage_dealt: integer
+        date: string
+        dropped_capture_points: integer
+        frags: integer
+        max_xp: integer
+        planes_killed: integer
+        survived_battles: integer
+        wins: integer
+        xp: integer
+    pve:
+      type: object_or_null
+      availability: documented_as_extra
+
+observed_behavior:
+  last_verified: 2026-03-09
+  docs_ui_notes:
+    - Loading the Developer Room documentation path with query parameters can render `METHOD NOT FOUND` even though the base method page exists.
+  live_notes:
+    - Endpoint is reachable and returns JSON.
+    - Tested active public NA accounts returned `status: ok` with `data[account_id].pvp = null`.
+    - Explicit recent `dates` values still returned `pvp: null` in testing.
+    - This behavior makes the endpoint unusable as a trustworthy source of PvP daily slices for current product logic.
+
+trust:
+  rating: low
+  suitable_for:
+    - exploratory manual checks only
+  not_suitable_for:
+    - core player activity derivation
+    - production charting without fallback
+    - authoritative recent-battle calculations
+  recommendation: Treat as unreliable and feature-flagged until live validation proves otherwise.
+
+repo_usage:
+  current_state:
+    - The repo does not treat this endpoint as authoritative for player activity.
+    - Snapshot-based activity is derived from cumulative account info instead.
+  code_refs:
+    - server/warships/data.py
+    - agents/knowledge/wows-statsbydate-status.md
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-statsbydate-status.md
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - curl against https://api.worldofwarships.com/wows/account/info/
+    - curl against https://api.worldofwarships.com/wows/account/statsbydate/

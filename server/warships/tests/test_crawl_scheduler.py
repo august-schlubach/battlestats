@@ -73,39 +73,48 @@ class RefreshTaskLockTests(TestCase):
         cache.clear()
 
     def test_player_refresh_task_skips_when_lock_exists(self):
-        cache.add("warships:tasks:update_player_data:42:lock", "existing-run", timeout=60)
+        cache.add("warships:tasks:update_player_data:42:lock",
+                  "existing-run", timeout=60)
 
         with patch("warships.data.update_player_data") as mock_update_player_data:
-            result = update_player_data_task.run(player_id=42, force_refresh=True)
+            result = update_player_data_task.run(
+                player_id=42, force_refresh=True)
 
-        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        self.assertEqual(result, {"status": "skipped",
+                         "reason": "already-running"})
         mock_update_player_data.assert_not_called()
 
     def test_clan_refresh_task_skips_when_lock_exists(self):
-        cache.add("warships:tasks:update_clan_data:99:lock", "existing-run", timeout=60)
+        cache.add("warships:tasks:update_clan_data:99:lock",
+                  "existing-run", timeout=60)
 
         with patch("warships.data.update_clan_data") as mock_update_clan_data:
             result = update_clan_data_task.run(clan_id=99)
 
-        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        self.assertEqual(result, {"status": "skipped",
+                         "reason": "already-running"})
         mock_update_clan_data.assert_not_called()
 
     def test_clan_members_refresh_task_skips_when_lock_exists(self):
-        cache.add("warships:tasks:update_clan_members:99:lock", "existing-run", timeout=60)
+        cache.add("warships:tasks:update_clan_members:99:lock",
+                  "existing-run", timeout=60)
 
         with patch("warships.data.update_clan_members") as mock_update_clan_members:
             result = update_clan_members_task.run(clan_id=99)
 
-        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        self.assertEqual(result, {"status": "skipped",
+                         "reason": "already-running"})
         mock_update_clan_members.assert_not_called()
 
     def test_clan_battle_summary_task_skips_when_lock_exists(self):
-        cache.add("warships:tasks:update_clan_battle_summary:99:lock", "existing-run", timeout=60)
+        cache.add("warships:tasks:update_clan_battle_summary:99:lock",
+                  "existing-run", timeout=60)
 
         with patch("warships.data.refresh_clan_battle_seasons_cache") as mock_refresh_summary:
             result = update_clan_battle_summary_task.run(clan_id=99)
 
-        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        self.assertEqual(result, {"status": "skipped",
+                         "reason": "already-running"})
         mock_refresh_summary.assert_not_called()
 
     def test_post_migrate_updates_existing_periodic_task(self):

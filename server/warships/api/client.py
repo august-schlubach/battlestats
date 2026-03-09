@@ -12,7 +12,8 @@ from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = os.getenv("WG_API_BASE_URL", "https://api.worldofwarships.com/wows/")
+BASE_URL = os.getenv(
+    "WG_API_BASE_URL", "https://api.worldofwarships.com/wows/")
 APP_ID = os.getenv("WG_APP_ID")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("WG_REQUEST_TIMEOUT_SECONDS", "20"))
 RETRY_TOTAL = int(os.getenv("WG_API_RETRY_TOTAL", "2"))
@@ -47,7 +48,8 @@ def make_api_request(endpoint: str, params: Dict[str, Any]) -> Optional[Any]:
         return None
 
     clean_endpoint = endpoint.lstrip("/")
-    clean_params = {key: value for key, value in params.items() if value is not None}
+    clean_params = {key: value for key,
+                    value in params.items() if value is not None}
     clean_params.setdefault("application_id", APP_ID)
 
     try:
@@ -59,18 +61,22 @@ def make_api_request(endpoint: str, params: Dict[str, Any]) -> Optional[Any]:
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as error:
-        logger.error("HTTP request failed for endpoint '%s': %s", clean_endpoint, error)
+        logger.error("HTTP request failed for endpoint '%s': %s",
+                     clean_endpoint, error)
         return None
     except ValueError as error:
-        logger.error("Invalid JSON from endpoint '%s': %s", clean_endpoint, error)
+        logger.error("Invalid JSON from endpoint '%s': %s",
+                     clean_endpoint, error)
         return None
 
     if not isinstance(payload, dict):
-        logger.error("Unexpected non-dict API response for endpoint '%s'", clean_endpoint)
+        logger.error(
+            "Unexpected non-dict API response for endpoint '%s'", clean_endpoint)
         return None
 
     if payload.get("status") != "ok":
-        logger.error("Error in response for endpoint '%s': %s", clean_endpoint, payload)
+        logger.error("Error in response for endpoint '%s': %s",
+                     clean_endpoint, payload)
         return None
 
     data = payload.get("data")

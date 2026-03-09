@@ -12,11 +12,36 @@ from warships.tasks import update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
 
-def _ranked_rows_have_top_ship(rows: Any) -> bool:
-    if not isinstance(rows, list):
-        return False
 
-    return all(isinstance(row, dict) and 'top_ship_name' in row for row in rows)
+def _coerce_activity_rows(activity_rows: Any) -> list[dict]:
+    if not isinstance(activity_rows, list):
+        return []
+
+    rows = []
+    for row in activity_rows:
+        if not isinstance(row, dict):
+            continue
+
+        rows.append({
+            'date': row.get('date'),
+            'battles': int(row.get('battles', 0) or 0),
+            'wins': int(row.get('wins', 0) or 0),
+        })
+
+    return rows
+
+
+def _coerce_ranked_rows(ranked_rows: Any) -> list[dict]:
+    if not isinstance(ranked_rows, list):
+        return []
+
+    rows = [row for row in ranked_rows if isinstance(row, dict)]
+    return sorted(rows, key=lambda row: int(row.get('season_id', 0) or 0), reverse=True)
+
+
+def _ranked_rows_have_top_ship(rows: Any) -> bool:
+    normalized_rows = _coerce_ranked_rows(rows)
+    return all('top_ship_name' in row for row in normalized_rows)
 
 
 def _extract_ranked_ship_battles(season_stats: Any) -> int:
@@ -36,7 +61,10 @@ def _extract_ranked_ship_battles(season_stats: Any) -> int:
     return total_battles
 
 
-def _build_top_ranked_ship_names_by_season(ranked_ship_stats_rows: Any, requested_season_ids: list[int]) -> dict[int, Optional[str]]:
+def _build_top_ranked_ship_names_by_season(
+    ranked_ship_stats_rows: Any,
+    requested_season_ids: list[int],
+) -> dict[int, Optional[str]]:
     if not isinstance(ranked_ship_stats_rows, list):
         return {}
 
@@ -47,8 +75,9 @@ def _build_top_ranked_ship_names_by_season(ranked_ship_stats_rows: Any, requeste
         if not isinstance(row, dict):
             continue
 
+        ship_id = row.get('ship_id')
         try:
-            ship_id = int(row.get('ship_id'))
+            ship_id_int = int(ship_id)
         except (TypeError, ValueError):
             continue
 
@@ -58,7 +87,7 @@ def _build_top_ranked_ship_names_by_season(ranked_ship_stats_rows: Any, requeste
         elif len(requested_season_ids) == 1:
             season_items = [(requested_season_ids[0], row)]
         else:
-            season_items = []
+            continue
 
         for season_id_raw, season_stats in season_items:
             try:
@@ -70,11 +99,12 @@ def _build_top_ranked_ship_names_by_season(ranked_ship_stats_rows: Any, requeste
             if battles <= 0:
                 continue
 
-            current_best_battles = top_ship_battles_by_season.get(season_id, -1)
+            current_best_battles = top_ship_battles_by_season.get(
+                season_id, -1)
             current_best_ship_id = top_ship_ids_by_season.get(season_id)
-            if battles > current_best_battles or (battles == current_best_battles and (current_best_ship_id is None or ship_id < current_best_ship_id)):
+            if battles > current_best_battles or (battles == current_best_battles and (current_best_ship_id is None or ship_id_int < current_best_ship_id)):
                 top_ship_battles_by_season[season_id] = battles
-                top_ship_ids_by_season[season_id] = ship_id
+                top_ship_ids_by_season[season_id] = ship_id_int
 
     ship_names_by_id: dict[int, Optional[str]] = {}
     for ship_id in set(top_ship_ids_by_season.values()):
@@ -85,6 +115,160 @@ def _build_top_ranked_ship_names_by_season(ranked_ship_stats_rows: Any, requeste
         season_id: ship_names_by_id.get(ship_id)
         for season_id, ship_id in top_ship_ids_by_season.items()
     }
+
+
+def _calculate_activity_trend_direction(activity_rows: list[dict]) -> str:
+    if not activity_rows:
+        return 'flat'
+
+    midpoint = len(activity_rows) // 2
+    earlier_rows = activity_rows[:midpoint]
+    later_rows = activity_rows[midpoint:]
+
+    earlier_total = sum(int(row.get('battles', 0) or 0)
+                        for row in earlier_rows)
+    later_total = sum(int(row.get('battles', 0) or 0) for row in later_rows)
+
+    if earlier_total == 0 and later_total == 0:
+        return 'flat'
+
+    threshold = max(3, int(max(earlier_total, later_total) * 0.15))
+    delta = later_total - earlier_total
+    if delta > threshold:
+        return 'up'
+    if delta < -threshold:
+        return 'down'
+    return 'flat'
+
+
+def build_player_summary(player: Player, activity_rows: Any = None, ranked_rows: Any = None, battles_rows: Any = None) -> dict:
+    account_age_days = None
+    if player.creation_date:
+        account_age_days = (datetime.now(
+            timezone.utc).date() - player.creation_date.date()).days
+
+    summary = {
+        'player_id': player.player_id,
+        'name': player.name,
+        'is_hidden': player.is_hidden,
+        'days_since_last_battle': player.days_since_last_battle,
+        'last_battle_date': player.last_battle_date.isoformat() if player.last_battle_date else None,
+        'account_age_days': account_age_days,
+        'pvp_ratio': player.pvp_ratio,
+        'pvp_battles': player.pvp_battles,
+        'pvp_survival_rate': player.pvp_survival_rate,
+        'battles_last_29_days': None,
+        'wins_last_29_days': None,
+        'active_days_last_29_days': None,
+        'recent_win_rate': None,
+        'activity_trend_direction': None,
+        'ships_played_total': None,
+        'ship_type_spread': None,
+        'tier_spread': None,
+        'ranked_seasons_participated': None,
+        'latest_ranked_battles': None,
+        'highest_ranked_league_recent': None,
+    }
+
+    if player.is_hidden:
+        return summary
+
+    normalized_activity_rows = _coerce_activity_rows(
+        player.activity_json if activity_rows is None else activity_rows)
+    battles_last_29_days = sum(row['battles']
+                               for row in normalized_activity_rows)
+    wins_last_29_days = sum(row['wins'] for row in normalized_activity_rows)
+    active_days_last_29_days = sum(
+        1 for row in normalized_activity_rows if row['battles'] > 0)
+
+    normalized_battles_rows = battles_rows if battles_rows is not None else player.battles_json
+    if not isinstance(normalized_battles_rows, list):
+        normalized_battles_rows = []
+
+    played_rows = [
+        row for row in normalized_battles_rows
+        if isinstance(row, dict) and int(row.get('pvp_battles', 0) or 0) > 0
+    ]
+
+    ship_type_spread = len({
+        row.get('ship_type') for row in played_rows if row.get('ship_type') is not None
+    })
+    tier_spread = len({
+        row.get('ship_tier') for row in played_rows if row.get('ship_tier') is not None
+    })
+
+    normalized_ranked_rows = _coerce_ranked_rows(
+        player.ranked_json if ranked_rows is None else ranked_rows)
+    latest_ranked_row = normalized_ranked_rows[0] if normalized_ranked_rows else None
+
+    summary.update({
+        'battles_last_29_days': battles_last_29_days,
+        'wins_last_29_days': wins_last_29_days,
+        'active_days_last_29_days': active_days_last_29_days,
+        'recent_win_rate': round(wins_last_29_days / battles_last_29_days, 3) if battles_last_29_days > 0 else None,
+        'activity_trend_direction': _calculate_activity_trend_direction(normalized_activity_rows),
+        'ships_played_total': len(played_rows),
+        'ship_type_spread': ship_type_spread,
+        'tier_spread': tier_spread,
+        'ranked_seasons_participated': len(normalized_ranked_rows),
+        'latest_ranked_battles': int(latest_ranked_row.get('total_battles', 0) or 0) if latest_ranked_row else None,
+        'highest_ranked_league_recent': latest_ranked_row.get('highest_league_name') if latest_ranked_row else None,
+    })
+    return summary
+
+
+def fetch_player_summary(player_id: str) -> dict:
+    player = Player.objects.get(player_id=player_id)
+    activity_rows = fetch_activity_data(player_id)
+    ranked_rows = fetch_ranked_data(player_id)
+
+    if not player.is_hidden and not player.battles_json:
+        update_battle_data(player_id)
+
+    player.refresh_from_db()
+    return build_player_summary(player, activity_rows=activity_rows, ranked_rows=ranked_rows)
+
+
+def fetch_player_explorer_rows(
+    query: str = '',
+    hidden: str = 'all',
+    activity_bucket: str = 'all',
+    ranked: str = 'all',
+    min_pvp_battles: int = 0,
+) -> list[dict]:
+    players = Player.objects.exclude(name='').all()
+
+    if query:
+        players = players.filter(name__icontains=query)
+
+    if hidden == 'visible':
+        players = players.filter(is_hidden=False)
+    elif hidden == 'hidden':
+        players = players.filter(is_hidden=True)
+
+    if min_pvp_battles > 0:
+        players = players.filter(pvp_battles__gte=min_pvp_battles)
+
+    if activity_bucket == '7d':
+        players = players.filter(days_since_last_battle__lte=7)
+    elif activity_bucket == '30d':
+        players = players.filter(days_since_last_battle__lte=30)
+    elif activity_bucket == '90d':
+        players = players.filter(days_since_last_battle__lte=90)
+    elif activity_bucket == 'dormant90plus':
+        players = players.filter(days_since_last_battle__gt=90)
+
+    rows = [build_player_summary(player) for player in players]
+
+    if ranked == 'yes':
+        rows = [row for row in rows if (
+            row.get('ranked_seasons_participated') or 0) > 0]
+    elif ranked == 'no':
+        rows = [row for row in rows if (
+            row.get('ranked_seasons_participated') or 0) == 0]
+
+    return rows
+
 
 def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[dict]:
     if not isinstance(battles_json, list):
@@ -247,7 +431,8 @@ def fetch_tier_data(player_id: str) -> list:
 
 def update_tiers_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
-    tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0} for tier in range(1, 12)}
+    tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0}
+                       for tier in range(1, 12)}
     for row in player.battles_json or []:
         if not isinstance(row, dict):
             continue
@@ -256,7 +441,8 @@ def update_tiers_data(player_id: str) -> list:
         if not isinstance(tier, int) or tier not in tier_aggregates:
             continue
 
-        tier_aggregates[tier]['pvp_battles'] += int(row.get('pvp_battles', 0) or 0)
+        tier_aggregates[tier]['pvp_battles'] += int(
+            row.get('pvp_battles', 0) or 0)
         tier_aggregates[tier]['wins'] += int(row.get('wins', 0) or 0)
 
     data = []
@@ -765,12 +951,13 @@ def update_ranked_data(player_id) -> None:
         return
 
     requested_season_ids = sorted(
-        int(season_id) for season_id in rank_info.keys() if str(season_id).isdigit()
+        [int(season_id)
+         for season_id in rank_info.keys() if str(season_id).isdigit()]
     )
+    ranked_ship_stats_rows = _fetch_ranked_ship_stats_for_player(
+        int(player_id), season_ids=requested_season_ids)
     top_ship_names_by_season = _build_top_ranked_ship_names_by_season(
-        _fetch_ranked_ship_stats_for_player(int(player_id), season_ids=requested_season_ids),
-        requested_season_ids,
-    )
+        ranked_ship_stats_rows, requested_season_ids)
 
     # Aggregate into per-season summaries
     result = _aggregate_ranked_seasons(
@@ -803,7 +990,8 @@ def fetch_type_data(player_id: str) -> list:
 
 def update_type_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
-    player.type_json = _aggregate_battles_by_key(player.battles_json, 'ship_type')
+    player.type_json = _aggregate_battles_by_key(
+        player.battles_json, 'ship_type')
     player.type_updated_at = datetime.now()
     player.save()
 

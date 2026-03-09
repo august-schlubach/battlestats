@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.core.cache import cache
 from django.utils import timezone
 
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data
 from warships.models import Player, Snapshot, Clan
 
 
@@ -119,15 +119,18 @@ class RandomsDataRefreshTests(TestCase):
             name="Sorter",
             player_id=445,
             battles_json=[
-                {"ship_name": "Low", "ship_type": "Destroyer", "ship_tier": 6, "pvp_battles": 3, "win_ratio": 0.33, "wins": 1},
-                {"ship_name": "High", "ship_type": "Cruiser", "ship_tier": 10, "pvp_battles": 15, "win_ratio": 0.6, "wins": 9},
+                {"ship_name": "Low", "ship_type": "Destroyer", "ship_tier": 6,
+                    "pvp_battles": 3, "win_ratio": 0.33, "wins": 1},
+                {"ship_name": "High", "ship_type": "Cruiser", "ship_tier": 10,
+                    "pvp_battles": 15, "win_ratio": 0.6, "wins": 9},
             ],
         )
 
         update_randoms_data(player.player_id)
         player.refresh_from_db()
 
-        self.assertEqual([row["ship_name"] for row in player.randoms_json], ["High", "Low"])
+        self.assertEqual([row["ship_name"]
+                         for row in player.randoms_json], ["High", "Low"])
 
 
 class AggregateChartDataTests(TestCase):
@@ -145,7 +148,8 @@ class AggregateChartDataTests(TestCase):
         update_tiers_data(player.player_id)
         player.refresh_from_db()
 
-        tier_ten = next(row for row in player.tiers_json if row["ship_tier"] == 10)
+        tier_ten = next(
+            row for row in player.tiers_json if row["ship_tier"] == 10)
         self.assertEqual(tier_ten["pvp_battles"], 15)
         self.assertEqual(tier_ten["wins"], 8)
         self.assertEqual(tier_ten["win_ratio"], 0.53)
@@ -165,9 +169,88 @@ class AggregateChartDataTests(TestCase):
         player.refresh_from_db()
 
         self.assertEqual(player.type_json[0]["ship_type"], "Cruiser")
-        destroyer = next(row for row in player.type_json if row["ship_type"] == "Destroyer")
+        destroyer = next(
+            row for row in player.type_json if row["ship_type"] == "Destroyer")
         self.assertEqual(destroyer["pvp_battles"], 16)
         self.assertEqual(destroyer["wins"], 9)
+
+    @patch("warships.data._fetch_ship_info")
+    def test_build_top_ranked_ship_names_by_season_prefers_most_played_ship(self, mock_fetch_ship_info):
+        class ShipStub:
+            def __init__(self, name):
+                self.name = name
+
+        mock_fetch_ship_info.side_effect = lambda ship_id: ShipStub({
+            "101": "Yamato",
+            "202": "Des Moines",
+        }[ship_id])
+
+        rows = [
+            {
+                "ship_id": 101,
+                "seasons": {
+                    "1100": {"battles": 12},
+                    "1101": {"rank_solo": {"battles": 3}, "rank_div2": {"battles": 1}},
+                },
+            },
+            {
+                "ship_id": 202,
+                "seasons": {
+                    "1100": {"battles": 8},
+                    "1101": {"rank_solo": {"battles": 9}},
+                },
+            },
+        ]
+
+        result = _build_top_ranked_ship_names_by_season(rows, [1100, 1101])
+
+        self.assertEqual(result[1100], "Yamato")
+        self.assertEqual(result[1101], "Des Moines")
+
+
+class RankedDataRefreshTests(TestCase):
+    @patch("warships.data._fetch_ranked_ship_stats_for_player")
+    @patch("warships.data._fetch_ship_info")
+    @patch("warships.data._fetch_ranked_account_info")
+    @patch("warships.data._get_ranked_seasons_metadata")
+    def test_update_ranked_data_adds_top_ship_name(
+        self,
+        mock_get_ranked_seasons_metadata,
+        mock_fetch_ranked_account_info,
+        mock_fetch_ship_info,
+        mock_fetch_ranked_ship_stats_for_player,
+    ):
+        class ShipStub:
+            def __init__(self, name):
+                self.name = name
+
+        player = Player.objects.create(name="RankedCaptain", player_id=7001)
+        mock_get_ranked_seasons_metadata.return_value = {
+            1100: {"name": "Season 100", "label": "S100", "start_date": "2026-01-01", "end_date": "2026-02-01"},
+        }
+        mock_fetch_ranked_account_info.return_value = {
+            "rank_info": {
+                "1100": {
+                    "1": {
+                        "1": {"battles": 7, "victories": 4, "rank": 5, "best_rank_in_sprint": 5},
+                    },
+                },
+            },
+        }
+        mock_fetch_ranked_ship_stats_for_player.return_value = [
+            {
+                "ship_id": 999,
+                "seasons": {
+                    "1100": {"battles": 6},
+                },
+            },
+        ]
+        mock_fetch_ship_info.return_value = ShipStub("Stalingrad")
+
+        update_ranked_data(player.player_id)
+        player.refresh_from_db()
+
+        self.assertEqual(player.ranked_json[0]["top_ship_name"], "Stalingrad")
 
 
 class PlayerDataHardeningTests(TestCase):

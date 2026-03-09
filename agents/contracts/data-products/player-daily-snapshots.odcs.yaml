@@ -1,0 +1,117 @@
+apiVersion: v3.1.0
+kind: DataContract
+
+id: 624f4b7f-f12b-4d4f-a2e1-2f4e00f4f7ab
+name: player_daily_snapshots
+version: 0.1.0
+status: draft
+domain: battlestats
+dataProduct: player-activity
+tenant: battlestats
+
+description:
+  purpose: Daily derived PvP activity snapshots used for player activity charts and downstream player evaluation features.
+  limitations: Derived from cumulative account data because the upstream WoWS account/statsbydate endpoint is not currently reliable for PvP daily slices.
+  usage: Use for recent activity visualization and interval calculations, not as a canonical replay-grade battle ledger.
+  authoritativeDefinitions:
+    - url: https://developers.wargaming.net/reference/all/wows/account/info/
+      type: implementation
+      description: Upstream cumulative player stats source.
+    - url: https://developers.wargaming.net/reference/all/wows/account/statsbydate/
+      type: businessDefinition
+      description: Documented upstream daily stats endpoint, currently not trusted for PvP slices in this repo.
+
+tags:
+  - world-of-warships
+  - player-activity
+  - snapshots
+
+team:
+  - role: owner
+    description: battlestats maintainers
+
+support:
+  - channel: repo knowledge base
+    description: See agents/knowledge for upstream API investigations and behavioral notes.
+    tool: other
+
+servers:
+  - server: battlestats-django
+    type: other
+    description: Derived inside the Django application from Player and Snapshot models.
+
+schema:
+  - id: player_daily_snapshot_obj
+    name: player_daily_snapshot
+    logicalType: object
+    physicalType: table
+    description: One player's cumulative PvP totals for a given date plus derived interval metrics.
+    dataGranularityDescription: One row per player per date.
+    properties:
+      - id: player_id_prop
+        name: player_id
+        businessName: player id
+        logicalType: integer
+        physicalType: integer
+        required: true
+        description: World of Warships account identifier.
+        classification: public
+      - id: snapshot_date_prop
+        name: date
+        businessName: snapshot date
+        logicalType: date
+        physicalType: date
+        required: true
+        description: UTC calendar date represented by the snapshot row.
+        classification: public
+      - id: battles_prop
+        name: battles
+        businessName: cumulative PvP battles
+        logicalType: integer
+        physicalType: integer
+        required: true
+        description: Cumulative PvP battles at snapshot time.
+        classification: public
+      - id: wins_prop
+        name: wins
+        businessName: cumulative PvP wins
+        logicalType: integer
+        physicalType: integer
+        required: true
+        description: Cumulative PvP wins at snapshot time.
+        classification: public
+      - id: interval_battles_prop
+        name: interval_battles
+        businessName: daily battle delta
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Difference in cumulative battles from the previous snapshot date. First snapshot in a window may be zero.
+        classification: public
+      - id: interval_wins_prop
+        name: interval_wins
+        businessName: daily win delta
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Difference in cumulative wins from the previous snapshot date. First snapshot in a window may be zero.
+        classification: public
+      - id: last_fetch_prop
+        name: last_fetch
+        businessName: refresh timestamp
+        logicalType: timestamp
+        physicalType: datetime
+        required: false
+        description: Application timestamp when the snapshot row was last refreshed.
+        classification: public
+
+quality:
+  - description: player_id and date should uniquely identify a row.
+  - description: battles and wins must be non-negative.
+  - description: interval_battles and interval_wins should not be negative after recomputation.
+  - description: wins should never exceed battles for the same row.
+
+slaProperties:
+  - property: freshness
+    value: daily
+    description: Snapshot data is intended to refresh on a daily cadence or on-demand player lookup.

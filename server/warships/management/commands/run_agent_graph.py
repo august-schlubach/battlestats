@@ -31,9 +31,17 @@ class Command(BaseCommand):
             default=None,
             help="Optional JSON file containing workflow context.",
         )
+        parser.add_argument(
+            "--workflow-id",
+            type=str,
+            default=None,
+            help="Optional workflow/thread ID used for checkpointed runs.",
+        )
 
     def handle(self, *args, **options):
         context = _load_json_file(options.get("context_file"))
+        if options.get("workflow_id"):
+            context["workflow_id"] = options["workflow_id"]
         result = run_graph(options["task"], context=context)
 
         if options["as_json"]:

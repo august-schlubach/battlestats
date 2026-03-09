@@ -8,6 +8,7 @@ See `agents/langgraph-usage-note.md` for when it makes sense to use the repo's L
 
 - One role spec per file (already set up).
 - One shared process contract (this file).
+- One durable knowledge base under `agents/knowledge/` for research write-ups, verified system notes, and investigation handoffs.
 - One set of shared templates under `agents/templates/` (optional next step).
 
 ## Current Roles
@@ -66,3 +67,9 @@ Instead of only role markdown files, add these lightweight controls:
 - Make assumptions explicit.
 - Keep a single source of truth for status and decisions.
 - Escalate blockers quickly; do not silently workaround requirement gaps.
+
+## Knowledge Base
+
+- Store reusable findings under `agents/knowledge/` when they would save future investigation time.
+- Prefer one topic per file with a clear title, verification date, evidence summary, current conclusion, and next checks.
+- Use this for upstream API behavior, environment quirks, architectural decisions, and repeated debugging outcomes.

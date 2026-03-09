@@ -16,7 +16,8 @@ def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[lis
         "account_id": player_id,
     }
     if season_ids:
-        params["season_id"] = ",".join(str(season_id) for season_id in season_ids)
+        params["season_id"] = ",".join(str(season_id)
+                                       for season_id in season_ids)
 
     logging.info(
         f' ---> Remote fetching ranked ship stats for player_id: {player_id}')
@@ -28,6 +29,7 @@ def _fetch_ranked_ship_stats_for_player(player_id: int, season_ids: Optional[lis
         rows = []
 
     return rows if isinstance(rows, list) else []
+
 
 def _fetch_ship_stats_for_player(player_id: str) -> Dict:
     """Fetch all competitive data for all ships for a given player_id."""

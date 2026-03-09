@@ -222,21 +222,124 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload[1]["name"], "CaptainBravo")
         self.assertNotEqual(payload[0]["name"], "AlphaCaptain")
 
-    def test_landing_players_includes_hidden_flag(self):
+    def test_landing_players_excludes_hidden_players(self):
         Player.objects.create(
             name="HiddenLandingPlayer",
             player_id=4242,
             is_hidden=True,
             last_battle_date=timezone.now().date(),
         )
+        Player.objects.create(
+            name="VisibleLandingPlayer",
+            player_id=4243,
+            is_hidden=False,
+            last_battle_date=timezone.now().date(),
+        )
 
         response = self.client.get("/api/landing/players/")
 
         self.assertEqual(response.status_code, 200)
-        matching_rows = [row for row in response.json(
-        ) if row["name"] == "HiddenLandingPlayer"]
-        self.assertEqual(len(matching_rows), 1)
-        self.assertTrue(matching_rows[0]["is_hidden"])
+        names = [row["name"] for row in response.json()]
+        self.assertIn("VisibleLandingPlayer", names)
+        self.assertNotIn("HiddenLandingPlayer", names)
+
+    def test_player_summary_returns_derived_metrics(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="SummaryPlayer",
+            player_id=8181,
+            is_hidden=False,
+            pvp_ratio=54.2,
+            pvp_battles=1200,
+            pvp_survival_rate=38.5,
+            creation_date=now - timedelta(days=365),
+            days_since_last_battle=3,
+            last_battle_date=now.date() - timedelta(days=3),
+            activity_json=[
+                {"date": "2026-02-10", "battles": 1, "wins": 1},
+                {"date": "2026-02-11", "battles": 2, "wins": 1},
+                {"date": "2026-02-12", "battles": 7, "wins": 4},
+                {"date": "2026-02-13", "battles": 9, "wins": 5},
+            ],
+            activity_updated_at=now,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 15, "wins": 8},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 12, "wins": 7},
+            ],
+            ranked_json=[
+                {"season_id": 5, "highest_league_name": "Silver",
+                    "total_battles": 21, "top_ship_name": "Stalingrad"},
+                {"season_id": 4, "highest_league_name": "Bronze",
+                    "total_battles": 10, "top_ship_name": "Yamato"},
+            ],
+            ranked_updated_at=now,
+        )
+
+        response = self.client.get("/api/fetch/player_summary/8181/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["name"], "SummaryPlayer")
+        self.assertEqual(payload["battles_last_29_days"], 19)
+        self.assertEqual(payload["wins_last_29_days"], 11)
+        self.assertEqual(payload["active_days_last_29_days"], 4)
+        self.assertEqual(payload["ships_played_total"], 2)
+        self.assertEqual(payload["ship_type_spread"], 2)
+        self.assertEqual(payload["tier_spread"], 2)
+        self.assertEqual(payload["ranked_seasons_participated"], 2)
+        self.assertEqual(payload["latest_ranked_battles"], 21)
+        self.assertEqual(payload["highest_ranked_league_recent"], "Silver")
+
+    def test_players_explorer_sorts_by_recent_battles_desc_and_filters_ranked(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="ExplorerAlpha",
+            player_id=9101,
+            is_hidden=False,
+            pvp_ratio=55.0,
+            pvp_battles=500,
+            creation_date=now - timedelta(days=100),
+            days_since_last_battle=2,
+            activity_json=[
+                {"date": "2026-02-10", "battles": 2, "wins": 1},
+                {"date": "2026-02-11", "battles": 3, "wins": 2},
+            ],
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "wins": 5},
+            ],
+            ranked_json=[
+                {"season_id": 8, "highest_league_name": "Gold", "total_battles": 11},
+            ],
+        )
+        Player.objects.create(
+            name="ExplorerBravo",
+            player_id=9102,
+            is_hidden=False,
+            pvp_ratio=50.0,
+            pvp_battles=800,
+            creation_date=now - timedelta(days=200),
+            days_since_last_battle=4,
+            activity_json=[
+                {"date": "2026-02-10", "battles": 1, "wins": 1},
+            ],
+            battles_json=[
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 25, "wins": 13},
+            ],
+            ranked_json=[],
+        )
+
+        response = self.client.get(
+            "/api/players/explorer/?sort=battles_last_29_days&direction=desc&ranked=yes")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["name"], "ExplorerAlpha")
+        self.assertEqual(payload["results"][0]["battles_last_29_days"], 5)
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):
@@ -361,7 +464,8 @@ class ApiThrottleTests(TestCase):
 
     @patch("warships.views.update_clan_battle_summary_task.delay")
     def test_clan_battle_seasons_flags_pending_refresh_on_empty_cache(self, mock_delay):
-        Clan.objects.create(clan_id=42, name="PendingClan", tag="PC", members_count=0)
+        Clan.objects.create(clan_id=42, name="PendingClan",
+                            tag="PC", members_count=0)
 
         response = self.client.get("/api/fetch/clan_battle_seasons/42/")
 
@@ -390,6 +494,7 @@ class ApiThrottleTests(TestCase):
                 "total_battles": 34,
                 "total_wins": 20,
                 "win_rate": 0.5882,
+                "top_ship_name": "Stalingrad",
                 "best_sprint": {
                     "sprint_number": 2,
                     "league": 1,
@@ -429,6 +534,7 @@ class ApiThrottleTests(TestCase):
         payload = response.json()
         self.assertEqual(payload[0]["season_id"], 1025)
         self.assertEqual(payload[0]["highest_league_name"], "Gold")
+        self.assertEqual(payload[0]["top_ship_name"], "Stalingrad")
         self.assertEqual(payload[0]["best_sprint"]["sprint_number"], 2)
 
     @patch("warships.views._fetch_player_id_by_name", return_value=None)

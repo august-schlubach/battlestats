@@ -152,7 +152,8 @@ def save_player(player_data: Dict, clan: Clan) -> None:
     )
 
     if player.last_battle_date:
-        player.days_since_last_battle = (_now().date() - player.last_battle_date).days
+        player.days_since_last_battle = (
+            _now().date() - player.last_battle_date).days
 
     if player_data.get("hidden_profile"):
         player.is_hidden = True
@@ -165,7 +166,8 @@ def save_player(player_data: Dict, clan: Clan) -> None:
         player.pvp_wins = pvp.get("wins", 0)
         player.pvp_losses = pvp.get("losses", 0)
         if player.pvp_battles > 0:
-            player.pvp_ratio = round(player.pvp_wins / player.pvp_battles * 100, 2)
+            player.pvp_ratio = round(
+                player.pvp_wins / player.pvp_battles * 100, 2)
         player.pvp_survival_rate = (
             round(pvp.get("survived_battles", 0) / pvp["battles"] * 100, 2)
             if pvp.get("battles")
@@ -186,7 +188,8 @@ def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
         return []
 
     all_clans.extend(first_batch)
-    log.info("Page 1/%d — %d clans (total pages: %d)", total_pages, len(first_batch), total_pages)
+    log.info("Page 1/%d — %d clans (total pages: %d)",
+             total_pages, len(first_batch), total_pages)
 
     for page in range(2, total_pages + 1):
         if limit and len(all_clans) >= limit:
@@ -197,7 +200,8 @@ def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
             break
         all_clans.extend(batch)
         if page % 50 == 0:
-            log.info("Page %d/%d — %d clans so far", page, total_pages, len(all_clans))
+            log.info("Page %d/%d — %d clans so far",
+                     page, total_pages, len(all_clans))
 
     if limit:
         all_clans = all_clans[:limit]
@@ -221,7 +225,8 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False) -> dict[str
 
         info = fetch_clan_info(clan_id)
         if not info:
-            log.warning("[%d/%d] Failed to fetch info for clan %d", i, total, clan_id)
+            log.warning("[%d/%d] Failed to fetch info for clan %d",
+                        i, total, clan_id)
             continue
 
         clan = save_clan(info)
@@ -233,7 +238,8 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False) -> dict[str
 
         member_ids = fetch_member_ids(clan_id)
         if not member_ids:
-            log.warning("[%d/%d] No member IDs for [%s] %s", i, total, clan.tag, clan.name)
+            log.warning("[%d/%d] No member IDs for [%s] %s",
+                        i, total, clan.tag, clan.name)
             clans_processed += 1
             continue
 
@@ -256,7 +262,8 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False) -> dict[str
                 skipped,
             )
 
-    log.info("Done. Clans processed: %d, skipped: %d, players saved: %d", clans_processed, skipped, players_saved)
+    log.info("Done. Clans processed: %d, skipped: %d, players saved: %d",
+             clans_processed, skipped, players_saved)
     return {
         "clans_processed": clans_processed,
         "players_saved": players_saved,
@@ -268,7 +275,8 @@ def run_clan_crawl(resume: bool = False, dry_run: bool = False, limit: Optional[
     if not APP_ID:
         raise RuntimeError("WG_APP_ID environment variable is not set")
 
-    log.info("Starting crawl (resume=%s, dry_run=%s, limit=%s)", resume, dry_run, limit)
+    log.info("Starting crawl (resume=%s, dry_run=%s, limit=%s)",
+             resume, dry_run, limit)
 
     clan_stubs = crawl_clan_ids(limit=limit)
     if not clan_stubs:

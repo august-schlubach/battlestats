@@ -31,9 +31,17 @@ def main() -> int:
         default=None,
         help="Optional JSON file containing context (verification, touched_files, etc).",
     )
+    parser.add_argument(
+        "--workflow-id",
+        type=str,
+        default=None,
+        help="Optional workflow/thread ID used for checkpointed runs.",
+    )
     args = parser.parse_args()
 
     context = _load_json_file(args.context_file)
+    if args.workflow_id:
+        context["workflow_id"] = args.workflow_id
     result = run_graph(args.task, context=context)
 
     if args.as_json:

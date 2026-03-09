@@ -75,6 +75,11 @@ const LandingClanSVG = dynamic(() => import('./LandingClanSVG'), {
     loading: () => <LoadingPanel label="Loading clan landscape..." minHeight={360} />,
 });
 
+const PlayerExplorer = dynamic(() => import('./PlayerExplorer'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading player explorer..." minHeight={360} />,
+});
+
 const LANDING_LIMIT = 40;
 const SEARCH_SUGGESTION_LIMIT = 8;
 const SEARCH_DEBOUNCE_MS = 180;
@@ -510,6 +515,8 @@ const PlayerSearch: React.FC = () => {
                             )}
                         </div>
                     )}
+
+                    <PlayerExplorer onSelectMember={handleSelectMember} />
                 </div>
             )}
         </div>

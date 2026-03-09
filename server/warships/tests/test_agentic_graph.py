@@ -1,9 +1,86 @@
+import os
+from contextlib import contextmanager
 from unittest import TestCase
+from unittest.mock import patch
 
 from warships.agentic import run_graph
+from warships.agentic.checkpoints import get_graph_checkpointer, get_langgraph_checkpoint_postgres_url
+from langgraph.checkpoint.memory import MemorySaver
 
 
 class AgenticGraphTests(TestCase):
+    def test_checkpoint_url_derived_from_db_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DB_ENGINE": "postgresql_psycopg2",
+                "DB_NAME": "battlestats",
+                "DB_USERNAME": "django",
+                "DB_PASSWORD": "secret value",
+                "DB_HOST": "db",
+                "DB_PORT": "5432",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                get_langgraph_checkpoint_postgres_url(),
+                "postgresql://django:secret+value@db:5432/battlestats",
+            )
+
+    def test_graph_checkpointer_falls_back_to_memory_when_postgres_not_configured(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DB_ENGINE": "sqlite3",
+                "LANGGRAPH_CHECKPOINT_POSTGRES_URL": "",
+            },
+            clear=False,
+        ):
+            with get_graph_checkpointer() as saver:
+                self.assertIsInstance(saver, MemorySaver)
+
+    def test_graph_checkpointer_uses_postgres_backend_when_requested(self):
+        captured: dict[str, object] = {}
+
+        class FakeSaver:
+            def __init__(self):
+                self.setup_called = False
+
+            def setup(self):
+                self.setup_called = True
+
+        @contextmanager
+        def fake_from_conn_string(conn_string, pipeline=False):
+            captured["conn_string"] = conn_string
+            captured["pipeline"] = pipeline
+            saver = FakeSaver()
+            captured["saver"] = saver
+            yield saver
+
+        fake_postgres_saver = type(
+            "FakePostgresSaver",
+            (),
+            {"from_conn_string": staticmethod(fake_from_conn_string)},
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "LANGGRAPH_CHECKPOINT_POSTGRES_URL": "postgresql://example/checkpoints",
+                "LANGGRAPH_CHECKPOINT_AUTO_SETUP": "true",
+            },
+            clear=False,
+        ), patch(
+            "warships.agentic.checkpoints.PostgresSaver",
+            fake_postgres_saver,
+        ):
+            with get_graph_checkpointer({"checkpoint_backend": "postgres"}) as saver:
+                self.assertIs(saver, captured["saver"])
+
+        self.assertEqual(captured["conn_string"], "postgresql://example/checkpoints")
+        self.assertFalse(captured["pipeline"])
+        self.assertTrue(captured["saver"].setup_called)
+
     def test_run_graph_completes_when_verification_passes(self):
         result = run_graph(
             "Fix clan hydration in player page",

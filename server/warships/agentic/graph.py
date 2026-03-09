@@ -10,6 +10,8 @@ from typing import Any, Literal, TypedDict
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from .checkpoints import get_graph_checkpointer
+
 
 class AgentState(TypedDict, total=False):
     """Shared workflow state for a guarded implementation pipeline."""
@@ -359,7 +361,7 @@ def _route_after_verification(
     return "summarize"
 
 
-def build_graph():
+def build_graph(checkpointer: Any | None = None):
     """Build and compile the guarded LangGraph workflow."""
 
     graph_builder = StateGraph(AgentState)
@@ -388,7 +390,7 @@ def build_graph():
     graph_builder.add_edge("retry_verification", "verify_changes")
     graph_builder.add_edge("summarize", END)
 
-    return graph_builder.compile(checkpointer=MemorySaver())
+    return graph_builder.compile(checkpointer=checkpointer or MemorySaver())
 
 
 def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
@@ -397,7 +399,6 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
     context = context or {}
     workflow_id = context.get(
         "workflow_id") or f"run-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
-    compiled = build_graph()
     initial_state: AgentState = {
         "workflow_id": workflow_id,
         "task": task,
@@ -423,7 +424,9 @@ def run_graph(task: str, context: dict[str, Any] | None = None) -> AgentState:
         "transition_log": [],
     }
 
-    return compiled.invoke(
-        initial_state,
-        config={"configurable": {"thread_id": workflow_id}},
-    )
+    with get_graph_checkpointer(context=context) as checkpointer:
+        compiled = build_graph(checkpointer=checkpointer)
+        return compiled.invoke(
+            initial_state,
+            config={"configurable": {"thread_id": workflow_id}},
+        )
