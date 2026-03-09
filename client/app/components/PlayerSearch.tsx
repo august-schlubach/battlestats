@@ -1,8 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import axios from 'axios';
-import PlayerDetail from './PlayerDetail';
-import ClanDetail from './ClanDetail';
-import LandingClanSVG from './LandingClanSVG';
+import dynamic from 'next/dynamic';
 
 interface LandingClan {
     clan_id: number;
@@ -55,6 +52,28 @@ interface PlayerData {
     clan_tag: string | null;
     clan_id: number;
 }
+
+const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
+    <div
+        className="flex animate-pulse items-center justify-center rounded-md border border-[#dbe9f6] bg-[#f7fbff] text-sm text-[#6baed6]"
+        style={{ minHeight }}
+    >
+        {label}
+    </div>
+);
+
+const PlayerDetail = dynamic(() => import('./PlayerDetail'), {
+    loading: () => <LoadingPanel label="Loading player view..." minHeight={720} />,
+});
+
+const ClanDetail = dynamic(() => import('./ClanDetail'), {
+    loading: () => <LoadingPanel label="Loading clan view..." minHeight={560} />,
+});
+
+const LandingClanSVG = dynamic(() => import('./LandingClanSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan landscape..." minHeight={360} />,
+});
 
 const LANDING_LIMIT = 40;
 const SEARCH_SUGGESTION_LIMIT = 8;
@@ -152,8 +171,12 @@ const PlayerSearch: React.FC = () => {
     }, [searchTerm]);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
-        const response = await axios.get<PlayerData>(`http://localhost:8888/api/player/${playerName}`);
-        return response.data;
+        const response = await fetch(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch player ${playerName}`);
+        }
+
+        return response.json();
     };
 
     const handleSearch = async () => {

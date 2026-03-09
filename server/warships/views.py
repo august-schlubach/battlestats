@@ -26,18 +26,17 @@ PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
 
 
 class PlayerViewSet(viewsets.ModelViewSet):
-    queryset = Player.objects.all()
+    queryset = Player.objects.select_related('clan').all()
     serializer_class = PlayerSerializer
     permission_classes = [permissions.AllowAny]
 
     def get_object(self):
         lookup_field_value = self.kwargs[self.lookup_field]
         try:
-            obj = Player.objects.get(name__iexact=lookup_field_value)
+            obj = self.queryset.get(name__iexact=lookup_field_value)
             if not obj.clan:
                 from warships.data import update_player_data
                 update_player_data(player=obj, force_refresh=True)
-                obj.refresh_from_db()
         except Player.DoesNotExist:
             player_id = _fetch_player_id_by_name(lookup_field_value)
             if not player_id:
@@ -50,7 +49,6 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
             from warships.data import update_player_data
             update_player_data(player=obj, force_refresh=True)
-            obj.refresh_from_db()
 
         self.check_object_permissions(self.request, obj)
 
@@ -91,7 +89,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
 
 class PlayerDetail(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Player.objects.all()
+    queryset = Player.objects.select_related('clan').all()
     serializer_class = PlayerSerializer
     lookup_field = 'name'
     permission_classes = [permissions.AllowAny]

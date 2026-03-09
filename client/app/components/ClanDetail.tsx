@@ -1,7 +1,6 @@
 import React from 'react';
-import ClanBattleSeasons from './ClanBattleSeasons';
-import ClanSVG from './ClanSVG';
-import ClanMembers from './ClanMembers';
+import dynamic from 'next/dynamic';
+import DeferredSection from './DeferredSection';
 
 interface ClanDetailProps {
     clan: {
@@ -13,6 +12,30 @@ interface ClanDetailProps {
     onBack: () => void;
     onSelectMember: (memberName: string) => void;
 }
+
+const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
+    <div
+        className="flex animate-pulse items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-500"
+        style={{ minHeight }}
+    >
+        {label}
+    </div>
+);
+
+const ClanSVG = dynamic(() => import('./ClanSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan chart..." minHeight={400} />,
+});
+
+const ClanBattleSeasons = dynamic(() => import('./ClanBattleSeasons'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={240} />,
+});
+
+const ClanMembers = dynamic(() => import('./ClanMembers'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
+});
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
     return (
@@ -30,13 +53,25 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={400} />
             </div>
 
-            <div className="mt-8">
-                <ClanBattleSeasons clanId={clan.clan_id} memberCount={clan.members_count} />
-            </div>
+            <DeferredSection
+                className="mt-8"
+                minHeight={240}
+                placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={240} />}
+            >
+                <div>
+                    <ClanBattleSeasons clanId={clan.clan_id} memberCount={clan.members_count} />
+                </div>
+            </DeferredSection>
 
-            <div className="mt-6 border-t border-gray-100 pt-4">
-                <ClanMembers clanId={clan.clan_id} onSelectMember={onSelectMember} />
-            </div>
+            <DeferredSection
+                className="mt-6 border-t border-gray-100 pt-4"
+                minHeight={96}
+                placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
+            >
+                <div>
+                    <ClanMembers clanId={clan.clan_id} onSelectMember={onSelectMember} />
+                </div>
+            </DeferredSection>
 
             <button
                 onClick={onBack}

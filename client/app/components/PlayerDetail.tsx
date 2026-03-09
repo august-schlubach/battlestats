@@ -1,10 +1,6 @@
 import React from 'react';
-import TierSVG from './TierSVG';
-import TypeSVG from './TypeSVG';
-import RandomsSVG from './RandomsSVG';
-import RankedSeasons from './RankedSeasons';
-import ClanMembers from './ClanMembers';
-import ClanSVG from './ClanSVG';
+import dynamic from 'next/dynamic';
+import DeferredSection from './DeferredSection';
 
 interface PlayerDetailProps {
     player: {
@@ -36,6 +32,45 @@ interface PlayerDetailProps {
     onSelectClan: (clanId: number, clanName: string) => void;
     isLoading?: boolean;
 }
+
+const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
+    <div
+        className="flex animate-pulse items-center justify-center rounded-md border border-[#dbe9f6] bg-[#f7fbff] text-sm text-[#6baed6]"
+        style={{ minHeight }}
+    >
+        {label}
+    </div>
+);
+
+const ClanSVG = dynamic(() => import('./ClanSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan chart..." minHeight={280} />,
+});
+
+const ClanMembers = dynamic(() => import('./ClanMembers'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
+});
+
+const RandomsSVG = dynamic(() => import('./RandomsSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading top ships..." minHeight={500} />,
+});
+
+const RankedSeasons = dynamic(() => import('./RankedSeasons'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading ranked seasons..." minHeight={220} />,
+});
+
+const TierSVG = dynamic(() => import('./TierSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={334} />,
+});
+
+const TypeSVG = dynamic(() => import('./TypeSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={210} />,
+});
 
 const selectColorByWR = (winRatio: number): string => {
     if (winRatio > 65) return "#810c9e";  // super unicum
@@ -86,9 +121,15 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             <div id="clan_plot_container" className="mb-5">
                                 <ClanSVG clanId={player.clan_id} onSelectMember={onSelectMember} svgHeight={280} />
                             </div>
-                            <div id="clan_members_container" className="pt-5">
-                                <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} />
-                            </div>
+                            <DeferredSection
+                                className="pt-5"
+                                minHeight={96}
+                                placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
+                            >
+                                <div id="clan_members_container">
+                                    <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} />
+                                </div>
+                            </DeferredSection>
                         </>
                     ) : (
                         <p className="text-sm text-gray-500">No clan data available</p>
@@ -152,16 +193,28 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p className="mb-2 text-xs text-[#6baed6]">Historical ranked season performance, including league finish.</p>
                                 <RankedSeasons playerId={player.player_id} isLoading={isLoading} />
                             </div>
-                            <div className="mt-8">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Tier</h3>
-                                <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate grouped by ship tier.</p>
-                                <TierSVG playerId={player.player_id} />
-                            </div>
-                            <div className="mt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Ship Type</h3>
-                                <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate across classes.</p>
-                                <TypeSVG playerId={player.player_id} />
-                            </div>
+                            <DeferredSection
+                                className="mt-8"
+                                minHeight={360}
+                                placeholder={<LoadingPanel label="Preparing tier chart..." minHeight={360} />}
+                            >
+                                <div>
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Tier</h3>
+                                    <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate grouped by ship tier.</p>
+                                    <TierSVG playerId={player.player_id} />
+                                </div>
+                            </DeferredSection>
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={236}
+                                placeholder={<LoadingPanel label="Preparing ship type chart..." minHeight={236} />}
+                            >
+                                <div>
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Ship Type</h3>
+                                    <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate across classes.</p>
+                                    <TypeSVG playerId={player.player_id} />
+                                </div>
+                            </DeferredSection>
                         </>
                     )}
                 </div>
