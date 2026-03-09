@@ -160,6 +160,16 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     )}
                 </div>
             </div>
+            <div className="mt-8 border-t border-[#c6dbef] pt-5">
+                <button
+                    type="button"
+                    onClick={onBack}
+                    className="inline-flex items-center rounded-md border border-[#2171b5] px-4 py-2 text-sm font-medium text-[#2171b5] transition-colors hover:bg-[#eff3ff]"
+                    aria-label="Return to landing page"
+                >
+                    Back
+                </button>
+            </div>
         </div>
     );
 

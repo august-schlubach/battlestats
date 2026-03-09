@@ -1,7 +1,7 @@
 import logging
 from datetime import timedelta
 from django.core.cache import cache
-from django.db.models import Sum, F, FloatField, Case, When, Value
+from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField
 from django.db.models.functions import Cast
 from django.http import Http404
 from rest_framework import generics, permissions, viewsets
@@ -267,7 +267,7 @@ def landing_players(request) -> Response:
         return list(
             Player.objects.exclude(name='').exclude(
                 last_battle_date__isnull=True
-            ).values('name', 'pvp_ratio').order_by('-last_battle_date')
+            ).values('name', 'pvp_ratio', 'is_hidden').order_by('-last_battle_date')
         )
 
     data = cache.get_or_set('landing:players', _fetch_landing_players, 60)
@@ -286,3 +286,25 @@ def landing_recent_players(request) -> Response:
     data = cache.get_or_set('landing:recent_players',
                             _fetch_recent_players, 60)
     return Response(data)
+
+
+@api_view(["GET"])
+def player_name_suggestions(request) -> Response:
+    query = (request.query_params.get('q') or '').strip()
+    if len(query) < 2:
+        return Response([])
+
+    suggestions = list(
+        Player.objects.exclude(name='').filter(name__icontains=query).annotate(
+            prefix_rank=Case(
+                When(name__istartswith=query, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            ),
+        ).values('name', 'pvp_ratio', 'is_hidden').order_by(
+            'prefix_rank',
+            F('last_battle_date').desc(nulls_last=True),
+            'name',
+        )[:8]
+    )
+    return Response(suggestions)

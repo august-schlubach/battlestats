@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, landing_clans, landing_players, landing_recent_players
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, landing_clans, landing_players, landing_recent_players, player_name_suggestions
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -35,6 +35,8 @@ urlpatterns = [
          landing_clans, name='landing_clans'),
     path('api/landing/players/',
          landing_players, name='landing_players'),
+    path('api/landing/player-suggestions/',
+         player_name_suggestions, name='player_name_suggestions'),
     path('api/landing/recent/',
          landing_recent_players, name='landing_recent_players'),
 

@@ -17,14 +17,16 @@ const TypeSVG: React.FC<TypeSVGProps> = ({ playerId }) => {
                 container.removeChild(container.firstChild);
             }
 
-            const type_svg_margin = { top: 10, right: 20, bottom: 50, left: 96 },
-                type_svg_width = 500 - type_svg_margin.left - type_svg_margin.right,
-                type_svg_height = 170 - type_svg_margin.top - type_svg_margin.bottom;
+            const total_type_svg_width = 500;
+            const total_type_svg_height = 210;
+            const type_svg_margin = { top: 44, right: 20, bottom: 50, left: 96 },
+                type_svg_width = total_type_svg_width - type_svg_margin.left - type_svg_margin.right,
+                type_svg_height = total_type_svg_height - type_svg_margin.top - type_svg_margin.bottom;
 
             const type_svg = d3.select("#type_svg_container")
                 .append("svg")
-                .attr("width", type_svg_width + type_svg_margin.left + type_svg_margin.right)
-                .attr("height", type_svg_height + type_svg_margin.top + type_svg_margin.bottom)
+                .attr("width", total_type_svg_width)
+                .attr("height", total_type_svg_height)
                 .append("g")
                 .attr("transform", `translate(${type_svg_margin.left}, ${type_svg_margin.top})`);
 
@@ -109,39 +111,19 @@ const TypeSVG: React.FC<TypeSVGProps> = ({ playerId }) => {
     };
 
     const showTypeDetails = (d: any) => {
-        const start_x = 400, start_y = 110;
+        const detail_x = 480, detail_y = 26;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
         const detailGroup = d3.select("#type_svg_container").select("svg").append("g")
             .classed('details', true);
 
         detailGroup.append("text")
-            .attr("x", start_x)
-            .attr("y", start_y)
-            .style("font-size", "14px")
-            .attr("text-anchor", "end")
-            .attr("font-weight", "700")
-            .text(d.pvp_battles);
-        detailGroup.append("text")
-            .attr("x", start_x + 40)
-            .attr("y", start_y)
+            .attr("x", detail_x)
+            .attr("y", detail_y)
             .style("font-size", "12px")
             .attr("text-anchor", "end")
-            .text("Battles");
-
-        detailGroup.append("text")
-            .attr("x", start_x + 95)
-            .attr("y", start_y)
-            .style("font-size", "14px")
-            .attr("text-anchor", "end")
             .attr("font-weight", "700")
-            .text(win_percentage);
-        detailGroup.append("text")
-            .attr("x", start_x + 160)
-            .attr("y", start_y)
-            .style("font-size", "12px")
-            .attr("text-anchor", "end")
-            .text("% Win Rate");
+            .text(`${d.pvp_battles} Battles • ${win_percentage}% Win Rate`);
     };
 
     const hideTypeDetails = () => {

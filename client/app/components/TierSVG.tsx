@@ -16,14 +16,16 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
             // Clear the container before drawing a new SVG
             d3.select(container).selectAll("*").remove();
 
-            const tier_svg_margin = { top: 10, right: 20, bottom: 50, left: 70 },
-                svg_width = 500 - tier_svg_margin.left - tier_svg_margin.right,
-                svg_height = 300 - tier_svg_margin.top - tier_svg_margin.bottom;
+            const total_svg_width = 500;
+            const total_svg_height = 334;
+            const tier_svg_margin = { top: 44, right: 20, bottom: 50, left: 70 },
+                svg_width = total_svg_width - tier_svg_margin.left - tier_svg_margin.right,
+                svg_height = total_svg_height - tier_svg_margin.top - tier_svg_margin.bottom;
 
             const svg = d3.select("#tier_svg_container")
                 .append("svg")
-                .attr("width", svg_width + tier_svg_margin.left + tier_svg_margin.right)
-                .attr("height", svg_height + tier_svg_margin.top + tier_svg_margin.bottom)
+                .attr("width", total_svg_width)
+                .attr("height", total_svg_height)
                 .append("g")
                 .attr("transform", `translate(${tier_svg_margin.left}, ${tier_svg_margin.top})`);
 
@@ -108,39 +110,19 @@ const TierSVG: React.FC<TierSVGProps> = ({ playerId }) => {
     };
 
     const showTierDetails = (d: any) => {
-        const start_x = 400, start_y = 240;
+        const detail_x = 480, detail_y = 26;
         const win_percentage = ((d.wins / d.pvp_battles) * 100).toFixed(2);
 
         const detailGroup = d3.select("#tier_svg_container").select("svg").append("g")
             .classed('details', true);
 
         detailGroup.append("text")
-            .attr("x", start_x)
-            .attr("y", start_y)
-            .style("font-size", "14px")
-            .attr("text-anchor", "end")
-            .attr("font-weight", "700")
-            .text(d.pvp_battles);
-        detailGroup.append("text")
-            .attr("x", start_x + 40)
-            .attr("y", start_y)
+            .attr("x", detail_x)
+            .attr("y", detail_y)
             .style("font-size", "12px")
             .attr("text-anchor", "end")
-            .text("Battles");
-
-        detailGroup.append("text")
-            .attr("x", start_x + 95)
-            .attr("y", start_y)
-            .style("font-size", "14px")
-            .attr("text-anchor", "end")
             .attr("font-weight", "700")
-            .text(win_percentage);
-        detailGroup.append("text")
-            .attr("x", start_x + 160)
-            .attr("y", start_y)
-            .style("font-size", "12px")
-            .attr("text-anchor", "end")
-            .text("% Win Rate");
+            .text(`${d.pvp_battles} Battles • ${win_percentage}% Win Rate`);
     };
 
     const hideTierDetails = () => {

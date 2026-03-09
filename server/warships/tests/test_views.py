@@ -196,6 +196,45 @@ class ClanMembersEndpointTests(TestCase):
 
 
 class ApiContractTests(TestCase):
+    def test_player_name_suggestions_prioritize_prefix_matches_and_limit_results(self):
+        today = timezone.now().date()
+        Player.objects.create(name="CaptainAlpha",
+                              player_id=5001, last_battle_date=today)
+        Player.objects.create(name="AlphaCaptain",
+                              player_id=5002, last_battle_date=today)
+        Player.objects.create(name="CaptainBravo",
+                              player_id=5003, last_battle_date=today)
+
+        for index in range(10):
+            Player.objects.create(
+                name=f"CaptainExtra{index}",
+                player_id=5100 + index,
+                last_battle_date=today,
+            )
+
+        response = self.client.get("/api/landing/player-suggestions/?q=cap")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 8)
+        self.assertEqual(payload[0]["name"], "CaptainAlpha")
+        self.assertEqual(payload[1]["name"], "CaptainBravo")
+        self.assertNotEqual(payload[0]["name"], "AlphaCaptain")
+
+    def test_landing_players_includes_hidden_flag(self):
+        Player.objects.create(
+            name="HiddenLandingPlayer",
+            player_id=4242,
+            is_hidden=True,
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/landing/players/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["name"], "HiddenLandingPlayer")
+        self.assertTrue(response.json()[0]["is_hidden"])
+
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):
         mock_fetch.return_value = [

@@ -16,6 +16,7 @@ interface LandingClan {
 interface LandingPlayer {
     name: string;
     pvp_ratio: number | null;
+    is_hidden?: boolean;
 }
 
 const wrColor = (r: number | null): string => {
@@ -56,11 +57,16 @@ interface PlayerData {
 }
 
 const LANDING_LIMIT = 40;
+const SEARCH_SUGGESTION_LIMIT = 8;
+const SEARCH_DEBOUNCE_MS = 180;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 
 const PlayerSearch: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchSuggestions, setSearchSuggestions] = useState<LandingPlayer[]>([]);
+    const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
+    const [isSuggestionListOpen, setIsSuggestionListOpen] = useState(false);
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [selectedClan, setSelectedClan] = useState<LandingClan | null>(null);
     const [error, setError] = useState('');
@@ -69,6 +75,7 @@ const PlayerSearch: React.FC = () => {
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
+    const suggestionHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const fetchLandingData = useCallback(async () => {
         try {
@@ -105,6 +112,44 @@ const PlayerSearch: React.FC = () => {
         fetchLandingData();
     }, [fetchLandingData]);
 
+    useEffect(() => {
+        if (suggestionHideTimeoutRef.current) {
+            return () => {
+                if (suggestionHideTimeoutRef.current) {
+                    clearTimeout(suggestionHideTimeoutRef.current);
+                }
+            };
+        }
+    }, []);
+
+    useEffect(() => {
+        const trimmedSearch = searchTerm.trim();
+        if (trimmedSearch.length < 2) {
+            setSearchSuggestions([]);
+            setHighlightedSuggestionIndex(-1);
+            return;
+        }
+
+        const timeoutId = setTimeout(async () => {
+            try {
+                const response = await fetch(`http://localhost:8888/api/landing/player-suggestions/?q=${encodeURIComponent(trimmedSearch)}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch suggestions for ${trimmedSearch}`);
+                }
+
+                const suggestions: LandingPlayer[] = await response.json();
+                setSearchSuggestions(suggestions.slice(0, SEARCH_SUGGESTION_LIMIT));
+                setHighlightedSuggestionIndex(suggestions.length > 0 ? 0 : -1);
+            } catch (err) {
+                console.error('Error fetching player suggestions:', err);
+                setSearchSuggestions([]);
+                setHighlightedSuggestionIndex(-1);
+            }
+        }, SEARCH_DEBOUNCE_MS);
+
+        return () => clearTimeout(timeoutId);
+    }, [searchTerm]);
+
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
         const response = await axios.get<PlayerData>(`http://localhost:8888/api/player/${playerName}`);
         return response.data;
@@ -117,6 +162,7 @@ const PlayerSearch: React.FC = () => {
             setPlayerData(data);
             setError('');
             setSelectedClan(null);
+            setIsSuggestionListOpen(false);
         } catch (err) {
             setError('Player not found');
             setPlayerData(null);
@@ -173,6 +219,10 @@ const PlayerSearch: React.FC = () => {
     };
 
     const handleSelectMember = async (memberName: string) => {
+        setSearchTerm(memberName);
+        setIsSuggestionListOpen(false);
+        setSearchSuggestions([]);
+        setHighlightedSuggestionIndex(-1);
         setIsLoadingPlayer(true);
         try {
             const data = await fetchPlayerByName(memberName);
@@ -183,6 +233,59 @@ const PlayerSearch: React.FC = () => {
             setError('Player not found');
         } finally {
             setIsLoadingPlayer(false);
+        }
+    };
+
+    const handleSearchInputFocus = () => {
+        if (searchSuggestions.length > 0) {
+            setIsSuggestionListOpen(true);
+        }
+    };
+
+    const handleSearchInputBlur = () => {
+        suggestionHideTimeoutRef.current = setTimeout(() => {
+            setIsSuggestionListOpen(false);
+        }, 120);
+    };
+
+    const handleSuggestionMouseDown = (playerName: string) => {
+        if (suggestionHideTimeoutRef.current) {
+            clearTimeout(suggestionHideTimeoutRef.current);
+            suggestionHideTimeoutRef.current = null;
+        }
+        void handleSelectMember(playerName);
+    };
+
+    const handleSearchInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+        if (!isSuggestionListOpen || searchSuggestions.length === 0) {
+            return;
+        }
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setHighlightedSuggestionIndex((currentIndex) => (
+                currentIndex < searchSuggestions.length - 1 ? currentIndex + 1 : 0
+            ));
+            return;
+        }
+
+        if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setHighlightedSuggestionIndex((currentIndex) => (
+                currentIndex > 0 ? currentIndex - 1 : searchSuggestions.length - 1
+            ));
+            return;
+        }
+
+        if (event.key === 'Enter' && highlightedSuggestionIndex >= 0) {
+            event.preventDefault();
+            void handleSelectMember(searchSuggestions[highlightedSuggestionIndex].name);
+            return;
+        }
+
+        if (event.key === 'Escape') {
+            setIsSuggestionListOpen(false);
+            setHighlightedSuggestionIndex(-1);
         }
     };
 
@@ -251,13 +354,54 @@ const PlayerSearch: React.FC = () => {
                     <form onSubmit={handleSubmit} className="space-y-2">
                         <label htmlFor="search" className="block text-sm font-medium text-[#2171b5]">Search:</label>
                         <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                            <input
-                                type="text"
-                                id="search"
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="block w-full px-3 py-2 border border-[#c6dbef] rounded-md shadow-sm focus:outline-none focus:ring-[#4292c6] focus:border-[#4292c6] sm:w-1/3 sm:text-sm"
-                            />
+                            <div className="relative w-full sm:w-1/3">
+                                <input
+                                    type="text"
+                                    id="search"
+                                    value={searchTerm}
+                                    onChange={(e) => {
+                                        setSearchTerm(e.target.value);
+                                        setIsSuggestionListOpen(true);
+                                    }}
+                                    onFocus={handleSearchInputFocus}
+                                    onBlur={handleSearchInputBlur}
+                                    onKeyDown={handleSearchInputKeyDown}
+                                    autoComplete="off"
+                                    aria-autocomplete="list"
+                                    aria-expanded={isSuggestionListOpen && searchSuggestions.length > 0}
+                                    aria-controls="player-search-suggestions"
+                                    className="block w-full px-3 py-2 border border-[#c6dbef] rounded-md shadow-sm focus:outline-none focus:ring-[#4292c6] focus:border-[#4292c6] sm:text-sm"
+                                />
+                                {isSuggestionListOpen && searchSuggestions.length > 0 && (
+                                    <ul
+                                        id="player-search-suggestions"
+                                        className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-[#c6dbef] bg-white py-1 shadow-lg"
+                                        role="listbox"
+                                    >
+                                        {searchSuggestions.map((player, index) => {
+                                            const isHighlighted = index === highlightedSuggestionIndex;
+                                            return (
+                                                <li key={`suggestion-${player.name}`} role="option" aria-selected={isHighlighted}>
+                                                    <button
+                                                        type="button"
+                                                        onMouseDown={() => handleSuggestionMouseDown(player.name)}
+                                                        onMouseEnter={() => setHighlightedSuggestionIndex(index)}
+                                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? 'bg-[#deebf7] text-[#084594]' : 'text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                                    >
+                                                        <span className="inline-flex items-center gap-2">
+                                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
+                                                            <span>{player.name}</span>
+                                                        </span>
+                                                        {player.is_hidden && (
+                                                            <span className="text-xs uppercase tracking-wide text-[#6baed6]">Hidden</span>
+                                                        )}
+                                                    </button>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
                             <button type="submit" className="px-4 py-2 bg-[#2171b5] hover:bg-[#084594] text-white rounded transition-colors">Go</button>
                         </div>
                     </form>
@@ -293,15 +437,26 @@ const PlayerSearch: React.FC = () => {
                             <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
                             <p className="mt-2 text-sm leading-7 text-[#4292c6]">
                                 {players.slice(0, LANDING_LIMIT).map((player) => (
-                                    <button
-                                        key={player.name}
-                                        onClick={() => handleSelectMember(player.name)}
-                                        className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
-                                        aria-label={`Show player ${player.name}`}
-                                    >
-                                        <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
-                                        {player.name}
-                                    </button>
+                                    player.is_hidden ? (
+                                        <span
+                                            key={player.name}
+                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#6baed6]"
+                                            aria-label={`${player.name} has hidden stats`}
+                                        >
+                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
+                                            {player.name}
+                                        </span>
+                                    ) : (
+                                        <button
+                                            key={player.name}
+                                            onClick={() => handleSelectMember(player.name)}
+                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                            aria-label={`Show player ${player.name}`}
+                                        >
+                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
+                                            {player.name}
+                                        </button>
+                                    )
                                 ))}
                             </p>
 
