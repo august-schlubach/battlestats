@@ -146,6 +146,22 @@ class WRDistributionBinSerializer(serializers.Serializer):
     count = serializers.IntegerField()
 
 
+class PlayerPopulationDistributionBinSerializer(serializers.Serializer):
+    bin_min = serializers.FloatField()
+    bin_max = serializers.FloatField()
+    count = serializers.IntegerField()
+
+
+class PlayerPopulationDistributionSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    label = serializers.CharField()
+    x_label = serializers.CharField()
+    scale = serializers.ChoiceField(choices=['linear', 'log'])
+    value_format = serializers.ChoiceField(choices=['percent', 'integer'])
+    tracked_population = serializers.IntegerField()
+    bins = PlayerPopulationDistributionBinSerializer(many=True)
+
+
 class PlayerExplorerRowSerializer(serializers.Serializer):
     name = serializers.CharField()
     player_id = serializers.IntegerField()

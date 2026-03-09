@@ -5,7 +5,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.models import Player, Clan
+from warships.models import Player, Clan, PlayerExplorerSummary
 from warships.views import PUBLIC_API_THROTTLES, landing_players
 
 
@@ -292,6 +292,85 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["latest_ranked_battles"], 21)
         self.assertEqual(payload["highest_ranked_league_recent"], "Silver")
 
+    def test_player_distribution_returns_survival_payload(self):
+        Player.objects.create(
+            name="DistributionOne",
+            player_id=8801,
+            is_hidden=False,
+            pvp_battles=1200,
+            pvp_ratio=54.2,
+            pvp_survival_rate=38.5,
+        )
+        Player.objects.create(
+            name="DistributionTwo",
+            player_id=8802,
+            is_hidden=False,
+            pvp_battles=2400,
+            pvp_ratio=57.8,
+            pvp_survival_rate=44.1,
+        )
+        Player.objects.create(
+            name="DistributionHidden",
+            player_id=8803,
+            is_hidden=True,
+            pvp_battles=2200,
+            pvp_ratio=59.0,
+            pvp_survival_rate=50.0,
+        )
+
+        response = self.client.get("/api/fetch/player_distribution/survival_rate/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "survival_rate")
+        self.assertEqual(payload["label"], "Survival Rate")
+        self.assertEqual(payload["scale"], "linear")
+        self.assertEqual(payload["value_format"], "percent")
+        self.assertEqual(payload["tracked_population"], 2)
+        self.assertTrue(any(row["count"] > 0 for row in payload["bins"]))
+
+    def test_player_distribution_returns_battles_payload_with_log_scale(self):
+        Player.objects.create(
+            name="BattlesA",
+            player_id=8811,
+            is_hidden=False,
+            pvp_battles=150,
+            pvp_ratio=48.0,
+            pvp_survival_rate=30.0,
+        )
+        Player.objects.create(
+            name="BattlesB",
+            player_id=8812,
+            is_hidden=False,
+            pvp_battles=9800,
+            pvp_ratio=62.0,
+            pvp_survival_rate=46.0,
+        )
+        Player.objects.create(
+            name="BattlesTooSmall",
+            player_id=8813,
+            is_hidden=False,
+            pvp_battles=90,
+            pvp_ratio=50.0,
+            pvp_survival_rate=35.0,
+        )
+
+        response = self.client.get("/api/fetch/player_distribution/battles_played/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "battles_played")
+        self.assertEqual(payload["scale"], "log")
+        self.assertEqual(payload["value_format"], "integer")
+        self.assertEqual(payload["tracked_population"], 2)
+        self.assertTrue(any(row["bin_min"] == 100 and row["count"] == 1 for row in payload["bins"]))
+        self.assertTrue(any(row["bin_min"] == 6400 and row["count"] == 1 for row in payload["bins"]))
+
+    def test_player_distribution_rejects_unknown_metric(self):
+        response = self.client.get("/api/fetch/player_distribution/not-real/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_players_explorer_sorts_by_recent_battles_desc_and_filters_ranked(self):
         now = timezone.now()
         Player.objects.create(
@@ -340,6 +419,34 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["results"][0]["name"], "ExplorerAlpha")
         self.assertEqual(payload["results"][0]["battles_last_29_days"], 5)
+
+    def test_players_explorer_backfills_missing_denormalized_summary(self):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="ExplorerBackfill",
+            player_id=9103,
+            is_hidden=False,
+            pvp_ratio=51.2,
+            pvp_battles=450,
+            creation_date=now - timedelta(days=80),
+            days_since_last_battle=5,
+            activity_json=[
+                {"date": "2026-02-10", "battles": 4, "wins": 2},
+                {"date": "2026-02-11", "battles": 1, "wins": 1},
+            ],
+            battles_json=[
+                {"ship_name": "Ship C", "ship_type": "Battleship", "ship_tier": 9, "pvp_battles": 11, "wins": 6},
+            ],
+            ranked_json=[],
+        )
+
+        response = self.client.get("/api/players/explorer/?q=ExplorerBackfill")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["results"][0]["battles_last_29_days"], 5)
+        self.assertTrue(PlayerExplorerSummary.objects.filter(player=player).exists())
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

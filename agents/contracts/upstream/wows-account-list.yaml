@@ -1,0 +1,87 @@
+id: wows.account.list
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/account/list/
+purpose: Search player accounts by nickname prefix or exact match and return account IDs plus nicknames.
+docs_url: https://developers.wargaming.net/reference/all/wows/account/list/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    search:
+      required: true
+      type: string
+      description: Player search string. Docs state exact search is case-insensitive and may include up to 100 comma-separated names.
+    type:
+      required: false
+      type: string
+      description: Search mode. Docs list `startswith` as default and `exact` for exact matching.
+    limit:
+      required: false
+      type: integer
+      description: Max returned rows. Docs state values above 100 are capped at 100.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+    data:
+      type: array
+  expected_item_shape:
+    account_id: integer
+    nickname: string
+
+observed_behavior:
+  last_verified: 2026-03-09
+  docs_notes:
+    - Docs describe this endpoint as a partial player list filtered by initial username characters and sorted alphabetically.
+    - Docs list exact-match mode as case-insensitive.
+    - Docs list errors for missing search, insufficient search length, and too many names in search.
+  live_notes:
+    - Repo usage is intentionally narrow: exact search with limit 1 and fields `account_id,nickname`.
+    - Upstream exact match still requires client-side nickname verification because the repo treats only case-insensitive exact nickname matches as valid.
+    - This endpoint is used only to find an account ID when the local cache misses.
+
+trust:
+  rating: medium
+  suitable_for:
+    - exact-name account ID lookup with client-side validation
+    - interactive search flows when ambiguity is acceptable
+  not_suitable_for:
+    - authoritative identity matching without post-filtering
+    - assuming first result is always a true exact match
+  recommendation: Use with `type=exact`, a narrow field set, and a local case-insensitive nickname equality check before accepting the result.
+
+repo_usage:
+  current_state:
+    - Used only after local player-name lookup misses.
+    - Current code requests `type=exact`, `limit=1`, and fields `account_id,nickname`.
+    - Current code rejects upstream results whose returned nickname is not a case-insensitive exact match.
+  code_refs:
+    - server/warships/api/players.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - docs reference at https://developers.wargaming.net/reference/all/wows/account/list/

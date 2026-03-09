@@ -5,8 +5,9 @@ from django.test import TestCase
 from django.core.cache import cache
 from django.utils import timezone
 
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data
-from warships.models import Player, Snapshot, Clan
+from warships.clan_crawl import save_player
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary
+from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
 class SnapshotDataTests(TestCase):
@@ -330,6 +331,107 @@ class PlayerDataHardeningTests(TestCase):
         update_player_data(player, force_refresh=True)
 
         self.assertIsNone(cache.get("landing:players"))
+
+
+class PlayerExplorerSummaryTests(TestCase):
+    def test_refresh_player_explorer_summary_persists_denormalized_metrics(self):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="ExplorerSummaryPlayer",
+            player_id=9911,
+            is_hidden=False,
+            pvp_ratio=53.4,
+            pvp_battles=1234,
+            pvp_survival_rate=39.5,
+            creation_date=now - timedelta(days=250),
+            activity_json=[
+                {"date": "2026-03-01", "battles": 2, "wins": 1},
+                {"date": "2026-03-02", "battles": 4, "wins": 3},
+            ],
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 10, "pvp_battles": 8, "wins": 5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser", "ship_tier": 8, "pvp_battles": 4, "wins": 2},
+            ],
+            ranked_json=[
+                {"season_id": 3, "highest_league_name": "Silver", "total_battles": 12},
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertEqual(summary.battles_last_29_days, 6)
+        self.assertEqual(summary.wins_last_29_days, 4)
+        self.assertEqual(summary.active_days_last_29_days, 2)
+        self.assertEqual(summary.ships_played_total, 2)
+        self.assertEqual(summary.ship_type_spread, 2)
+        self.assertEqual(summary.tier_spread, 2)
+        self.assertEqual(summary.ranked_seasons_participated, 1)
+        self.assertEqual(summary.latest_ranked_battles, 12)
+        self.assertEqual(summary.highest_ranked_league_recent, "Silver")
+
+    def test_update_player_data_hidden_profile_clears_denormalized_summary_values(self):
+        player = Player.objects.create(
+            name="SummaryHiddenCaptain",
+            player_id=9912,
+            is_hidden=False,
+            activity_json=[{"date": "2026-03-01", "battles": 5, "wins": 3}],
+            battles_json=[{"ship_name": "Ship A", "ship_type": "Destroyer", "ship_tier": 10, "pvp_battles": 5, "wins": 3}],
+            ranked_json=[{"season_id": 1, "highest_league_name": "Bronze", "total_battles": 7}],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            battles_last_29_days=5,
+            wins_last_29_days=3,
+            active_days_last_29_days=1,
+            ships_played_total=1,
+            ranked_seasons_participated=1,
+        )
+
+        with patch("warships.data._fetch_player_personal_data") as mock_fetch_player_personal_data, patch("warships.data._fetch_clan_membership_for_player") as mock_fetch_clan_membership:
+            mock_fetch_player_personal_data.return_value = {
+                "account_id": 9912,
+                "nickname": "SummaryHiddenCaptain",
+                "hidden_profile": True,
+            }
+            mock_fetch_clan_membership.return_value = {}
+
+            update_player_data(player, force_refresh=True)
+
+        summary = PlayerExplorerSummary.objects.get(player=player)
+        self.assertIsNone(summary.battles_last_29_days)
+        self.assertIsNone(summary.ships_played_total)
+        self.assertIsNone(summary.ranked_seasons_participated)
+
+    def test_clan_crawl_save_player_creates_explorer_summary_row(self):
+        clan = Clan.objects.create(clan_id=9913, name="CrawlerClan", tag="CC")
+
+        save_player(
+            {
+                "account_id": 9913,
+                "nickname": "CrawlerCaptain",
+                "created_at": int((timezone.now() - timedelta(days=400)).timestamp()),
+                "last_battle_time": int((timezone.now() - timedelta(days=2)).timestamp()),
+                "hidden_profile": False,
+                "statistics": {
+                    "battles": 250,
+                    "pvp": {
+                        "battles": 200,
+                        "wins": 110,
+                        "losses": 90,
+                        "survived_battles": 70,
+                    },
+                },
+            },
+            clan,
+        )
+
+        player = Player.objects.get(player_id=9913)
+        summary = PlayerExplorerSummary.objects.get(player=player)
+
+        self.assertEqual(player.clan, clan)
+        self.assertEqual(summary.player, player)
+        self.assertEqual(summary.battles_last_29_days, 0)
+        self.assertEqual(summary.ships_played_total, 0)
 
     @patch("warships.data._fetch_clan_data")
     def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):

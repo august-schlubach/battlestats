@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 import logging
 from django.core.cache import cache
-from warships.models import Player, Snapshot, Clan
+from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
@@ -154,7 +154,13 @@ def _calculate_activity_trend_direction(activity_rows: list[dict]) -> str:
     return 'flat'
 
 
-def build_player_summary(player: Player, activity_rows: Any = None, ranked_rows: Any = None, battles_rows: Any = None) -> dict:
+def build_player_summary(
+    player: Player,
+    activity_rows: Any = None,
+    ranked_rows: Any = None,
+    battles_rows: Any = None,
+    use_cached_summary: bool = True,
+) -> dict:
     account_age_days = None
     if player.creation_date:
         account_age_days = (datetime.now(
@@ -184,6 +190,23 @@ def build_player_summary(player: Player, activity_rows: Any = None, ranked_rows:
     }
 
     if player.is_hidden:
+        return summary
+
+    explorer_summary = getattr(player, 'explorer_summary', None)
+    if use_cached_summary and activity_rows is None and ranked_rows is None and battles_rows is None and explorer_summary is not None:
+        summary.update({
+            'battles_last_29_days': explorer_summary.battles_last_29_days,
+            'wins_last_29_days': explorer_summary.wins_last_29_days,
+            'active_days_last_29_days': explorer_summary.active_days_last_29_days,
+            'recent_win_rate': explorer_summary.recent_win_rate,
+            'activity_trend_direction': explorer_summary.activity_trend_direction,
+            'ships_played_total': explorer_summary.ships_played_total,
+            'ship_type_spread': explorer_summary.ship_type_spread,
+            'tier_spread': explorer_summary.tier_spread,
+            'ranked_seasons_participated': explorer_summary.ranked_seasons_participated,
+            'latest_ranked_battles': explorer_summary.latest_ranked_battles,
+            'highest_ranked_league_recent': explorer_summary.highest_ranked_league_recent,
+        })
         return summary
 
     normalized_activity_rows = _coerce_activity_rows(
@@ -230,6 +253,41 @@ def build_player_summary(player: Player, activity_rows: Any = None, ranked_rows:
     return summary
 
 
+def refresh_player_explorer_summary(
+    player: Player,
+    activity_rows: Any = None,
+    ranked_rows: Any = None,
+    battles_rows: Any = None,
+) -> PlayerExplorerSummary:
+    summary = build_player_summary(
+        player,
+        activity_rows=activity_rows,
+        ranked_rows=ranked_rows,
+        battles_rows=battles_rows,
+        use_cached_summary=False,
+    )
+
+    explorer_summary, _ = PlayerExplorerSummary.objects.update_or_create(
+        player=player,
+        defaults={
+            'battles_last_29_days': summary['battles_last_29_days'],
+            'wins_last_29_days': summary['wins_last_29_days'],
+            'active_days_last_29_days': summary['active_days_last_29_days'],
+            'recent_win_rate': summary['recent_win_rate'],
+            'activity_trend_direction': summary['activity_trend_direction'],
+            'ships_played_total': summary['ships_played_total'],
+            'ship_type_spread': summary['ship_type_spread'],
+            'tier_spread': summary['tier_spread'],
+            'ranked_seasons_participated': summary['ranked_seasons_participated'],
+            'latest_ranked_battles': summary['latest_ranked_battles'],
+            'highest_ranked_league_recent': summary['highest_ranked_league_recent'],
+        },
+    )
+
+    player.explorer_summary = explorer_summary
+    return explorer_summary
+
+
 def fetch_player_summary(player_id: str) -> dict:
     player = Player.objects.get(player_id=player_id)
     activity_rows = fetch_activity_data(player_id)
@@ -239,7 +297,13 @@ def fetch_player_summary(player_id: str) -> dict:
         update_battle_data(player_id)
 
     player.refresh_from_db()
-    return build_player_summary(player, activity_rows=activity_rows, ranked_rows=ranked_rows)
+    refresh_player_explorer_summary(
+        player,
+        activity_rows=activity_rows,
+        ranked_rows=ranked_rows,
+        battles_rows=player.battles_json,
+    )
+    return build_player_summary(player)
 
 
 def fetch_player_explorer_rows(
@@ -249,7 +313,7 @@ def fetch_player_explorer_rows(
     ranked: str = 'all',
     min_pvp_battles: int = 0,
 ) -> list[dict]:
-    players = Player.objects.exclude(name='').all()
+    players = Player.objects.exclude(name='').select_related('explorer_summary').all()
 
     if query:
         players = players.filter(name__icontains=query)
@@ -271,7 +335,11 @@ def fetch_player_explorer_rows(
     elif activity_bucket == 'dormant90plus':
         players = players.filter(days_since_last_battle__gt=90)
 
-    rows = [build_player_summary(player) for player in players]
+    rows = []
+    for player in players:
+        if not hasattr(player, 'explorer_summary'):
+            refresh_player_explorer_summary(player)
+        rows.append(build_player_summary(player))
 
     if ranked == 'yes':
         rows = [row for row in rows if (
@@ -407,6 +475,7 @@ def update_battle_data(player_id: str) -> None:
     player.battles_updated_at = datetime.now()
     player.battles_json = sorted_data
     player.save()
+    refresh_player_explorer_summary(player, battles_rows=sorted_data)
     logging.info(f"Updated battles_json data: {player.name}")
 
 
@@ -593,6 +662,7 @@ def update_activity_data(player_id: int) -> None:
     player.activity_json = month
     player.activity_updated_at = datetime.now()
     player.save()
+    refresh_player_explorer_summary(player, activity_rows=month)
 
     logging.info(f'Updated activity data for player {player.name}')
 
@@ -603,36 +673,144 @@ def update_activity_data(player_id: int) -> None:
 
 LEAGUE_NAMES = {1: 'Gold', 2: 'Silver', 3: 'Bronze'}
 
+PLAYER_DISTRIBUTION_CACHE_TTL = 3600  # 1 hour
+PLAYER_DISTRIBUTION_CONFIGS = {
+    'win_rate': {
+        'label': 'Win Rate',
+        'x_label': 'Rate',
+        'scale': 'linear',
+        'value_format': 'percent',
+        'field_name': 'pvp_ratio',
+        'min_population_battles': 100,
+        'range_min': 35.0,
+        'range_max': 75.0,
+        'bin_width': 1.0,
+    },
+    'survival_rate': {
+        'label': 'Survival Rate',
+        'x_label': 'Rate',
+        'scale': 'linear',
+        'value_format': 'percent',
+        'field_name': 'pvp_survival_rate',
+        'min_population_battles': 100,
+        'range_min': 15.0,
+        'range_max': 75.0,
+        'bin_width': 1.0,
+    },
+    'battles_played': {
+        'label': 'PvP Battles',
+        'x_label': 'PvP Battles',
+        'scale': 'log',
+        'value_format': 'integer',
+        'field_name': 'pvp_battles',
+        'min_population_battles': 100,
+        'bin_edges': [100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400],
+    },
+}
 
-def fetch_wr_distribution() -> list[dict]:
-    """Return a histogram of player WR distribution, cached for 1 hour."""
-    cached = cache.get(WR_DISTRIBUTION_CACHE_KEY)
+
+def _player_distribution_cache_key(metric: str) -> str:
+    return f'players:distribution:v1:{metric}'
+
+
+def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value_max: float, bin_width: float) -> list[dict]:
+    bins: list[dict] = []
+    current = value_min
+
+    while current < value_max:
+        upper = round(current + bin_width, 6)
+        count = qs.filter(**{
+            f'{field_name}__gte': current,
+            f'{field_name}__lt': upper,
+        }).count()
+        bins.append({
+            'bin_min': round(current, 4),
+            'bin_max': round(upper, 4),
+            'count': count,
+        })
+        current = upper
+
+    return bins
+
+
+def _build_explicit_distribution_bins(qs, field_name: str, bin_edges: list[int]) -> list[dict]:
+    bins: list[dict] = []
+
+    for index, lower in enumerate(bin_edges[:-1]):
+        upper = bin_edges[index + 1]
+        filters = {
+            f'{field_name}__gte': lower,
+            f'{field_name}__lt': upper,
+        }
+
+        if index == len(bin_edges) - 2:
+            filters = {
+                f'{field_name}__gte': lower,
+                f'{field_name}__lte': upper,
+            }
+
+        bins.append({
+            'bin_min': lower,
+            'bin_max': upper,
+            'count': qs.filter(**filters).count(),
+        })
+
+    return bins
+
+
+def fetch_player_population_distribution(metric: str) -> dict:
+    config = PLAYER_DISTRIBUTION_CONFIGS.get(metric)
+    if config is None:
+        raise ValueError(f'Unsupported player distribution metric: {metric}')
+
+    cache_key = _player_distribution_cache_key(metric)
+    cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
-    MIN_BATTLES = 100
-    BIN_WIDTH = 1.0
-    WR_MIN = 35.0
-    WR_MAX = 75.0
-
+    field_name = config['field_name']
     qs = Player.objects.filter(
         is_hidden=False,
-        pvp_battles__gte=MIN_BATTLES,
-        pvp_ratio__isnull=False,
+        pvp_battles__gte=config['min_population_battles'],
+        **{f'{field_name}__isnull': False},
     )
 
-    bins: list[dict] = []
-    wr = WR_MIN
-    while wr < WR_MAX:
-        hi = round(wr + BIN_WIDTH, 1)
-        count = qs.filter(pvp_ratio__gte=wr, pvp_ratio__lt=hi).count()
-        bins.append({'wr_min': wr, 'wr_max': hi, 'count': count})
-        wr = hi
+    if config['scale'] == 'log':
+        bins = _build_explicit_distribution_bins(qs, field_name, config['bin_edges'])
+    else:
+        bins = _build_linear_distribution_bins(
+            qs,
+            field_name,
+            config['range_min'],
+            config['range_max'],
+            config['bin_width'],
+        )
 
-    cache.set(WR_DISTRIBUTION_CACHE_KEY, bins, WR_DISTRIBUTION_CACHE_TTL)
-    return bins
-WR_DISTRIBUTION_CACHE_KEY = 'wr:distribution:histogram'
-WR_DISTRIBUTION_CACHE_TTL = 3600  # 1 hour
+    payload = {
+        'metric': metric,
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'scale': config['scale'],
+        'value_format': config['value_format'],
+        'tracked_population': qs.count(),
+        'bins': bins,
+    }
+
+    cache.set(cache_key, payload, PLAYER_DISTRIBUTION_CACHE_TTL)
+    return payload
+
+
+def fetch_wr_distribution() -> list[dict]:
+    """Return a histogram of player WR distribution, cached for 1 hour."""
+    payload = fetch_player_population_distribution('win_rate')
+    return [
+        {
+            'wr_min': row['bin_min'],
+            'wr_max': row['bin_max'],
+            'count': row['count'],
+        }
+        for row in payload['bins']
+    ]
 
 RANKED_SEASONS_CACHE_KEY = 'ranked:seasons:metadata'
 RANKED_SEASONS_CACHE_TTL = 86400  # 24 hours in seconds
@@ -1024,6 +1202,7 @@ def update_ranked_data(player_id) -> None:
     player.ranked_json = result
     player.ranked_updated_at = datetime.now()
     player.save()
+    refresh_player_explorer_summary(player, ranked_rows=result)
     logging.info(
         f'Updated ranked data for {player.name}: {len(result)} seasons')
 
@@ -1297,6 +1476,7 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
 
     player.last_fetch = datetime.now()
     player.save()
+    refresh_player_explorer_summary(player)
     cache.delete('landing:players')
     logging.info(f"Updated player personal data: {player.name}")
 

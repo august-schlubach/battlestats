@@ -1,9 +1,10 @@
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Player(models.Model):
     name = models.CharField(max_length=200)
-    player_id = models.IntegerField(null=False, blank=False)
+    player_id = models.IntegerField(null=False, blank=False, db_index=True)
     is_hidden = models.BooleanField(default=False)
     total_battles = models.IntegerField(default=0)
     pvp_battles = models.IntegerField(default=0)
@@ -43,6 +44,16 @@ class Player(models.Model):
         clan_name = self.clan.name if self.clan else "No Clan"
         return f"{self.name} ({self.player_id}) {clan_name}"
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_hidden', 'last_battle_date'], name='player_hidden_battle_idx'),
+            models.Index(fields=['last_lookup'], name='player_last_lookup_idx'),
+            models.Index(fields=['clan', 'last_battle_date'], name='player_clan_battle_idx'),
+            models.Index(fields=['pvp_battles', 'pvp_ratio'], name='player_battles_ratio_idx'),
+            models.Index(fields=['pvp_battles', 'pvp_survival_rate'], name='player_battles_surv_idx'),
+            models.Index(Lower('name'), name='player_name_lower_idx'),
+        ]
+
 
 class Ship(models.Model):
     name = models.CharField(max_length=200, null=False, blank=False)
@@ -70,6 +81,11 @@ class Clan(models.Model):
     def __str__(self):
         return str(self.clan_id) + '-' + self.name
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['last_lookup'], name='clan_last_lookup_idx'),
+        ]
+
 
 class Snapshot(models.Model):
     player = models.ForeignKey(Player, on_delete=models.CASCADE)
@@ -88,3 +104,34 @@ class Snapshot(models.Model):
     # player and date should be unique together
     class Meta:
         unique_together = ('player', 'date')
+
+
+class PlayerExplorerSummary(models.Model):
+    player = models.OneToOneField(
+        Player,
+        on_delete=models.CASCADE,
+        related_name='explorer_summary',
+    )
+    battles_last_29_days = models.IntegerField(null=True, blank=True)
+    wins_last_29_days = models.IntegerField(null=True, blank=True)
+    active_days_last_29_days = models.IntegerField(null=True, blank=True)
+    recent_win_rate = models.FloatField(null=True, blank=True)
+    activity_trend_direction = models.CharField(max_length=16, null=True, blank=True)
+    ships_played_total = models.IntegerField(null=True, blank=True)
+    ship_type_spread = models.IntegerField(null=True, blank=True)
+    tier_spread = models.IntegerField(null=True, blank=True)
+    ranked_seasons_participated = models.IntegerField(null=True, blank=True)
+    latest_ranked_battles = models.IntegerField(null=True, blank=True)
+    highest_ranked_league_recent = models.CharField(max_length=32, null=True, blank=True)
+    refreshed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['battles_last_29_days'], name='explorer_battles29_idx'),
+            models.Index(fields=['active_days_last_29_days'], name='explorer_active29_idx'),
+            models.Index(fields=['ships_played_total'], name='explorer_ships_idx'),
+            models.Index(fields=['ranked_seasons_participated'], name='explorer_ranked_idx'),
+        ]
+
+    def __str__(self):
+        return f"Explorer summary for {self.player_id}"

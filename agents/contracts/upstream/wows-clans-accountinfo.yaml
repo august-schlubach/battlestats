@@ -1,0 +1,96 @@
+id: wows.clans.accountinfo
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/clans/accountinfo/
+purpose: Return clan membership data for one or more player account IDs.
+docs_url: https://developers.wargaming.net/reference/all/wows/clans/accountinfo/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    account_id:
+      required: true
+      type: integer_or_csv_of_integers
+      description: One or more player account IDs. Docs state a maximum limit of 100 IDs.
+    extra:
+      required: false
+      type: string
+      description: Docs list `clan` as the extra field for short clan details.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+    data:
+      account_id_keyed_object: true
+  expected_data_shape:
+    base_fields:
+      account_id: integer
+      account_name: string
+      clan_id: integer
+      joined_at: timestamp
+      role: string
+    extra_fields:
+      clan:
+        clan_id: integer
+        created_at: timestamp
+        members_count: integer
+        name: string
+        tag: string
+
+observed_behavior:
+  last_verified: 2026-03-09
+  docs_notes:
+    - Docs say clan data exists only for accounts that participated in clan activities, including join requests or membership.
+    - Docs expose `clan` only when requested as an extra field.
+  live_notes:
+    - Repo uses this endpoint as the primary source for player clan membership hydration.
+    - The current clan hydration flow requests `extra=clan` and a narrowed `fields` set.
+    - Consumers must tolerate empty or missing membership records for players with no clan activity.
+
+trust:
+  rating: medium
+  suitable_for:
+    - player clan membership lookup
+    - enriching player detail with current clan metadata
+    - identifying clan_id before deeper clan fetches
+  not_suitable_for:
+    - assuming every player has a clan membership record
+    - treating the absence of data as a hard error
+  recommendation: Use as the primary clan-membership lookup, but treat missing rows as a valid no-membership or no-clan-activity state.
+
+repo_usage:
+  current_state:
+    - Used to hydrate clan membership for a player account.
+    - Feeds follow-on clan detail fetches when a clan_id is present.
+    - Relevant to the player-page hydration path because clan data may arrive later than initial player data.
+  code_refs:
+    - server/warships/api/clans.py
+    - server/warships/views.py
+    - server/warships/data.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - docs reference at https://developers.wargaming.net/reference/all/wows/clans/accountinfo/

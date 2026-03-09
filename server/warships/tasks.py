@@ -1,5 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 import logging
+import os
+import time
 
 from django.core.cache import cache
 
@@ -19,7 +21,14 @@ CRAWL_TASK_OPTS = {
 }
 CLAN_CRAWL_LOCK_KEY = "warships:tasks:crawl_all_clans:lock"
 CLAN_CRAWL_LOCK_TIMEOUT = 8 * 60 * 60
+CLAN_CRAWL_HEARTBEAT_KEY = "warships:tasks:crawl_all_clans:heartbeat"
+CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
+
+
+def _configured_clan_battle_warm_ids(raw_value=None):
+    value = os.getenv("CLAN_BATTLE_WARM_CLAN_IDS", "1000055908") if raw_value is None else raw_value
+    return [clan_id.strip() for clan_id in str(value).split(",") if clan_id.strip()]
 
 
 def _task_lock_key(task_name: str, resource_id: object) -> str:
@@ -154,6 +163,29 @@ def update_clan_battle_summary_task(self, clan_id):
     )
 
 
+@app.task(bind=True, **TASK_OPTS)
+def warm_clan_battle_summaries_task(self, clan_ids=None):
+    from warships.data import refresh_clan_battle_seasons_cache
+
+    configured_ids = clan_ids or _configured_clan_battle_warm_ids()
+    if not configured_ids:
+        logger.info("Skipping warm_clan_battle_summaries_task because no clan ids are configured")
+        return {"status": "skipped", "reason": "no-clans-configured"}
+
+    results = []
+    for clan_id in configured_ids:
+        result = _run_locked_task(
+            "update_clan_battle_summary",
+            clan_id,
+            self.request.id,
+            lambda clan_id=clan_id: refresh_clan_battle_seasons_cache(clan_id),
+        )
+        results.append({"clan_id": str(clan_id), **result})
+
+    logger.info("Finished warm_clan_battle_summaries_task for clan_ids=%s", configured_ids)
+    return {"status": "completed", "results": results}
+
+
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None):
     from warships.clan_crawl import run_clan_crawl
@@ -163,6 +195,7 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None):
         return {"status": "skipped", "reason": "already-running"}
 
     try:
+        cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(), timeout=CLAN_CRAWL_LOCK_TIMEOUT)
         logger.info(
             "Starting crawl_all_clans_task resume=%s dry_run=%s limit=%s",
             resume,
@@ -174,3 +207,25 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None):
         return {"status": "completed", **summary}
     finally:
         cache.delete(CLAN_CRAWL_LOCK_KEY)
+
+
+@app.task(**TASK_OPTS)
+def ensure_crawl_all_clans_running_task():
+    heartbeat = cache.get(CLAN_CRAWL_HEARTBEAT_KEY)
+    lock_value = cache.get(CLAN_CRAWL_LOCK_KEY)
+    now_ts = time.time()
+
+    if lock_value is not None:
+        if heartbeat is not None and now_ts - float(heartbeat) <= CLAN_CRAWL_HEARTBEAT_STALE_AFTER:
+            logger.info("Crawl watchdog found active crawl with fresh heartbeat")
+            return {"status": "skipped", "reason": "running"}
+
+        logger.warning("Crawl watchdog found stale crawl lock; clearing it and resuming crawl")
+        cache.delete(CLAN_CRAWL_LOCK_KEY)
+        cache.delete(CLAN_CRAWL_HEARTBEAT_KEY)
+        crawl_all_clans_task.delay(resume=True)
+        return {"status": "scheduled", "reason": "stale-lock"}
+
+    logger.info("Crawl watchdog found no active crawl; scheduling resume crawl")
+    crawl_all_clans_task.delay(resume=True)
+    return {"status": "scheduled", "reason": "not-running"}

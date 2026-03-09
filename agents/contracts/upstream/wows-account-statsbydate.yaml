@@ -98,8 +98,10 @@ repo_usage:
     - The repo does not treat this endpoint as authoritative for player activity.
     - Snapshot-based activity is derived from cumulative account info instead.
   code_refs:
+    - server/warships/api/players.py
     - server/warships/data.py
     - agents/knowledge/wows-statsbydate-status.md
+
 
 evidence_refs:
   knowledge_notes:

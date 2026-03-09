@@ -8,8 +8,10 @@ from typing import Dict, List, Optional
 
 import requests
 from django.conf import settings as django_settings
+from django.core.cache import cache
 
 from warships.models import Clan, Player
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_TIMEOUT
 
 
 BASE_URL = "https://api.worldofwarships.com/wows/"
@@ -20,6 +22,10 @@ RATE_LIMIT_DELAY = 0.25
 BATCH_SIZE = 100
 
 log = logging.getLogger("crawl")
+
+
+def _touch_crawl_heartbeat() -> None:
+    cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(), timeout=CLAN_CRAWL_LOCK_TIMEOUT)
 
 
 def _now():
@@ -177,10 +183,15 @@ def save_player(player_data: Dict, clan: Clan) -> None:
     player.last_fetch = _now()
     player.save()
 
+    from warships.data import refresh_player_explorer_summary
+
+    refresh_player_explorer_summary(player)
+
 
 def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
     all_clans: List[Dict] = []
     page = 1
+    _touch_crawl_heartbeat()
 
     first_batch, total_pages = fetch_clan_list_page(page)
     if not first_batch:
@@ -192,6 +203,7 @@ def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
              total_pages, len(first_batch), total_pages)
 
     for page in range(2, total_pages + 1):
+        _touch_crawl_heartbeat()
         if limit and len(all_clans) >= limit:
             break
         batch, _ = fetch_clan_list_page(page)
@@ -217,6 +229,7 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False) -> dict[str
     skipped = 0
 
     for i, stub in enumerate(clan_stubs, 1):
+        _touch_crawl_heartbeat()
         clan_id = stub["clan_id"]
 
         if resume and Clan.objects.filter(clan_id=clan_id, last_fetch__isnull=False).exists():

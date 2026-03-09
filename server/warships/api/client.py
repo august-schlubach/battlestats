@@ -12,6 +12,9 @@ from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
+# Contract notes for relied-on upstream endpoints live under
+# agents/contracts/upstream/.
+
 BASE_URL = os.getenv(
     "WG_API_BASE_URL", "https://api.worldofwarships.com/wows/")
 APP_ID = os.getenv("WG_APP_ID")

@@ -44,7 +44,7 @@ const drawLandingClanChart = (
     containerWidth: number,
     svgHeight: number,
 ) => {
-    const margin = { top: 20, right: 16, bottom: 32, left: 48 };
+    const margin = { top: 56, right: 16, bottom: 32, left: 48 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
 
@@ -59,10 +59,12 @@ const drawLandingClanChart = (
             total_battles: clan.total_battles as number,
         }));
 
-    const svg = container
+    const svgRoot = container
         .append('svg')
         .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
+        .attr('height', height + margin.top + margin.bottom);
+
+    const svg = svgRoot
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
@@ -111,37 +113,61 @@ const drawLandingClanChart = (
         .text('Win %');
 
     const showDetails = (datum: PlotDatum) => {
-        const startX = 30;
-        const startY = 10;
-        const detailGroup = svg.append('g').classed('details', true);
-        detailGroup.append('text')
-            .attr('x', startX)
-            .attr('y', startY)
+        const detailGroup = svgRoot
+            .append('g')
+            .classed('details', true)
+            .attr('transform', `translate(${margin.left}, 14)`);
+
+        const titleText = detailGroup.append('text')
+            .attr('x', 0)
+            .attr('y', 0)
             .style('font-size', '11px')
             .attr('font-weight', '700')
+            .style('fill', '#084594')
             .text(`[${datum.tag}] ${datum.name}`);
-        detailGroup.append('text')
-            .attr('x', startX)
-            .attr('y', startY + 16)
+
+        const metaText = detailGroup.append('text')
+            .attr('x', 0)
+            .attr('y', 18)
             .style('font-size', '10px')
             .attr('font-weight', '400')
+            .style('fill', '#6b7280');
+
+        metaText.append('tspan')
             .text(`${datum.total_battles.toLocaleString()} Battles`);
-        detailGroup.append('text')
-            .attr('x', startX + 100)
-            .attr('y', startY + 16)
-            .style('font-size', '10px')
-            .attr('font-weight', '400')
+
+        metaText.append('tspan')
+            .attr('dx', 12)
             .text(`${datum.clan_wr.toFixed(1)}% WR`);
-        detailGroup.append('text')
-            .attr('x', startX + 175)
-            .attr('y', startY + 16)
-            .style('font-size', '10px')
-            .attr('font-weight', '400')
+
+        metaText.append('tspan')
+            .attr('dx', 12)
             .text(`${datum.members_count} Members`);
+
+        const titleNode = titleText.node();
+        const metaNode = metaText.node();
+        if (!titleNode || !metaNode) {
+            return;
+        }
+
+        const titleBox = titleNode.getBBox();
+        const metaBox = metaNode.getBBox();
+        const minX = Math.min(titleBox.x, metaBox.x);
+        const minY = Math.min(titleBox.y, metaBox.y);
+        const maxX = Math.max(titleBox.x + titleBox.width, metaBox.x + metaBox.width);
+        const maxY = Math.max(titleBox.y + titleBox.height, metaBox.y + metaBox.height);
+
+        detailGroup.insert('rect', 'text')
+            .attr('x', minX - 10)
+            .attr('y', minY - 6)
+            .attr('width', maxX - minX + 20)
+            .attr('height', maxY - minY + 12)
+            .attr('rx', 6)
+            .attr('fill', 'rgba(255, 255, 255, 0.94)');
     };
 
     const hideDetails = () => {
-        svg.select('.details').remove();
+        svgRoot.select('.details').remove();
     };
 
     svg.append('g')
@@ -149,13 +175,19 @@ const drawLandingClanChart = (
         .data(plotData)
         .enter()
         .append('circle')
-        .attr('cx', (datum: PlotDatum) => x(datum.total_battles))
+        .attr('cx', x(0))
         .attr('cy', (datum: PlotDatum) => y(datum.clan_wr))
         .attr('r', 5)
-        .style('stroke', '#444')
-        .style('stroke-width', 1.25)
         .style('cursor', onSelectClan ? 'pointer' : 'default')
         .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr))
+        .attr('stroke', '#444')
+        .attr('stroke-width', 1.25)
+        .transition()
+        .duration(800)
+        .ease(d3.easeCubicOut)
+        .attr('cx', (datum: PlotDatum) => x(datum.total_battles));
+
+    svg.selectAll('circle')
         .on('click', function (_event: MouseEvent, datum: PlotDatum) {
             if (onSelectClan) {
                 onSelectClan(datum);

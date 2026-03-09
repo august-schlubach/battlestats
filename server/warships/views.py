@@ -15,10 +15,10 @@ from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
-    WRDistributionBinSerializer
+    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
-    fetch_player_explorer_rows, fetch_wr_distribution
+    fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
@@ -226,6 +226,17 @@ def player_summary(request, player_id: str) -> Response:
 def wr_distribution(request) -> Response:
     data = fetch_wr_distribution()
     return _validated_list_response(data, WRDistributionBinSerializer)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def player_distribution(request, metric: str) -> Response:
+    try:
+        data = fetch_player_population_distribution(metric)
+    except ValueError:
+        return Response({'detail': 'Unsupported player distribution metric.'}, status=status.HTTP_404_NOT_FOUND)
+
+    return _validated_single_response(data, PlayerPopulationDistributionSerializer)
 
 
 @api_view(["GET"])

@@ -77,6 +77,11 @@ const WRDistributionSVG = dynamic(() => import('./WRDistributionSVG'), {
     loading: () => <LoadingPanel label="Loading win rate distribution..." minHeight={240} />,
 });
 
+const BattlesDistributionSVG = dynamic(() => import('./BattlesDistributionSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading battles distribution..." minHeight={240} />,
+});
+
 const selectColorByWR = (winRatio: number): string => {
     if (winRatio > 65) return "#810c9e";  // super unicum
     if (winRatio >= 60) return "#D042F3";  // unicum
@@ -196,13 +201,25 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 
                             <DeferredSection
                                 className="mt-4"
-                                minHeight={264}
-                                placeholder={<LoadingPanel label="Preparing win rate distribution..." minHeight={264} />}
+                                minHeight={204}
+                                placeholder={<LoadingPanel label="Preparing win rate distribution..." minHeight={204} />}
                             >
                                 <div>
                                     <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Win Rate Distribution</h3>
-                                    <p className="mb-2 text-xs text-[#6baed6]">Where this player falls among all tracked players (100+ battles).</p>
-                                    <WRDistributionSVG playerWR={player.pvp_ratio} />
+                                    <p className="mb-2 text-xs text-[#6baed6]">Blue shows win rate. The overlay shows survival rate against the same tracked population (100+ PvP battles).</p>
+                                    <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
+                                </div>
+                            </DeferredSection>
+
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={204}
+                                placeholder={<LoadingPanel label="Preparing battles distribution..." minHeight={204} />}
+                            >
+                                <div>
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Battles Played Distribution</h3>
+                                    <p className="mb-2 text-xs text-[#6baed6]">Shows where this player&apos;s PvP battle count falls across the tracked player base.</p>
+                                    <BattlesDistributionSVG playerBattles={player.pvp_battles} />
                                 </div>
                             </DeferredSection>
 

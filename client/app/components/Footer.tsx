@@ -17,7 +17,7 @@ const Footer: React.FC = () => {
                 return res.json();
             })
             .then((data: DbStats) => setStats(data))
-            .catch(() => {});
+            .catch(() => { });
     }, []);
 
     return (
@@ -27,9 +27,6 @@ const Footer: React.FC = () => {
                     {stats.players.toLocaleString()} players &middot; {stats.clans.toLocaleString()} clans
                 </p>
             )}
-            <p className="mt-1" style={{ fontSize: '10px' }}>
-                This is purely informational for personal understanding.
-            </p>
         </footer>
     );
 };

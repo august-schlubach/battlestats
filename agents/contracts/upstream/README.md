@@ -35,3 +35,10 @@ These files are intentionally simpler than OpenAPI and more operational than nar
 - `evidence_refs`
 
 Rule of thumb: put facts that should be machine-readable here; put investigation narrative in `agents/knowledge/`.
+
+## Current Profiles
+
+- `wows-account-info.yaml`
+- `wows-account-list.yaml`
+- `wows-clans-accountinfo.yaml`
+- `wows-account-statsbydate.yaml`
