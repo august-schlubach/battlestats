@@ -16,8 +16,9 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, \
-    fetch_ranked_data, fetch_clan_battle_seasons
+    fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
+from .tasks import update_clan_battle_summary_task
 
 logging.basicConfig(level=logging.INFO)
 
@@ -167,16 +168,13 @@ def randoms_data(request, player_id: str) -> Response:
         player = Player.objects.filter(player_id=player_id).first()
         if not player or not player.battles_json:
             return Response([])
-
-        import pandas as pd
-        df = pd.DataFrame(player.battles_json)
-        df = df.filter(['pvp_battles', 'ship_name', 'ship_type',
-                        'ship_tier', 'win_ratio', 'wins'])
-        try:
-            df = df.sort_values(by='pvp_battles', ascending=False)
-        except KeyError:
-            pass
-        data = df.to_dict(orient='records')
+        data = [
+            row for row in sorted(player.battles_json, key=lambda row: row.get('pvp_battles', 0), reverse=True)
+            if isinstance(row, dict)
+            and row.get('ship_name') is not None
+            and row.get('ship_type') is not None
+            and row.get('ship_tier') is not None
+        ]
     else:
         data = fetch_randoms_data(player_id)
 
@@ -251,8 +249,13 @@ def clan_data(request, clan_filter: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def clan_battle_seasons(request, clan_id: str) -> Response:
+    had_cached_summary = has_clan_battle_summary_cache(clan_id)
     data = fetch_clan_battle_seasons(clan_id)
-    return _validated_list_response(data, ClanBattleSeasonSummarySerializer)
+    response = _validated_list_response(data, ClanBattleSeasonSummarySerializer)
+    if not had_cached_summary and not data:
+        response["X-Clan-Battles-Pending"] = "true"
+
+    return response
 
 
 @api_view(["GET"])

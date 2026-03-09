@@ -1,7 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
-import pandas as pd
 import logging
 from django.core.cache import cache
 from warships.models import Player, Snapshot, Clan
@@ -12,6 +11,66 @@ from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_
 from warships.tasks import update_tiers_data_task, update_type_data_task
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _extract_randoms_rows(battles_json: Any, limit: Optional[int] = 20) -> list[dict]:
+    if not isinstance(battles_json, list):
+        return []
+
+    rows = []
+    for row in battles_json:
+        if not isinstance(row, dict):
+            continue
+
+        ship_name = row.get('ship_name')
+        ship_type = row.get('ship_type')
+        ship_tier = row.get('ship_tier')
+        if ship_name is None or ship_type is None or ship_tier is None:
+            continue
+
+        rows.append({
+            'pvp_battles': int(row.get('pvp_battles', 0) or 0),
+            'ship_name': ship_name,
+            'ship_type': ship_type,
+            'ship_tier': ship_tier,
+            'win_ratio': float(row.get('win_ratio', 0) or 0),
+            'wins': int(row.get('wins', 0) or 0),
+        })
+
+    rows.sort(key=lambda row: row['pvp_battles'], reverse=True)
+    return rows if limit is None else rows[:limit]
+
+
+def _aggregate_battles_by_key(battles_json: Any, group_key: str) -> list[dict]:
+    if not isinstance(battles_json, list):
+        return []
+
+    aggregates: dict[Any, dict[str, int]] = {}
+    for row in battles_json:
+        if not isinstance(row, dict):
+            continue
+
+        key = row.get(group_key)
+        if key is None:
+            continue
+
+        aggregate = aggregates.setdefault(key, {'pvp_battles': 0, 'wins': 0})
+        aggregate['pvp_battles'] += int(row.get('pvp_battles', 0) or 0)
+        aggregate['wins'] += int(row.get('wins', 0) or 0)
+
+    result = []
+    for key, aggregate in aggregates.items():
+        battles = aggregate['pvp_battles']
+        wins = aggregate['wins']
+        result.append({
+            group_key: key,
+            'pvp_battles': battles,
+            'wins': wins,
+            'win_ratio': round(wins / battles, 2) if battles > 0 else 0,
+        })
+
+    result.sort(key=lambda row: row['pvp_battles'], reverse=True)
+    return result
 
 
 def update_battle_data(player_id: str) -> None:
@@ -115,27 +174,28 @@ def fetch_tier_data(player_id: str) -> list:
 
 def update_tiers_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
-    df = pd.DataFrame(player.battles_json)
-    logging.info(f'Player {player.name} battles data:\n{df}\n{df.shape}')
-    df = df.filter(['ship_tier', 'pvp_battles', 'wins'])
+    tier_aggregates = {tier: {'pvp_battles': 0, 'wins': 0} for tier in range(1, 12)}
+    for row in player.battles_json or []:
+        if not isinstance(row, dict):
+            continue
+
+        tier = row.get('ship_tier')
+        if not isinstance(tier, int) or tier not in tier_aggregates:
+            continue
+
+        tier_aggregates[tier]['pvp_battles'] += int(row.get('pvp_battles', 0) or 0)
+        tier_aggregates[tier]['wins'] += int(row.get('wins', 0) or 0)
 
     data = []
-    try:
-        for i in range(1, 12):
-            j = 12 - i  # reverse the tier order
-            battles = int(df.loc[df['ship_tier'] ==
-                          12 - i, 'pvp_battles'].sum())
-            wins = int(df.loc[df['ship_tier'] == 12 - i, 'wins'].sum())
-            wr = round(wins / battles if battles > 0 else 0, 2)
-            data.append({
-                'ship_tier': int(12 - i),
-                'pvp_battles': battles,
-                'wins': wins,
-                'win_ratio': wr
-            })
-    except KeyError:
-        logging.error(
-            f'\n\nTiers data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
+    for tier in range(11, 0, -1):
+        battles = tier_aggregates[tier]['pvp_battles']
+        wins = tier_aggregates[tier]['wins']
+        data.append({
+            'ship_tier': tier,
+            'pvp_battles': battles,
+            'wins': wins,
+            'win_ratio': round(wins / battles, 2) if battles > 0 else 0,
+        })
 
     player.tiers_json = data
     player.tiers_updated_at = datetime.now()
@@ -282,6 +342,10 @@ def _get_clan_battle_summary_cache_key(clan_id: str) -> str:
     return f'clan_battles:summary:v2:{clan_id}'
 
 
+def has_clan_battle_summary_cache(clan_id: str) -> bool:
+    return cache.get(_get_clan_battle_summary_cache_key(clan_id)) is not None
+
+
 def _invalidate_clan_battle_summary_cache(clan_id: str) -> None:
     cache.delete(_get_clan_battle_summary_cache_key(clan_id))
 
@@ -381,7 +445,7 @@ def _get_player_clan_battle_season_stats(account_id: int) -> list:
 
 
 def fetch_clan_battle_seasons(clan_id: str) -> list:
-    """Aggregate clan battle season stats across the clan's current roster."""
+    """Return cached clan battle summary, enqueueing background refresh on misses."""
     if not clan_id:
         return []
 
@@ -389,6 +453,19 @@ def fetch_clan_battle_seasons(clan_id: str) -> list:
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
+
+    from warships.tasks import update_clan_battle_summary_task
+
+    update_clan_battle_summary_task.delay(clan_id=clan_id)
+    return []
+
+
+def refresh_clan_battle_seasons_cache(clan_id: str) -> list:
+    """Aggregate clan battle season stats across the clan's current roster and cache them."""
+    if not clan_id:
+        return []
+
+    cache_key = _get_clan_battle_summary_cache_key(clan_id)
 
     try:
         clan = Clan.objects.get(clan_id=clan_id)
@@ -644,27 +721,7 @@ def fetch_type_data(player_id: str) -> list:
 
 def update_type_data(player_id: str) -> list:
     player = Player.objects.get(player_id=player_id)
-    df = pd.DataFrame(player.battles_json)
-    df = df.filter(['ship_type', 'pvp_battles', 'wins', 'win_ratio'])
-
-    data = {'ship_type': [], 'pvp_battles': [], 'wins': [], 'win_ratio': []}
-    try:
-        for ship_type in df['ship_type'].unique():
-            battles = int(df.loc[df['ship_type'] ==
-                                 ship_type, 'pvp_battles'].sum())
-            wins = int(df.loc[df['ship_type'] == ship_type, 'wins'].sum())
-            wr = round(wins/battles if battles > 0 else 0, 2)
-            data["pvp_battles"].append(battles)
-            data["ship_type"].append(ship_type)
-            data["wins"].append(wins)
-            data["win_ratio"].append(wr)
-    except KeyError:
-        logging.error(
-            f'\n\nType data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
-
-    df = pd.DataFrame(data).sort_values(by='pvp_battles', ascending=False)
-
-    player.type_json = df.to_dict(orient='records')
+    player.type_json = _aggregate_battles_by_key(player.battles_json, 'ship_type')
     player.type_updated_at = datetime.now()
     player.save()
 
@@ -738,18 +795,7 @@ def fetch_clan_plot_data(clan_id: str, filter_type: str = 'active') -> list:
 
 def update_randoms_data(player_id: str) -> None:
     player = Player.objects.get(player_id=player_id)
-    df = pd.DataFrame(player.battles_json)
-    df = df.filter(['pvp_battles', 'ship_name', 'ship_type',
-                   'ship_tier', 'win_ratio', 'wins'])
-
-    try:
-        df = df.sort_values(by='pvp_battles', ascending=False).head(20)
-    except KeyError:
-        logging.error(
-            f'\n\nBattles data key error for player {player.name}\n{df.info()}\n\n{df.head()}\n\n')
-        return []
-
-    player.randoms_json = df.to_dict(orient='records')
+    player.randoms_json = _extract_randoms_rows(player.battles_json, limit=20)
     player.randoms_updated_at = datetime.now()
     player.save()
 

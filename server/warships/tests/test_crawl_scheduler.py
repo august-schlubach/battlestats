@@ -9,7 +9,7 @@ from django.test import TestCase, override_settings
 from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
 from warships.signals import ensure_daily_clan_crawl_schedule
-from warships.tasks import CLAN_CRAWL_LOCK_KEY, crawl_all_clans_task, update_clan_data_task, update_clan_members_task, update_player_data_task
+from warships.tasks import CLAN_CRAWL_LOCK_KEY, crawl_all_clans_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task
 
 
 @override_settings(
@@ -98,6 +98,15 @@ class RefreshTaskLockTests(TestCase):
 
         self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
         mock_update_clan_members.assert_not_called()
+
+    def test_clan_battle_summary_task_skips_when_lock_exists(self):
+        cache.add("warships:tasks:update_clan_battle_summary:99:lock", "existing-run", timeout=60)
+
+        with patch("warships.data.refresh_clan_battle_seasons_cache") as mock_refresh_summary:
+            result = update_clan_battle_summary_task.run(clan_id=99)
+
+        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        mock_refresh_summary.assert_not_called()
 
     def test_post_migrate_updates_existing_periodic_task(self):
         schedule = CrontabSchedule.objects.create(

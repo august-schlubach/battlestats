@@ -141,6 +141,19 @@ def update_type_data_task(player_id):
     update_type_data(player_id=player_id)
 
 
+@app.task(bind=True, **TASK_OPTS)
+def update_clan_battle_summary_task(self, clan_id):
+    from warships.data import refresh_clan_battle_seasons_cache
+
+    logger.info("Starting update_clan_battle_summary_task for clan_id=%s", clan_id)
+    return _run_locked_task(
+        "update_clan_battle_summary",
+        clan_id,
+        self.request.id,
+        lambda: refresh_clan_battle_seasons_cache(clan_id),
+    )
+
+
 @app.task(bind=True, **CRAWL_TASK_OPTS)
 def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None):
     from warships.clan_crawl import run_clan_crawl

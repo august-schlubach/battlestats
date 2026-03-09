@@ -51,18 +51,35 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
 
     useEffect(() => {
         let cancelled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        let attempts = 0;
 
         const fetchSeasons = async () => {
-            setLoading(true);
-            setError('');
+            if (!cancelled && attempts === 0) {
+                setLoading(true);
+                setError('');
+            }
+
             try {
                 const response = await fetch(`http://localhost:8888/api/fetch/clan_battle_seasons/${clanId}/`);
                 if (!response.ok) {
                     throw new Error(`Failed to fetch clan battle seasons: ${response.status}`);
                 }
+
                 const data = await response.json();
-                if (!cancelled) {
-                    setSeasons(Array.isArray(data) ? data : []);
+                if (cancelled) {
+                    return;
+                }
+
+                setSeasons(Array.isArray(data) ? data : []);
+
+                const isPending = response.headers.get('X-Clan-Battles-Pending') === 'true';
+                if (isPending && attempts < 5) {
+                    attempts += 1;
+                    timeoutId = setTimeout(() => {
+                        void fetchSeasons();
+                    }, 1500);
+                    return;
                 }
             } catch (err) {
                 console.error('Error fetching clan battle seasons:', err);
@@ -70,16 +87,22 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                     setError('Unable to load clan battles seasons.');
                 }
             } finally {
-                if (!cancelled) {
+                if (!cancelled && attempts === 0) {
+                    setLoading(false);
+                }
+                if (!cancelled && attempts > 0 && !timeoutId) {
                     setLoading(false);
                 }
             }
         };
 
-        fetchSeasons();
+        void fetchSeasons();
 
         return () => {
             cancelled = true;
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
         };
     }, [clanId]);
 

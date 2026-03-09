@@ -313,7 +313,7 @@ class ClanBattleSummaryCacheTests(TestCase):
     @patch("warships.data._get_player_clan_battle_season_stats")
     @patch("warships.data._get_clan_battle_seasons_metadata")
     def test_clan_battle_summary_cached_after_first_call(self, mock_meta, mock_player_stats):
-        from warships.data import fetch_clan_battle_seasons, _get_clan_battle_summary_cache_key
+        from warships.data import refresh_clan_battle_seasons_cache, _get_clan_battle_summary_cache_key
 
         clan = Clan.objects.create(
             clan_id=77, name="CacheClan", tag="CC", members_count=2)
@@ -335,7 +335,7 @@ class ClanBattleSummaryCacheTests(TestCase):
             [{"season_id": 50, "battles": 20, "wins": 9, "losses": 11}],
         ]
 
-        result1 = fetch_clan_battle_seasons("77")
+        result1 = refresh_clan_battle_seasons_cache("77")
         self.assertEqual(result1[0]["participants"], 2)
         self.assertEqual(result1[0]["roster_battles"], 30)
         self.assertEqual(result1[0]["roster_wins"], 15)
@@ -345,14 +345,14 @@ class ClanBattleSummaryCacheTests(TestCase):
         self.assertEqual(mock_player_stats.call_count, 2)
 
         mock_player_stats.reset_mock()
-        result2 = fetch_clan_battle_seasons("77")
+        result2 = cache.get(_get_clan_battle_summary_cache_key("77"))
         self.assertEqual(result2[0]["roster_battles"], 30)
         mock_player_stats.assert_not_called()
 
     @patch("warships.data._get_player_clan_battle_season_stats")
     @patch("warships.data._get_clan_battle_seasons_metadata")
     def test_clan_battle_summary_orders_by_season_dates_and_keeps_all_rows(self, mock_meta, mock_player_stats):
-        from warships.data import fetch_clan_battle_seasons
+        from warships.data import refresh_clan_battle_seasons_cache
 
         clan = Clan.objects.create(
             clan_id=78, name="SortClan", tag="SC", members_count=1)
@@ -390,7 +390,7 @@ class ClanBattleSummaryCacheTests(TestCase):
             {"season_id": 31, "battles": 10, "wins": 6, "losses": 4},
         ]
 
-        result = fetch_clan_battle_seasons("78")
+        result = refresh_clan_battle_seasons_cache("78")
 
         self.assertEqual([row["season_id"] for row in result], [32, 31, 301])
         self.assertEqual(len(result), 3)
@@ -405,3 +405,12 @@ class ClanBattleSummaryCacheTests(TestCase):
         _invalidate_clan_battle_summary_cache("88")
 
         self.assertIsNone(cache.get(cache_key))
+
+    @patch("warships.tasks.update_clan_battle_summary_task.delay")
+    def test_fetch_clan_battle_seasons_enqueues_refresh_on_cache_miss(self, mock_delay):
+        from warships.data import fetch_clan_battle_seasons
+
+        result = fetch_clan_battle_seasons("91")
+
+        self.assertEqual(result, [])
+        mock_delay.assert_called_once_with(clan_id="91")

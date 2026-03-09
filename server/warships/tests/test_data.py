@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.core.cache import cache
 from django.utils import timezone
 
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data
 from warships.models import Player, Snapshot, Clan
 
 
@@ -113,6 +113,61 @@ class RandomsDataRefreshTests(TestCase):
         self.assertEqual(rows[0]["ship_name"], "Fresh Ship")
         mock_update_battle_data.assert_called_once_with(player.player_id)
         mock_update_randoms_data.assert_called_once_with(player.player_id)
+
+    def test_update_randoms_data_uses_plain_python_sorting(self):
+        player = Player.objects.create(
+            name="Sorter",
+            player_id=445,
+            battles_json=[
+                {"ship_name": "Low", "ship_type": "Destroyer", "ship_tier": 6, "pvp_battles": 3, "win_ratio": 0.33, "wins": 1},
+                {"ship_name": "High", "ship_type": "Cruiser", "ship_tier": 10, "pvp_battles": 15, "win_ratio": 0.6, "wins": 9},
+            ],
+        )
+
+        update_randoms_data(player.player_id)
+        player.refresh_from_db()
+
+        self.assertEqual([row["ship_name"] for row in player.randoms_json], ["High", "Low"])
+
+
+class AggregateChartDataTests(TestCase):
+    def test_update_tiers_data_aggregates_without_pandas(self):
+        player = Player.objects.create(
+            name="TierCaptain",
+            player_id=446,
+            battles_json=[
+                {"ship_tier": 10, "pvp_battles": 10, "wins": 6},
+                {"ship_tier": 10, "pvp_battles": 5, "wins": 2},
+                {"ship_tier": 8, "pvp_battles": 3, "wins": 1},
+            ],
+        )
+
+        update_tiers_data(player.player_id)
+        player.refresh_from_db()
+
+        tier_ten = next(row for row in player.tiers_json if row["ship_tier"] == 10)
+        self.assertEqual(tier_ten["pvp_battles"], 15)
+        self.assertEqual(tier_ten["wins"], 8)
+        self.assertEqual(tier_ten["win_ratio"], 0.53)
+
+    def test_update_type_data_aggregates_without_pandas(self):
+        player = Player.objects.create(
+            name="TypeCaptain",
+            player_id=447,
+            battles_json=[
+                {"ship_type": "Destroyer", "pvp_battles": 10, "wins": 5},
+                {"ship_type": "Destroyer", "pvp_battles": 6, "wins": 4},
+                {"ship_type": "Cruiser", "pvp_battles": 20, "wins": 11},
+            ],
+        )
+
+        update_type_data(player.player_id)
+        player.refresh_from_db()
+
+        self.assertEqual(player.type_json[0]["ship_type"], "Cruiser")
+        destroyer = next(row for row in player.type_json if row["ship_type"] == "Destroyer")
+        self.assertEqual(destroyer["pvp_battles"], 16)
+        self.assertEqual(destroyer["wins"], 9)
 
 
 class PlayerDataHardeningTests(TestCase):

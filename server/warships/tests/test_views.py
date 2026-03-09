@@ -233,7 +233,8 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/")
 
         self.assertEqual(response.status_code, 200)
-        matching_rows = [row for row in response.json() if row["name"] == "HiddenLandingPlayer"]
+        matching_rows = [row for row in response.json(
+        ) if row["name"] == "HiddenLandingPlayer"]
         self.assertEqual(len(matching_rows), 1)
         self.assertTrue(matching_rows[0]["is_hidden"])
 
@@ -266,7 +267,8 @@ class ApiContractTests(TestCase):
 
 class ApiThrottleTests(TestCase):
     def test_landing_players_endpoint_declares_public_api_throttles(self):
-        self.assertEqual(landing_players.cls.throttle_classes, PUBLIC_API_THROTTLES)
+        self.assertEqual(landing_players.cls.throttle_classes,
+                         PUBLIC_API_THROTTLES)
 
     def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
         cache.delete('landing:recent_players')
@@ -357,6 +359,17 @@ class ApiThrottleTests(TestCase):
         self.assertIn("X-Randoms-Updated-At", response)
         self.assertIn("X-Battles-Updated-At", response)
 
+    @patch("warships.views.update_clan_battle_summary_task.delay")
+    def test_clan_battle_seasons_flags_pending_refresh_on_empty_cache(self, mock_delay):
+        Clan.objects.create(clan_id=42, name="PendingClan", tag="PC", members_count=0)
+
+        response = self.client.get("/api/fetch/clan_battle_seasons/42/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
+        self.assertEqual(response["X-Clan-Battles-Pending"], "true")
+        mock_delay.assert_called_once_with(clan_id="42")
+
     @patch("warships.views.fetch_ranked_data")
     def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):
         now = timezone.now()
@@ -377,7 +390,6 @@ class ApiThrottleTests(TestCase):
                 "total_battles": 34,
                 "total_wins": 20,
                 "win_rate": 0.5882,
-                "sprints_played": 3,
                 "best_sprint": {
                     "sprint_number": 2,
                     "league": 1,
