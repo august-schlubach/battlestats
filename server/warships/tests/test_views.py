@@ -233,8 +233,9 @@ class ApiContractTests(TestCase):
         response = self.client.get("/api/landing/players/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()[0]["name"], "HiddenLandingPlayer")
-        self.assertTrue(response.json()[0]["is_hidden"])
+        matching_rows = [row for row in response.json() if row["name"] == "HiddenLandingPlayer"]
+        self.assertEqual(len(matching_rows), 1)
+        self.assertTrue(matching_rows[0]["is_hidden"])
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

@@ -31,7 +31,7 @@ interface RankedSeason {
     sprints: RankedSprint[];
 }
 
-type SortKey = 'season' | 'highestRank' | 'sprints' | 'wins' | 'winRate';
+type SortKey = 'season' | 'highestRank' | 'sprints' | 'battles' | 'wins' | 'winRate';
 type SortDirection = 'asc' | 'desc';
 
 const leagueColors: Record<string, string> = {
@@ -77,20 +77,12 @@ const getRankOrderValue = (leagueName: string, fallbackValue: number): number =>
     return map[normalized] ?? fallbackValue;
 };
 
-const formatDateRange = (startDate: string | null, endDate: string | null): string => {
-    if (startDate && endDate) {
-        return `${startDate} to ${endDate}`;
-    }
-
+const formatSeasonStartDate = (startDate: string | null): string => {
     if (startDate) {
-        return `Started ${startDate}`;
+        return startDate;
     }
 
-    if (endDate) {
-        return `Ended ${endDate}`;
-    }
-
-    return 'Dates unavailable';
+    return 'Start date unavailable';
 };
 
 const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = false }) => {
@@ -151,6 +143,8 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
             comparison = getRankOrderValue(left.highest_league_name, left.highest_league) - getRankOrderValue(right.highest_league_name, right.highest_league);
         } else if (sortKey === 'sprints') {
             comparison = left.sprints_played - right.sprints_played;
+        } else if (sortKey === 'battles') {
+            comparison = left.total_battles - right.total_battles;
         } else if (sortKey === 'wins') {
             comparison = left.total_wins - right.total_wins;
         } else if (sortKey === 'winRate') {
@@ -216,6 +210,11 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                                 </button>
                                             </th>
                                             <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
+                                                <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('battles')}>
+                                                    Battles <span aria-hidden="true">{getSortMarker('battles')}</span>
+                                                </button>
+                                            </th>
+                                            <th scope="col" className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">
                                                 <button type="button" className="ml-auto inline-flex items-center gap-1" onClick={() => handleSort('wins')}>
                                                     Wins <span aria-hidden="true">{getSortMarker('wins')}</span>
                                                 </button>
@@ -234,8 +233,8 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                             return (
                                                 <tr key={season.season_id} className="align-top">
                                                     <td className="px-3 py-3 text-[#084594]">
-                                                        <p className="font-semibold">{season.season_label} - {season.season_name}</p>
-                                                        <p className="mt-1 text-xs text-[#6baed6]">{formatDateRange(season.start_date, season.end_date)}</p>
+                                                        <p className="font-semibold">{season.season_label}</p>
+                                                        <p className="mt-1 text-xs text-[#6baed6]">{formatSeasonStartDate(season.start_date)}</p>
                                                     </td>
                                                     <td className="px-3 py-3">
                                                         <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badgeClassName}`}>
@@ -243,6 +242,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                                         </span>
                                                     </td>
                                                     <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.sprints_played}</td>
+                                                    <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_battles.toLocaleString()}</td>
                                                     <td className="px-3 py-3 text-right font-medium text-[#084594]">{season.total_wins.toLocaleString()}</td>
                                                     <td className={`px-3 py-3 text-right font-semibold ${getWinRateColorClass(season.win_rate)}`}>{formatWinRate(season.win_rate)}</td>
                                                 </tr>

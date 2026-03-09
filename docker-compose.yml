@@ -50,14 +50,16 @@ services:
       context: client/
       dockerfile: Dockerfile
     container_name: battlestats-react
-    user: "${UID:-1000}:${GID:-1000}"
     environment:
       - PORT=3001
+      - HOSTNAME=0.0.0.0
     ports:
       - "3001:3001"
     volumes:
       - ./client:/app
-    command: npm run dev -- --port 3001
+      - client_node_modules:/app/node_modules
+      - client_next_cache:/app/.next
+    command: sh -c "rm -rf /app/.next/* && npm run dev -- --hostname 0.0.0.0 --port 3001"
 
   task-runner:
     container_name: battlestats-celery
@@ -94,3 +96,5 @@ services:
 
 volumes:
   postgres_data:
+  client_node_modules:
+  client_next_cache:

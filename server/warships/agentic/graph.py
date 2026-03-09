@@ -57,7 +57,17 @@ ALLOWED_VERIFICATION_BINARIES = {
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    current = Path(__file__).resolve()
+
+    for candidate in current.parents:
+        if (candidate / "docker-compose.yml").exists():
+            return candidate
+
+    for candidate in current.parents:
+        if (candidate / "manage.py").exists():
+            return candidate
+
+    return current.parents[2]
 
 
 def _read_role_files() -> dict[str, str]:
@@ -105,8 +115,17 @@ def _safe_cwd(cwd_hint: str | None) -> Path:
     if not cwd_hint:
         return root
 
-    requested = (root / cwd_hint).resolve()
+    normalized_hint = cwd_hint.strip().strip("/")
+    if normalized_hint in {"", "."}:
+        return root
+
+    if normalized_hint == "server" and (root / "manage.py").exists():
+        return root
+
+    requested = (root / normalized_hint).resolve()
     if not str(requested).startswith(str(root)):
+        return root
+    if not requested.exists():
         return root
     return requested
 
