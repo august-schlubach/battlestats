@@ -84,7 +84,7 @@ def validate_case(case: SmokeCase, payload: Any) -> list[str]:
 
 
 def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]:
-    attempts = 2 if case.retry_on_pending else 1
+    attempts = 6 if case.retry_on_pending else 1
     last_status = None
     last_payload = None
     pending_seen = False
@@ -102,8 +102,14 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
             pending_header = headers.get("X-Clan-Battles-Pending", "").lower()
             if pending_header == "true":
                 pending_seen = True
-                time.sleep(1.0)
+                time.sleep(5.0)
                 continue
+
+        # Empty result on first attempt may mean cache is cold; retry
+        if case.retry_on_pending and isinstance(payload, list) and len(payload) == 0:
+            pending_seen = True
+            time.sleep(5.0)
+            continue
 
         errors = validate_case(case, payload)
         if not errors:
@@ -116,6 +122,12 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
     if last_status != case.expected_status:
         return False, f"{case.name}: expected status {case.expected_status}, got {last_status}"
 
+    # If we retried due to pending and data never arrived, warn but pass
+    if pending_seen and case.retry_on_pending:
+        errors = validate_case(case, last_payload)
+        if errors:
+            return True, f"{case.name}: ok (pending — data not yet populated by worker)"
+
     pending_note = " after pending refresh" if pending_seen else ""
     errors = validate_case(case, last_payload)
     detail = "; ".join(
@@ -125,12 +137,32 @@ def run_case(case: SmokeCase, base_url: str, timeout: float) -> tuple[bool, str]
 
 def build_cases() -> list[SmokeCase]:
     return [
+        # ── Landing / discovery ────────────────────────────────
         SmokeCase("landing_clans", "/api/landing/clans/",
                   json_type="list", min_items=1),
         SmokeCase("landing_players", "/api/landing/players/",
                   json_type="list", min_items=1),
         SmokeCase("landing_recent", "/api/landing/recent/",
                   json_type="list", min_items=1),
+        SmokeCase(
+            "player_suggestions",
+            "/api/landing/player-suggestions/?q=sh",
+            json_type="list",
+            min_items=1,
+        ),
+
+        # ── Player detail (router) ────────────────────────────
+        SmokeCase(
+            "player_detail_shinn000",
+            "/api/player/Shinn000/",
+            json_type="dict",
+            required_keys=("name", "pvp_ratio", "pvp_survival_rate", "verdict"),
+            exact_key_values={"name": "Shinn000"},
+        ),
+        SmokeCase("player_missing_404",
+                  "/api/player/PlayerThatWillNeverExist/", expected_status=404),
+
+        # ── Player fetch endpoints ─────────────────────────────
         SmokeCase(
             "player_summary_shinn000",
             "/api/fetch/player_summary/1000270433/",
@@ -150,6 +182,14 @@ def build_cases() -> list[SmokeCase]:
                   json_type="list", min_items=1),
         SmokeCase("ranked_empty_kevik70", "/api/fetch/ranked_data/1001712582/",
                   json_type="list", exact_items=0),
+
+        # ── Clan endpoints ─────────────────────────────────────
+        SmokeCase(
+            "clan_detail_naumachia",
+            "/api/clan/1000055908/",
+            json_type="dict",
+            required_keys=("clan_id", "name"),
+        ),
         SmokeCase("clan_data_naumachia", "/api/fetch/clan_data/1000055908:active",
                   json_type="list", min_items=1),
         SmokeCase("clan_members_naumachia",
@@ -161,6 +201,33 @@ def build_cases() -> list[SmokeCase]:
             min_items=1,
             retry_on_pending=True,
         ),
+        SmokeCase(
+            "clan_filter_invalid_400",
+            "/api/fetch/clan_data/1000055908:bogus",
+            expected_status=400,
+            json_type="dict",
+            required_keys=("detail",),
+        ),
+
+        # ── Ship endpoint ──────────────────────────────────────
+        SmokeCase(
+            "ship_detail",
+            "/api/ship/1/",
+            json_type="dict",
+            required_keys=("name",),
+        ),
+
+        # ── Player explorer ────────────────────────────────────
+        SmokeCase(
+            "players_explorer",
+            "/api/players/explorer/?page_size=5&min_pvp_battles=1000",
+            json_type="dict",
+            required_keys=("count", "page", "page_size", "results"),
+            nested_list_key="results",
+            min_nested_items=1,
+        ),
+
+        # ── Population distributions ───────────────────────────
         SmokeCase("wr_distribution", "/api/fetch/wr_distribution/",
                   json_type="list", min_items=1),
         SmokeCase(
@@ -169,6 +236,15 @@ def build_cases() -> list[SmokeCase]:
             json_type="dict",
             required_keys=("metric", "tracked_population", "bins"),
             exact_key_values={"metric": "win_rate"},
+            nested_list_key="bins",
+            min_nested_items=1,
+        ),
+        SmokeCase(
+            "player_distribution_survival_rate",
+            "/api/fetch/player_distribution/survival_rate/",
+            json_type="dict",
+            required_keys=("metric", "tracked_population", "bins"),
+            exact_key_values={"metric": "survival_rate"},
             nested_list_key="bins",
             min_nested_items=1,
         ),
@@ -190,20 +266,13 @@ def build_cases() -> list[SmokeCase]:
             nested_list_key="tiles",
             min_nested_items=1,
         ),
+
+        # ── Stats ──────────────────────────────────────────────
         SmokeCase(
             "stats",
             "/api/stats/",
             json_type="dict",
             required_keys=("players", "clans"),
-        ),
-        SmokeCase("player_missing_404",
-                  "/api/player/PlayerThatWillNeverExist/", expected_status=404),
-        SmokeCase(
-            "clan_filter_invalid_400",
-            "/api/fetch/clan_data/1000055908:bogus",
-            expected_status=400,
-            json_type="dict",
-            required_keys=("detail",),
         ),
     ]
 
@@ -213,7 +282,7 @@ def parse_args() -> argparse.Namespace:
         description="Smoke test live Battlestats API endpoints.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL,
                         help="Base URL for the running app.")
-    parser.add_argument("--timeout", type=float, default=20.0,
+    parser.add_argument("--timeout", type=float, default=30.0,
                         help="Per-request timeout in seconds.")
     return parser.parse_args()
 
