@@ -38,6 +38,54 @@ class PlayerViewSetTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         player.refresh_from_db()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.views.update_battle_data")
+    def test_player_lookup_hydrates_missing_battle_rows_for_kill_ratio(
+        self,
+        mock_update_battle_data,
+        _mock_update_player_task,
+        _mock_update_clan_task,
+        _mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=951,
+            name="BattleHydrationClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        player = Player.objects.create(
+            name="BattleHydrationPlayer",
+            player_id=9051,
+            clan=clan,
+            last_fetch=now,
+            pvp_battles=30,
+            pvp_ratio=53.0,
+            pvp_survival_rate=40.0,
+            battles_json=None,
+        )
+
+        def write_battle_rows(player_id):
+            hydrated = Player.objects.get(player_id=player_id)
+            hydrated.battles_json = [
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "kdr": 1.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "kdr": 0.5},
+            ]
+            hydrated.save(update_fields=["battles_json"])
+
+        mock_update_battle_data.side_effect = write_battle_rows
+
+        response = self.client.get("/api/player/BattleHydrationPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kill_ratio"], 0.78)
+        mock_update_battle_data.assert_called_once_with(player.player_id)
+        player.refresh_from_db()
         self.assertIsNotNone(player.last_lookup)
         self.assertLess(
             abs((timezone.now() - player.last_lookup).total_seconds()), 5)
@@ -83,30 +131,53 @@ class PlayerViewSetTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_clan_data")
     @patch("warships.data.update_player_data")
-    def test_player_lookup_without_clan_enqueues_forced_refresh(
+    def test_player_lookup_without_clan_hydrates_clan_details_before_serializing(
         self,
-        _mock_update_player_data,
+        mock_update_player_data,
+        mock_update_clan_data,
         mock_update_player_task,
         mock_update_clan_task,
         mock_update_clan_members_task,
     ):
-        Player.objects.create(
+        player = Player.objects.create(
             name="NoClanYet",
             player_id=7001,
             clan=None,
             last_fetch=timezone.now(),
         )
 
+        def hydrate_player(player, force_refresh=False):
+            clan, _ = Clan.objects.get_or_create(clan_id=70010)
+            player.clan = clan
+            player.save(update_fields=["clan"])
+
+        def hydrate_clan(clan_id):
+            clan = Clan.objects.get(clan_id=clan_id)
+            clan.name = "Hydrated Clan"
+            clan.tag = "HC"
+            clan.members_count = 5
+            clan.last_fetch = timezone.now()
+            clan.save(update_fields=["name", "tag",
+                      "members_count", "last_fetch"])
+
+        mock_update_player_data.side_effect = hydrate_player
+        mock_update_clan_data.side_effect = hydrate_clan
+
         response = self.client.get("/api/player/NoClanYet/")
 
         self.assertEqual(response.status_code, 200)
-        mock_update_player_task.assert_called_once_with(
-            player_id=7001,
-            force_refresh=True,
-        )
+        payload = response.json()
+        self.assertEqual(payload["clan_id"], 70010)
+        self.assertEqual(payload["clan_name"], "Hydrated Clan")
+        self.assertEqual(payload["clan_tag"], "HC")
+        mock_update_player_data.assert_called_once_with(
+            player=player, force_refresh=True)
+        mock_update_clan_data.assert_called_once_with(70010)
+        mock_update_player_task.assert_not_called()
         mock_update_clan_task.assert_not_called()
-        mock_update_clan_members_task.assert_not_called()
+        mock_update_clan_members_task.assert_called_once_with(clan_id=70010)
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -134,6 +205,43 @@ class PlayerViewSetTests(TestCase):
         response = self.client.get("/api/player/FreshPlayer/")
 
         self.assertEqual(response.status_code, 200)
+        mock_update_player_task.assert_not_called()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_lookup_recomputes_missing_verdict_from_stored_stats(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=902,
+            name="VerdictClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        player = Player.objects.create(
+            name="VerdictGapPlayer",
+            player_id=9003,
+            clan=clan,
+            last_fetch=now,
+            pvp_battles=1000,
+            pvp_ratio=50.0,
+            pvp_survival_rate=35.0,
+            verdict=None,
+        )
+
+        response = self.client.get("/api/player/VerdictGapPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["verdict"], "Survivor")
+        player.refresh_from_db()
+        self.assertEqual(player.verdict, "Survivor")
         mock_update_player_task.assert_not_called()
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
@@ -195,6 +303,41 @@ class ClanMembersEndpointTests(TestCase):
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 
+    def test_clan_members_orders_by_player_score_desc(self):
+        clan = Clan.objects.create(
+            clan_id=77, name="Score Clan", members_count=3)
+        low = Player.objects.create(
+            name="LowScoreMember",
+            player_id=7701,
+            clan=clan,
+            pvp_ratio=52.0,
+            last_battle_date=timezone.now().date() - timedelta(days=1),
+        )
+        high = Player.objects.create(
+            name="HighScoreMember",
+            player_id=7702,
+            clan=clan,
+            pvp_ratio=55.0,
+            last_battle_date=timezone.now().date() - timedelta(days=3),
+        )
+        no_score = Player.objects.create(
+            name="NoScoreMember",
+            player_id=7703,
+            clan=clan,
+            pvp_ratio=57.0,
+            last_battle_date=timezone.now().date(),
+        )
+        PlayerExplorerSummary.objects.create(player=low, player_score=3.4)
+        PlayerExplorerSummary.objects.create(player=high, player_score=8.6)
+
+        response = self.client.get("/api/fetch/clan_members/77/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()],
+            ["HighScoreMember", "LowScoreMember", "NoScoreMember"],
+        )
+
 
 class ApiContractTests(TestCase):
     def test_player_name_suggestions_prioritize_prefix_matches_and_limit_results(self):
@@ -242,6 +385,73 @@ class ApiContractTests(TestCase):
         names = [row["name"] for row in response.json()]
         self.assertIn("VisibleLandingPlayer", names)
         self.assertNotIn("HiddenLandingPlayer", names)
+
+    def test_landing_players_orders_by_player_score_desc(self):
+        today = timezone.now().date()
+        high = Player.objects.create(
+            name="LandingHighScore",
+            player_id=4301,
+            is_hidden=False,
+            pvp_ratio=55.0,
+            last_battle_date=today - timedelta(days=3),
+        )
+        low = Player.objects.create(
+            name="LandingLowScore",
+            player_id=4302,
+            is_hidden=False,
+            pvp_ratio=53.0,
+            last_battle_date=today,
+        )
+        no_score = Player.objects.create(
+            name="LandingNoScore",
+            player_id=4303,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            last_battle_date=today - timedelta(days=1),
+        )
+        PlayerExplorerSummary.objects.create(player=high, player_score=9.1)
+        PlayerExplorerSummary.objects.create(player=low, player_score=4.2)
+
+        response = self.client.get("/api/landing/players/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:3]],
+            ["LandingHighScore", "LandingLowScore", "LandingNoScore"],
+        )
+
+    def test_landing_recent_players_orders_recent_slice_by_player_score_desc(self):
+        now = timezone.now()
+        recent_high = Player.objects.create(
+            name="RecentHighScore",
+            player_id=4401,
+            pvp_ratio=58.0,
+            last_lookup=now - timedelta(minutes=30),
+        )
+        recent_low = Player.objects.create(
+            name="RecentLowScore",
+            player_id=4402,
+            pvp_ratio=51.0,
+            last_lookup=now - timedelta(minutes=5),
+        )
+        recent_none = Player.objects.create(
+            name="RecentNoScore",
+            player_id=4403,
+            pvp_ratio=54.0,
+            last_lookup=now - timedelta(minutes=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=recent_high, player_score=8.2)
+        PlayerExplorerSummary.objects.create(
+            player=recent_low, player_score=2.4)
+
+        response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:3]],
+            ["RecentHighScore", "RecentLowScore", "RecentNoScore"],
+        )
 
     def test_player_summary_returns_derived_metrics(self):
         now = timezone.now()
@@ -291,6 +501,63 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["ranked_seasons_participated"], 2)
         self.assertEqual(payload["latest_ranked_battles"], 21)
         self.assertEqual(payload["highest_ranked_league_recent"], "Silver")
+
+    def test_player_detail_includes_kill_ratio(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="DetailKillRatioPlayer",
+            player_id=8182,
+            is_hidden=False,
+            pvp_ratio=53.0,
+            pvp_battles=30,
+            pvp_survival_rate=40.0,
+            creation_date=now - timedelta(days=180),
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "kdr": 1.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "kdr": 0.5},
+            ],
+        )
+
+        response = self.client.get("/api/player/DetailKillRatioPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kill_ratio"], 0.78)
+        self.assertEqual(response.json()["player_score"], 3.22)
+
+    def test_player_detail_backfills_missing_kill_ratio_from_stale_summary(self):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="DetailKillRatioBackfill",
+            player_id=8183,
+            is_hidden=False,
+            pvp_ratio=53.0,
+            pvp_battles=30,
+            pvp_survival_rate=40.0,
+            creation_date=now - timedelta(days=180),
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 10, "kdr": 1.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "kdr": 0.5},
+            ],
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            kill_ratio=None,
+            ships_played_total=0,
+        )
+
+        response = self.client.get("/api/player/DetailKillRatioBackfill/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["kill_ratio"], 0.78)
+        self.assertEqual(response.json()["player_score"], 3.22)
+
+        player.refresh_from_db()
+        self.assertEqual(player.explorer_summary.kill_ratio, 0.78)
+        self.assertEqual(player.explorer_summary.player_score, 3.22)
 
     def test_player_distribution_returns_survival_payload(self):
         Player.objects.create(
@@ -416,6 +683,81 @@ class ApiContractTests(TestCase):
         self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
         self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
 
+    def test_player_correlation_distribution_returns_tier_type_payload(self):
+        cache.clear()
+
+        Player.objects.create(
+            name="TierTypeOne",
+            player_id=8831,
+            is_hidden=False,
+            pvp_battles=1400,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 40, "wins": 24},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 20, "wins": 10},
+                {"ship_name": "Ship C", "ship_type": "Battleship",
+                    "ship_tier": 8, "pvp_battles": 10, "wins": 5},
+            ],
+        )
+        Player.objects.create(
+            name="TierTypeTwo",
+            player_id=8832,
+            is_hidden=False,
+            pvp_battles=2100,
+            battles_json=[
+                {"ship_name": "Ship D", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 15, "wins": 8},
+                {"ship_name": "Ship E", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 30, "wins": 18},
+                {"ship_name": "Ship F", "ship_type": "Battleship",
+                    "ship_tier": 9, "pvp_battles": 25, "wins": 14},
+            ],
+        )
+        Player.objects.create(
+            name="TierTypeHidden",
+            player_id=8833,
+            is_hidden=True,
+            pvp_battles=2500,
+            battles_json=[
+                {"ship_name": "Ship G", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 100, "wins": 60},
+            ],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/tier_type/8831/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "tier_type")
+        self.assertEqual(payload["label"], "Tier vs Ship Type")
+        self.assertEqual(payload["x_label"], "Ship Type")
+        self.assertEqual(payload["y_label"], "Tier")
+        self.assertEqual(payload["tracked_population"], 2)
+        self.assertEqual(payload["player_cells"][0]["ship_type"], "Destroyer")
+        self.assertEqual(payload["player_cells"][0]["ship_tier"], 10)
+        self.assertEqual(payload["player_cells"][0]["pvp_battles"], 40)
+        self.assertAlmostEqual(payload["player_cells"][0]["win_ratio"], 0.6)
+        self.assertTrue(any(
+            tile["ship_type"] == "Destroyer"
+            and tile["ship_tier"] == 10
+            and tile["count"] == 55
+            for tile in payload["tiles"]
+        ))
+        self.assertTrue(any(
+            point["ship_type"] == "Battleship"
+            and point["count"] == 35
+            and point["avg_tier"] > 8.7
+            for point in payload["trend"]
+        ))
+
+    def test_player_correlation_distribution_returns_404_for_missing_tier_type_player(self):
+        response = self.client.get(
+            "/api/fetch/player_correlation/tier_type/999999/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_player_correlation_distribution_rejects_unknown_metric(self):
         response = self.client.get("/api/fetch/player_correlation/not-real/")
 
@@ -540,9 +882,62 @@ class ApiContractTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["results"][0]["name"], "ExplorerKRBravo")
-        self.assertEqual(payload["results"][0]["kill_ratio"], 1.2)
+        self.assertEqual(payload["results"][0]["kill_ratio"], 1.01)
         self.assertEqual(payload["results"][1]["name"], "ExplorerKRAlpha")
-        self.assertEqual(payload["results"][1]["kill_ratio"], 0.83)
+        self.assertEqual(payload["results"][1]["kill_ratio"], 0.78)
+
+    def test_players_explorer_sorts_by_player_score_desc(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="ExplorerScoreAlpha",
+            player_id=9106,
+            is_hidden=False,
+            total_battles=4000,
+            pvp_ratio=54.0,
+            pvp_battles=1800,
+            pvp_survival_rate=42.0,
+            creation_date=now - timedelta(days=300),
+            days_since_last_battle=2,
+            activity_json=[
+                {"date": "2026-03-08", "battles": 6, "wins": 4},
+                {"date": "2026-03-09", "battles": 4, "wins": 3},
+            ],
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 20, "kdr": 1.4},
+            ],
+            ranked_json=[],
+        )
+        Player.objects.create(
+            name="ExplorerScoreBravo",
+            player_id=9107,
+            is_hidden=False,
+            total_battles=2200,
+            pvp_ratio=52.0,
+            pvp_battles=1600,
+            pvp_survival_rate=34.0,
+            creation_date=now - timedelta(days=260),
+            days_since_last_battle=20,
+            activity_json=[
+                {"date": "2026-02-10", "battles": 1, "wins": 1},
+            ],
+            battles_json=[
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 8, "pvp_battles": 18, "kdr": 0.9},
+            ],
+            ranked_json=[],
+        )
+
+        response = self.client.get(
+            "/api/players/explorer/?sort=player_score&direction=desc&q=ExplorerScore")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["results"][0]["name"], "ExplorerScoreAlpha")
+        self.assertGreater(
+            payload["results"][0]["player_score"], payload["results"][1]["player_score"])
+        self.assertEqual(payload["results"][1]["name"], "ExplorerScoreBravo")
 
     @patch("warships.views.fetch_clan_battle_seasons")
     def test_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):

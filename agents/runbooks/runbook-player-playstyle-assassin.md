@@ -6,22 +6,25 @@ Maintain the player playstyle taxonomy so verdict labels map cleanly onto meanin
 
 ## Threshold Rationale
 
-- WoWS player color bands in this repo already treat `>= 60%` win rate as the start of the purple/unicum tier, so `Assassin` starts there.
+- WoWS player color bands in this repo already treat `> 65%` win rate as the start of the super-unicum shelf, so `Sealord` lives there as the absolute top-end label.
+- `Assassin` now covers the rest of the purple/unicum tier at `60%` to `<65%`.
 - `Warrior` now covers the stronger blue band at `56%` to `<60%` with stable survival.
 - `Stalwart` covers the merely-good but dependable band at `52%` to `<56%` with stable survival.
 - `Daredevil` remains the aggressive low-survival mirror for both the `Stalwart` and `Warrior` skill bands.
+- `Flotsam` now starts at `51%` so players hovering right around `50%` no longer read as quietly useful.
 - `Hot Potato` starts below `42%` win rate with poor survival, making it a rarer worst-of-the-worst shelf rather than swallowing too much of the ordinary low-red population.
-- `Potato` remains the low-survival bucket for `45%` to `<48%`, while `Survivor` remains the lower-win-rate but higher-survival branch.
+- `Potato` and `Survivor` now absorb the broad average-to-bad shelf from `42%` to `<51%`, while `Flotsam` and `Jetsam` stay reserved for players who are at least meaningfully above average.
 
 ## Current Thresholds
 
 1. `< 100 battles` -> `Recruit`
-2. `>= 60% WR` -> `Assassin`
-3. `56% to < 60% WR` -> `Warrior` or `Daredevil` depending on survival
-4. `52% to < 56% WR` -> `Stalwart` or `Daredevil` depending on survival
-5. `48% to < 52% WR` -> `Flotsam` or `Jetsam` depending on survival
-6. `42% to < 48% WR` -> `Survivor` or `Potato` depending on survival
-7. `< 42% WR` -> `Survivor` or `Hot Potato` depending on survival
+2. `>= 65% WR` -> `Sealord`
+3. `60% to < 65% WR` -> `Assassin`
+4. `56% to < 60% WR` -> `Warrior` or `Daredevil` depending on survival
+5. `52% to < 56% WR` -> `Stalwart` or `Daredevil` depending on survival
+6. `51% to < 52% WR` -> `Flotsam` or `Jetsam` depending on survival
+7. `42% to < 51% WR` -> `Survivor` or `Potato` depending on survival
+8. `< 42% WR` -> `Survivor` or `Hot Potato` depending on survival
 
 Low-survival split:
 

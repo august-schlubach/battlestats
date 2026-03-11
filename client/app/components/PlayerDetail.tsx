@@ -8,6 +8,8 @@ interface PlayerDetailProps {
         id: number;
         name: string;
         player_id: number;
+        kill_ratio: number | null;
+        player_score: number | null;
         total_battles: number;
         pvp_battles: number;
         pvp_wins: number;
@@ -74,6 +76,11 @@ const TypeSVG = dynamic(() => resilientDynamicImport(() => import('./TypeSVG'), 
     loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={210} />,
 });
 
+const TierTypeHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeHeatmapSVG'), 'PlayerDetail-TierTypeHeatmapSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading tier vs type heatmap..." minHeight={332} />,
+});
+
 const WRDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./WRDistributionSVG'), 'PlayerDetail-WRDistributionSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading win rate distribution..." minHeight={240} />,
@@ -95,7 +102,24 @@ const selectColorByWR = (winRatio: number): string => {
     return "#a50f15";                       // bad
 };
 
+const formatKillRatio = (killRatio: number | null): string => {
+    if (killRatio == null) {
+        return '—';
+    }
+
+    return killRatio.toFixed(2);
+};
+
+const formatPlayerScore = (playerScore: number | null): string => {
+    if (playerScore == null) {
+        return '—';
+    }
+
+    return playerScore.toFixed(playerScore < 1 ? 2 : 1);
+};
+
 const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
+    Sealord: 'Owns the map, dictates the pace, dominates, turns tables and wins.',
     Assassin: 'Wins relentlessly, wastes little, and closes games with intent.',
     Warrior: 'Performs well, stays alive, and keeps steady pressure on the fight.',
     Stalwart: 'Steady under pressure, useful in every phase, and good for more than raw damage.',
@@ -170,12 +194,20 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 {/* Second Column */}
                 <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
                     <div className="mb-3 border-b border-[#c6dbef] pb-3">
-                        <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
-                            {player.name}
-                        </h1>
-                        <p className="mt-1 text-sm text-[#4292c6]">
-                            Last played {player.days_since_last_battle} days ago
-                        </p>
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                                <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
+                                    {player.name}
+                                </h1>
+                                <p className="mt-1 text-sm text-[#4292c6]">
+                                    Last played {player.days_since_last_battle} days ago
+                                </p>
+                            </div>
+                            <div className="shrink-0 rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-2 text-right">
+                                <p className="text-[11px] uppercase tracking-wide text-[#4292c6]">Player Score</p>
+                                <p className="mt-1 text-2xl font-semibold text-[#084594]">{formatPlayerScore(player.player_score)}</p>
+                            </div>
+                        </div>
                     </div>
 
                     {player.is_hidden ? (
@@ -189,21 +221,33 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                         </div>
                     ) : (
                         <>
-                            <div className="mt-4 grid grid-cols-3 gap-3">
+                            <div className="mt-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
                                 <div
-                                    className="rounded-md bg-[#eff3ff] p-3"
+                                    className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3"
                                     style={{ border: `1px solid ${selectColorByWR(player.pvp_ratio)}` }}
                                 >
                                     <p className="text-xs uppercase tracking-wide text-[#4292c6]">Win Rate</p>
-                                    <p className="mt-1 text-2xl font-semibold text-[#084594]">{player.pvp_ratio}%</p>
+                                    <div className="flex flex-1 items-center justify-center">
+                                        <p className="text-center text-2xl font-semibold text-[#084594]">{player.pvp_ratio}%</p>
+                                    </div>
                                 </div>
-                                <div className="rounded-md bg-[#eff3ff] p-3">
+                                <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[#4292c6]">PvP Battles</p>
-                                    <p className="mt-1 text-2xl font-semibold text-[#084594]">{player.pvp_battles.toLocaleString()}</p>
+                                    <div className="flex flex-1 items-center justify-center">
+                                        <p className="text-center text-2xl font-semibold text-[#084594]">{player.pvp_battles.toLocaleString()}</p>
+                                    </div>
                                 </div>
-                                <div className="rounded-md bg-[#eff3ff] p-3">
+                                <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[#4292c6]">Survival</p>
-                                    <p className="mt-1 text-2xl font-semibold text-[#084594]">{player.pvp_survival_rate}%</p>
+                                    <div className="flex flex-1 items-center justify-center">
+                                        <p className="text-center text-2xl font-semibold text-[#084594]">{player.pvp_survival_rate}%</p>
+                                    </div>
+                                </div>
+                                <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
+                                    <p className="text-xs uppercase tracking-wide text-[#4292c6]">Weighted KDR</p>
+                                    <div className="flex flex-1 items-center justify-center">
+                                        <p className="text-center text-2xl font-semibold text-[#084594]">{formatKillRatio(player.kill_ratio)}</p>
+                                    </div>
                                 </div>
                             </div>
 
@@ -214,6 +258,15 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses.toLocaleString()}</span></p>
                             </div>
 
+                            {player.verdict && (
+                                <div className="mt-4 rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-3">
+                                    <p className="text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
+                                    {PLAYSTYLE_HELPER_TEXT[player.verdict] ? (
+                                        <p className="mt-1 text-xs text-[#6baed6]">{PLAYSTYLE_HELPER_TEXT[player.verdict]}</p>
+                                    ) : null}
+                                </div>
+                            )}
+
                             <DeferredSection
                                 className="mt-4"
                                 minHeight={268}
@@ -223,14 +276,6 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Win Rate vs Survival</h3>
                                     <p className="mb-2 text-xs text-[#6baed6]">Design 2 uses a true bivariate view: darker tiles mean more players, the dark ridge shows the population trend, and the marker shows whether this player survives more or less often than peers with a similar win rate. The prior overlay view is preserved in code as design 1.</p>
                                     <WRDistributionSVG playerWR={player.pvp_ratio} playerSurvivalRate={player.pvp_survival_rate} />
-                                    {player.verdict && (
-                                        <div className="mt-2">
-                                            <p className="text-sm font-medium text-[#334155]">Playstyle: <span className="font-semibold text-[#084594]">{player.verdict}</span></p>
-                                            {PLAYSTYLE_HELPER_TEXT[player.verdict] ? (
-                                                <p className="mt-1 text-xs text-[#6baed6]">{PLAYSTYLE_HELPER_TEXT[player.verdict]}</p>
-                                            ) : null}
-                                        </div>
-                                    )}
                                 </div>
                             </DeferredSection>
 
@@ -278,6 +323,17 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Performance by Ship Type</h3>
                                     <p className="mb-2 text-xs text-[#6baed6]">Battle volume and win rate across classes.</p>
                                     <TypeSVG playerId={player.player_id} />
+                                </div>
+                            </DeferredSection>
+                            <DeferredSection
+                                className="mt-4"
+                                minHeight={332}
+                                placeholder={<LoadingPanel label="Preparing tier vs type heatmap..." minHeight={332} />}
+                            >
+                                <div>
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Tier vs Type Profile</h3>
+                                    <p className="mb-2 text-xs text-[#6baed6]">Darker tiles show where the tracked player base clusters by tier and ship type. The player circles show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend.</p>
+                                    <TierTypeHeatmapSVG playerId={player.player_id} />
                                 </div>
                             </DeferredSection>
                         </>

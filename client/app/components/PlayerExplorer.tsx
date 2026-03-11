@@ -14,6 +14,7 @@ interface PlayerExplorerRow {
     ships_played_total: number | null;
     ranked_seasons_participated: number | null;
     kill_ratio: number | null;
+    player_score: number | null;
     pvp_survival_rate: number | null;
 }
 
@@ -24,7 +25,7 @@ interface PlayerExplorerResponse {
     results: PlayerExplorerRow[];
 }
 
-type SortKey = 'pvp_ratio' | 'pvp_battles' | 'account_age_days' | 'ships_played_total' | 'ranked_seasons_participated' | 'kill_ratio' | 'pvp_survival_rate';
+type SortKey = 'pvp_ratio' | 'pvp_battles' | 'account_age_days' | 'ships_played_total' | 'ranked_seasons_participated' | 'kill_ratio' | 'player_score' | 'pvp_survival_rate';
 type SortDirection = 'asc' | 'desc';
 type HiddenFilter = 'all' | 'visible' | 'hidden';
 type RankedFilter = 'all' | 'yes' | 'no';
@@ -123,7 +124,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Player Explorer</h3>
                     <p className="mt-1 text-xs text-[#6baed6]">Compare known players by recent activity, performance, longevity, and breadth.</p>
                 </div>
-                <p className="text-xs text-[#6baed6]">Visible dataset slice, not a universal leaderboard.</p>
+                <p className="text-xs text-[#6baed6]">Visible dataset slice, not a universal leaderboard. Weighted KDR is tier-weighted and player score blends performance with recency.</p>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-5">
@@ -186,8 +187,9 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     >
                         <option value="pvp_ratio">PvP WR</option>
                         <option value="pvp_battles">Total battles</option>
+                        <option value="player_score">Player score</option>
                         <option value="pvp_survival_rate">Survive %</option>
-                        <option value="kill_ratio">Kill Ratio</option>
+                        <option value="kill_ratio">Weighted KDR</option>
                         <option value="account_age_days">Account age</option>
                         <option value="ships_played_total">Ships played</option>
                         <option value="ranked_seasons_participated">Ranked seasons</option>
@@ -215,9 +217,10 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     <thead className="bg-[#f0f7ff]">
                         <tr>
                             <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Player</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Score</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Total Battles</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Survive %</th>
-                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Kill Ratio</th>
+                            <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Weighted KDR</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">PvP WR</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Ships</th>
                             <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-[#2171b5]">Ranked</th>
@@ -238,6 +241,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                                         <p className="mt-1 text-xs uppercase tracking-wide text-[#6baed6]">Hidden</p>
                                     ) : null}
                                 </td>
+                                <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.player_score)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.pvp_battles)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatPercent(row.pvp_survival_rate)}</td>
                                 <td className="px-3 py-3 text-right text-[#084594]">{formatMetric(row.kill_ratio)}</td>
@@ -248,7 +252,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                         ))}
                         {!isLoading && (data?.results.length || 0) === 0 ? (
                             <tr>
-                                <td colSpan={7} className="px-3 py-6 text-center text-sm text-gray-500">No players matched the current explorer filters.</td>
+                                <td colSpan={8} className="px-3 py-6 text-center text-sm text-gray-500">No players matched the current explorer filters.</td>
                             </tr>
                         ) : null}
                     </tbody>

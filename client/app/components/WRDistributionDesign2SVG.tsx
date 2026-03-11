@@ -279,8 +279,9 @@ const drawChart = (
     const survivalDelta = expectedSurvival == null ? null : playerSurvivalRate - expectedSurvival;
     const playerColor = selectColorByWR(playerWR);
     const plottedPlayerWR = clampToDomain(playerWR, payload.x_domain);
+    const plottedPlayerSurvivalRate = clampToDomain(playerSurvivalRate, payload.y_domain);
     const playerX = x(plottedPlayerWR);
-    const playerY = y(playerSurvivalRate);
+    const playerY = y(plottedPlayerSurvivalRate);
     const labelX = playerX > width * 0.7 ? playerX - 8 : playerX + 8;
     const labelAnchor = playerX > width * 0.7 ? 'end' : 'start';
     const labelY = playerY < height * 0.35 ? playerY + 28 : playerY - 18;

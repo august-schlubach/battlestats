@@ -47,6 +47,8 @@ urlpatterns = [
          wr_distribution, name='fetch_wr_distribution'),
     path('api/fetch/player_distribution/<str:metric>/',
          player_distribution, name='fetch_player_distribution'),
+    path('api/fetch/player_correlation/<str:metric>/<str:player_id>/',
+         player_correlation_distribution, name='fetch_player_correlation_distribution_for_player'),
     path('api/fetch/player_correlation/<str:metric>/',
          player_correlation_distribution, name='fetch_player_correlation_distribution'),
     path('api/stats/',

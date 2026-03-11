@@ -35,6 +35,8 @@ interface PlayerData {
     id: number;
     name: string;
     player_id: number;
+    kill_ratio: number | null;
+    player_score: number | null;
     total_battles: number;
     pvp_battles: number;
     pvp_wins: number;
@@ -176,7 +178,7 @@ const PlayerSearch: React.FC = () => {
     }, [searchTerm]);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
-        const response = await fetch(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}`);
+        const response = await fetch(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}/`);
         if (!response.ok) {
             throw new Error(`Failed to fetch player ${playerName}`);
         }

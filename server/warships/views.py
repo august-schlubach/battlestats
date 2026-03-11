@@ -16,10 +16,12 @@ from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
-    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer
+    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, \
+    PlayerTierTypeCorrelationSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
-    fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation
+    fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
+    fetch_player_tier_type_correlation, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
@@ -29,6 +31,7 @@ logging.basicConfig(level=logging.INFO)
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
+LANDING_RECENT_PLAYER_SCORE_WINDOW = 120
 
 
 def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
@@ -51,8 +54,16 @@ def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COU
     return featured + remainder
 
 
+def _player_score_ordering(secondary_field: str):
+    return (
+        F('explorer_summary__player_score').desc(nulls_last=True),
+        F(secondary_field).desc(nulls_last=True),
+        'name',
+    )
+
+
 class PlayerViewSet(viewsets.ModelViewSet):
-    queryset = Player.objects.select_related('clan').all()
+    queryset = Player.objects.select_related('clan', 'explorer_summary').all()
     serializer_class = PlayerSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -63,6 +74,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
             if not obj.clan:
                 from warships.data import update_player_data
                 update_player_data(player=obj, force_refresh=True)
+                obj.refresh_from_db()
         except Player.DoesNotExist:
             player_id = _fetch_player_id_by_name(lookup_field_value)
             if not player_id:
@@ -75,6 +87,16 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
             from warships.data import update_player_data
             update_player_data(player=obj, force_refresh=True)
+            obj.refresh_from_db()
+
+        if obj.clan and (not obj.clan.name or not obj.clan.last_fetch):
+            from warships.data import update_clan_data
+            update_clan_data(obj.clan.clan_id)
+            obj.refresh_from_db()
+
+        if not obj.is_hidden and not obj.battles_json and (obj.pvp_battles or 0) > 0:
+            update_battle_data(obj.player_id)
+            obj.refresh_from_db()
 
         self.check_object_permissions(self.request, obj)
 
@@ -82,8 +104,23 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
         # Record the last time this player profile was viewed via the API.
         obj.last_lookup = now
-        obj.save(update_fields=["last_lookup"])
+        update_fields = ["last_lookup"]
+
+        if obj.verdict is None and not obj.is_hidden:
+            inferred_verdict = compute_player_verdict(
+                obj.pvp_battles or 0,
+                obj.pvp_ratio,
+                obj.pvp_survival_rate,
+            )
+            if inferred_verdict is not None:
+                obj.verdict = inferred_verdict
+                update_fields.append("verdict")
+
+        obj.save(update_fields=update_fields)
         cache.delete('landing:recent_players')
+
+        if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
+            refresh_player_explorer_summary(obj)
 
         player_refresh_stale = not obj.last_fetch or (
             now - obj.last_fetch) > timedelta(minutes=15)
@@ -115,7 +152,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
 
 class PlayerDetail(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Player.objects.select_related('clan').all()
+    queryset = Player.objects.select_related('clan', 'explorer_summary').all()
     serializer_class = PlayerSerializer
     lookup_field = 'name'
     permission_classes = [permissions.AllowAny]
@@ -258,12 +295,20 @@ def player_distribution(request, metric: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
-def player_correlation_distribution(request, metric: str) -> Response:
-    if metric != 'win_rate_survival':
-        return Response({'detail': 'Unsupported player correlation metric.'}, status=status.HTTP_404_NOT_FOUND)
+def player_correlation_distribution(request, metric: str, player_id: str | None = None) -> Response:
+    if metric == 'win_rate_survival' and player_id is None:
+        data = fetch_player_wr_survival_correlation()
+        return _validated_single_response(data, PlayerCorrelationDistributionSerializer)
 
-    data = fetch_player_wr_survival_correlation()
-    return _validated_single_response(data, PlayerCorrelationDistributionSerializer)
+    if metric == 'tier_type' and player_id is not None:
+        try:
+            data = fetch_player_tier_type_correlation(player_id)
+        except Player.DoesNotExist:
+            return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        return _validated_single_response(data, PlayerTierTypeCorrelationSerializer)
+
+    return Response({'detail': 'Unsupported player correlation metric.'}, status=status.HTTP_404_NOT_FOUND)
 
 
 @api_view(["GET"])
@@ -302,6 +347,7 @@ def players_explorer(request) -> Response:
         'pvp_battles',
         'pvp_survival_rate',
         'kill_ratio',
+        'player_score',
         'account_age_days',
         'battles_last_29_days',
         'active_days_last_29_days',
@@ -370,11 +416,12 @@ def clan_members(request, clan_id: str) -> Response:
         update_clan_data(clan_id=clan_id)
         clan.refresh_from_db()
 
-    members = clan.player_set.exclude(name='').order_by('-last_battle_date')
+    members = clan.player_set.exclude(name='').order_by(
+        *_player_score_ordering('last_battle_date'))
     if not members.exists() or (clan.members_count and members.count() < clan.members_count):
         update_clan_members(clan_id=clan_id)
-        members = clan.player_set.exclude(
-            name='').order_by('-last_battle_date')
+        members = clan.player_set.exclude(name='').order_by(
+            *_player_score_ordering('last_battle_date'))
 
     serializer = ClanMemberSerializer(members, many=True)
     return Response(serializer.data)
@@ -443,7 +490,7 @@ def landing_players(request) -> Response:
                 is_hidden=False,
             ).exclude(
                 last_battle_date__isnull=True
-            ).values('name', 'pvp_ratio', 'is_hidden').order_by('-last_battle_date')
+            ).values('name', 'pvp_ratio', 'is_hidden').order_by(*_player_score_ordering('last_battle_date'))
         )
 
     data = cache.get_or_set('landing:players', _fetch_landing_players, 60)
@@ -454,10 +501,19 @@ def landing_players(request) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
     def _fetch_recent_players():
-        return list(
+        recent_player_ids = list(
             Player.objects.exclude(name='').exclude(
                 last_lookup__isnull=True
-            ).values('name', 'pvp_ratio').order_by('-last_lookup')[:40]
+            ).order_by(
+                F('last_lookup').desc(nulls_last=True),
+                'name',
+            ).values_list('id', flat=True)[:LANDING_RECENT_PLAYER_SCORE_WINDOW]
+        )
+
+        return list(
+            Player.objects.filter(id__in=recent_player_ids).values('name', 'pvp_ratio').order_by(
+                * _player_score_ordering('last_lookup')
+            )[:40]
         )
 
     data = cache.get_or_set('landing:recent_players',

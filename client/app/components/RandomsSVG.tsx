@@ -17,6 +17,15 @@ interface RandomsRow {
     wins: number;
 }
 
+const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
+    if (Array.isArray(data)) {
+        return data as RandomsRow[];
+    }
+
+    console.warn('Unexpected randoms data payload:', data);
+    return [];
+};
+
 type RandomsChartDesign = 'design1' | 'design2';
 
 const TOP_N = 20;
@@ -104,7 +113,7 @@ const drawBattlePlotDesign1 = (containerElement: HTMLDivElement, data: RandomsRo
 
     svg.append('g')
         .style('color', '#475569')
-        .call(d3.axisLeft(y).tickSize(0).tickFormat((value: number) => labelByRowKey.get(String(value)) ?? ''))
+        .call(d3.axisLeft(y).tickSize(0).tickPadding(6).tickFormat((value: number) => labelByRowKey.get(String(value)) ?? ''))
         .selectAll('text')
         .style('font-size', '10px')
         .style('font-weight', '500');
@@ -497,7 +506,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             setIsChartLoading(true);
             try {
                 const response = await fetch(`http://localhost:8888/api/fetch/randoms_data/${playerId}/?all=true`);
-                const result: RandomsRow[] = await response.json();
+                const result = normalizeRandomsRows(await response.json());
                 setAllShips(result);
                 setRandomsUpdatedAt(response.headers.get('X-Randoms-Updated-At'));
 

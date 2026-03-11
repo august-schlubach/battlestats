@@ -127,6 +127,7 @@ class PlayerExplorerSummary(models.Model):
     activity_trend_direction = models.CharField(
         max_length=16, null=True, blank=True)
     kill_ratio = models.FloatField(null=True, blank=True)
+    player_score = models.FloatField(null=True, blank=True)
     ships_played_total = models.IntegerField(null=True, blank=True)
     ship_type_spread = models.IntegerField(null=True, blank=True)
     tier_spread = models.IntegerField(null=True, blank=True)
@@ -138,6 +139,8 @@ class PlayerExplorerSummary(models.Model):
 
     class Meta:
         indexes = [
+            models.Index(fields=['player_score'],
+                         name='explorer_score_idx'),
             models.Index(fields=['battles_last_29_days'],
                          name='explorer_battles29_idx'),
             models.Index(fields=['active_days_last_29_days'],

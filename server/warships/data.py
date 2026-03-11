@@ -4,7 +4,7 @@ from datetime import datetime, timezone, timedelta
 import logging
 import math
 from django.core.cache import cache
-from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
+from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, build_ship_chart_name
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
@@ -15,12 +15,32 @@ logging.basicConfig(level=logging.INFO)
 
 
 PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD = 100
+PLAYSTYLE_SEALORD_WR_THRESHOLD = 65.0
 PLAYSTYLE_ASSASSIN_WR_THRESHOLD = 60.0
 PLAYSTYLE_WARRIOR_WR_THRESHOLD = 56.0
 PLAYSTYLE_STALWART_WR_THRESHOLD = 52.0
-PLAYSTYLE_FLOTSAM_WR_THRESHOLD = 48.0
+PLAYSTYLE_FLOTSAM_WR_THRESHOLD = 51.0
 PLAYSTYLE_HOT_POTATO_WR_THRESHOLD = 42.0
 PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD = 33.0
+KILL_RATIO_LOW_TIER_WEIGHT = 0.15
+KILL_RATIO_MID_TIER_WEIGHT = 0.65
+KILL_RATIO_HIGH_TIER_WEIGHT = 1.0
+KILL_RATIO_SMOOTHING_BATTLES = 12.0
+KILL_RATIO_PRIOR = 0.7
+PLAYER_SCORE_WR_WEIGHT = 0.36
+PLAYER_SCORE_KDR_WEIGHT = 0.24
+PLAYER_SCORE_SURVIVAL_WEIGHT = 0.14
+PLAYER_SCORE_BATTLES_WEIGHT = 0.10
+PLAYER_SCORE_ACTIVITY_WEIGHT = 0.16
+PLAYER_SCORE_MAX = 10.0
+PLAYER_SCORE_DORMANT_MIN = 0.05
+PLAYER_SCORE_DORMANT_MAX = 0.95
+PLAYER_SCORE_DORMANT_MULTIPLIER = 0.08
+PLAYER_SCORE_ACTIVITY_SATURATION_BATTLES = 8.0
+PLAYER_SCORE_LOW_TIER_WEIGHT = 0.02
+PLAYER_SCORE_MID_TIER_WEIGHT = 0.60
+PLAYER_SCORE_HIGH_TIER_WEIGHT = 1.0
+PLAYER_SCORE_LOW_TIER_FLOOR = 0.25
 
 
 def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_survival_rate: Optional[float]) -> Optional[str]:
@@ -30,8 +50,13 @@ def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_sur
     if pvp_ratio is None or pvp_survival_rate is None:
         return None
 
-    # 60% WR lines up with the WoWS unicum band and is high enough to feel elite
-    # without pushing the label into super-unicum rarity.
+    # 65% WR aligns with the repo's super-unicum shelf and is rare enough to earn
+    # a distinct top-end label.
+    if pvp_ratio >= PLAYSTYLE_SEALORD_WR_THRESHOLD:
+        return 'Sealord'
+
+    # 60% WR lines up with the WoWS unicum band and stays elite without claiming
+    # the absolute top shelf.
     if pvp_ratio >= PLAYSTYLE_ASSASSIN_WR_THRESHOLD:
         return 'Assassin'
 
@@ -198,26 +223,76 @@ def _coerce_battle_rows(battles_rows: Any) -> list[dict]:
     return [row for row in battles_rows if isinstance(row, dict)]
 
 
+def _kill_ratio_tier_weight(ship_tier: Any) -> float:
+    try:
+        tier = int(ship_tier)
+    except (TypeError, ValueError):
+        return KILL_RATIO_MID_TIER_WEIGHT
+
+    if 1 <= tier <= 4:
+        return KILL_RATIO_LOW_TIER_WEIGHT
+    if 5 <= tier <= 7:
+        return KILL_RATIO_MID_TIER_WEIGHT
+    return KILL_RATIO_HIGH_TIER_WEIGHT
+
+
+def _player_score_tier_weight(ship_tier: Any) -> float:
+    try:
+        tier = int(ship_tier)
+    except (TypeError, ValueError):
+        return PLAYER_SCORE_MID_TIER_WEIGHT
+
+    if 1 <= tier <= 4:
+        return PLAYER_SCORE_LOW_TIER_WEIGHT
+    if 5 <= tier <= 7:
+        return PLAYER_SCORE_MID_TIER_WEIGHT
+    return PLAYER_SCORE_HIGH_TIER_WEIGHT
+
+
+def _extract_row_kill_rate(row: dict, battles: int) -> Optional[float]:
+    if battles <= 0:
+        return None
+
+    frags = row.get('frags')
+    if frags is not None:
+        return float(frags or 0) / battles
+
+    if row.get('kdr') is None:
+        return None
+
+    return float(row.get('kdr') or 0)
+
+
 def _calculate_player_kill_ratio(battle_rows: list[dict]) -> Optional[float]:
-    total_frags = 0.0
-    total_battles = 0
+    weighted_sum = 0.0
+    total_weight = 0.0
+    has_battle_volume = False
 
     for row in battle_rows:
         battles = int(row.get('pvp_battles', 0) or 0)
         if battles <= 0:
             continue
 
-        frags = row.get('frags')
-        if frags is not None:
-            total_frags += float(frags or 0)
-        else:
-            total_frags += float(row.get('kdr', 0) or 0) * battles
-        total_battles += battles
+        has_battle_volume = True
+        observed_kill_rate = _extract_row_kill_rate(row, battles)
+        if observed_kill_rate is None:
+            continue
 
-    if total_battles <= 0:
+        smoothed_kill_rate = (
+            (observed_kill_rate * battles) +
+            (KILL_RATIO_PRIOR * KILL_RATIO_SMOOTHING_BATTLES)
+        ) / (battles + KILL_RATIO_SMOOTHING_BATTLES)
+        ship_weight = math.sqrt(battles) * \
+            _kill_ratio_tier_weight(row.get('ship_tier'))
+        weighted_sum += smoothed_kill_rate * ship_weight
+        total_weight += ship_weight
+
+    if total_weight <= 0:
+        if has_battle_volume:
+            return 0.0
         return None
 
-    return round(total_frags / total_battles, 2)
+    return round(weighted_sum / total_weight, 2)
 
 
 def _summary_has_battle_data(player: Player, battle_rows: list[dict]) -> bool:
@@ -225,6 +300,250 @@ def _summary_has_battle_data(player: Player, battle_rows: list[dict]) -> bool:
         return True
 
     return (player.pvp_battles or 0) <= 0
+
+
+def _build_ship_row_metadata(ship_id: Any, ship_model: Optional[Ship]) -> dict[str, Any]:
+    try:
+        normalized_ship_id = int(ship_id)
+    except (TypeError, ValueError):
+        normalized_ship_id = 0
+
+    if ship_model is None:
+        fallback_name = f"Unknown Ship {normalized_ship_id}" if normalized_ship_id else "Unknown Ship"
+        return {
+            'ship_id': normalized_ship_id,
+            'ship_name': fallback_name,
+            'ship_chart_name': build_ship_chart_name(fallback_name),
+            'ship_tier': 0,
+            'ship_type': 'Unknown',
+        }
+
+    ship_name = ship_model.name or (
+        f"Unknown Ship {ship_model.ship_id}" if ship_model.ship_id else "Unknown Ship"
+    )
+    return {
+        'ship_id': ship_model.ship_id,
+        'ship_name': ship_name,
+        'ship_chart_name': ship_model.chart_name or build_ship_chart_name(ship_name),
+        'ship_tier': ship_model.tier if ship_model.tier is not None else 0,
+        'ship_type': ship_model.ship_type or 'Unknown',
+    }
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
+
+
+def _normalize_wr_score(pvp_ratio: Optional[float]) -> Optional[float]:
+    if pvp_ratio is None:
+        return None
+
+    return _clamp((float(pvp_ratio) - 45.0) / 20.0, 0.0, 1.0)
+
+
+def _normalize_kdr_score(kill_ratio: Optional[float]) -> Optional[float]:
+    if kill_ratio is None:
+        return None
+
+    return _clamp((float(kill_ratio) - 0.4) / 1.6, 0.0, 1.0)
+
+
+def _normalize_survival_score(pvp_survival_rate: Optional[float]) -> Optional[float]:
+    if pvp_survival_rate is None:
+        return None
+
+    return _clamp((float(pvp_survival_rate) - 25.0) / 25.0, 0.0, 1.0)
+
+
+def _calculate_effective_battle_volume(battle_rows: list[dict], fallback_battles: Optional[int]) -> Optional[float]:
+    total_battles = 0
+    weighted_battles = 0.0
+
+    for row in battle_rows:
+        battles = max(int(row.get('pvp_battles', 0) or 0), 0)
+        if battles <= 0:
+            continue
+
+        total_battles += battles
+        weighted_battles += battles * \
+            _player_score_tier_weight(row.get('ship_tier'))
+
+    if total_battles > 0:
+        competitive_share = _clamp(weighted_battles / total_battles, 0.0, 1.0)
+        baseline_battles = max(int(fallback_battles or 0), total_battles)
+        return float(baseline_battles) * competitive_share
+
+    if fallback_battles is None:
+        return None
+
+    return float(max(int(fallback_battles or 0), 0))
+
+
+def _normalize_battle_volume_score(total_battles: Optional[int], battle_rows: list[dict]) -> Optional[float]:
+    effective_battles = _calculate_effective_battle_volume(
+        battle_rows, total_battles)
+    if effective_battles is None:
+        return None
+
+    battles = max(float(effective_battles), 0.0)
+    if battles <= 0:
+        return 0.0
+
+    return _clamp(math.log10(battles + 1) / 4.0, 0.0, 1.0)
+
+
+def _calculate_competitive_tier_factor(battle_rows: list[dict], fallback_battles: Optional[int]) -> float:
+    total_battles = 0
+    weighted_battles = 0.0
+
+    for row in battle_rows:
+        battles = max(int(row.get('pvp_battles', 0) or 0), 0)
+        if battles <= 0:
+            continue
+
+        total_battles += battles
+        weighted_battles += battles * \
+            _player_score_tier_weight(row.get('ship_tier'))
+
+    if total_battles <= 0:
+        fallback_total = max(int(fallback_battles or 0), 0)
+        return 1.0 if fallback_total > 0 else 1.0
+
+    competitive_share = _clamp(weighted_battles / total_battles, 0.0, 1.0)
+    return round(
+        _clamp(
+            PLAYER_SCORE_LOW_TIER_FLOOR +
+                ((1.0 - PLAYER_SCORE_LOW_TIER_FLOOR)
+                 * math.sqrt(competitive_share)),
+            PLAYER_SCORE_LOW_TIER_FLOOR,
+            1.0,
+        ),
+        4,
+    )
+
+
+def _fibonacci_activity_weight(day_age: int) -> float:
+    if day_age <= 1:
+        return 34.0
+    if day_age <= 3:
+        return 21.0
+    if day_age <= 7:
+        return 13.0
+    if day_age <= 13:
+        return 8.0
+    if day_age <= 21:
+        return 5.0
+    if day_age <= 34:
+        return 3.0
+    if day_age <= 55:
+        return 2.0
+    if day_age <= 89:
+        return 1.0
+    if day_age <= 144:
+        return 0.55
+    if day_age <= 233:
+        return 0.34
+    if day_age <= 365:
+        return 0.21
+    return 0.08
+
+
+def _inactivity_activity_multiplier(days_since_last_battle: Optional[int]) -> float:
+    if days_since_last_battle is None:
+        return 1.0
+
+    if days_since_last_battle <= 34:
+        return 1.0
+    if days_since_last_battle <= 55:
+        return 0.92
+    if days_since_last_battle <= 89:
+        return 0.75
+    if days_since_last_battle <= 144:
+        return 0.55
+    if days_since_last_battle <= 233:
+        return 0.35
+    if days_since_last_battle <= 365:
+        return 0.18
+    return 0.06
+
+
+def _calculate_recent_activity_score(activity_rows: Any, days_since_last_battle: Optional[int]) -> float:
+    normalized_rows = _coerce_activity_rows(activity_rows)
+    today = datetime.now().date()
+    weighted_intensity = 0.0
+
+    for row in normalized_rows:
+        row_date = row.get('date')
+        if not row_date:
+            continue
+
+        try:
+            age_days = (
+                today - datetime.fromisoformat(str(row_date)).date()).days
+        except ValueError:
+            continue
+
+        if age_days < 0:
+            continue
+
+        battles = int(row.get('battles', 0) or 0)
+        if battles <= 0:
+            continue
+
+        day_intensity = _clamp(
+            math.log1p(battles) /
+            math.log1p(PLAYER_SCORE_ACTIVITY_SATURATION_BATTLES),
+            0.0,
+            1.0,
+        )
+        weighted_intensity += day_intensity * \
+            _fibonacci_activity_weight(age_days)
+
+    max_recent_weight = sum(_fibonacci_activity_weight(day_age)
+                            for day_age in range(29))
+    recent_score = weighted_intensity / \
+        max_recent_weight if max_recent_weight > 0 else 0.0
+    return round(_clamp(recent_score, 0.0, 1.0) * _inactivity_activity_multiplier(days_since_last_battle), 4)
+
+
+def _calculate_player_score(
+    *,
+    pvp_ratio: Optional[float],
+    kill_ratio: Optional[float],
+    pvp_survival_rate: Optional[float],
+    total_battles: Optional[int],
+    activity_rows: Any,
+    days_since_last_battle: Optional[int],
+    battle_rows: list[dict],
+) -> Optional[float]:
+    component_values = [
+        (PLAYER_SCORE_WR_WEIGHT, _normalize_wr_score(pvp_ratio)),
+        (PLAYER_SCORE_KDR_WEIGHT, _normalize_kdr_score(kill_ratio)),
+        (PLAYER_SCORE_SURVIVAL_WEIGHT, _normalize_survival_score(pvp_survival_rate)),
+        (PLAYER_SCORE_BATTLES_WEIGHT, _normalize_battle_volume_score(
+            total_battles, battle_rows)),
+        (PLAYER_SCORE_ACTIVITY_WEIGHT, _calculate_recent_activity_score(
+            activity_rows, days_since_last_battle)),
+    ]
+
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for weight, value in component_values:
+        if value is None:
+            continue
+        weighted_sum += weight * value
+        total_weight += weight
+
+    if total_weight <= 0:
+        return None
+
+    score = round((weighted_sum / total_weight) * PLAYER_SCORE_MAX, 2)
+    score = round(
+        score * _calculate_competitive_tier_factor(battle_rows, total_battles), 2)
+    if days_since_last_battle is not None and days_since_last_battle > 365:
+        return round(_clamp(score * PLAYER_SCORE_DORMANT_MULTIPLIER, PLAYER_SCORE_DORMANT_MIN, PLAYER_SCORE_DORMANT_MAX), 2)
+
+    return score
 
 
 def _explorer_summary_needs_refresh(player: Player) -> bool:
@@ -242,10 +561,21 @@ def _explorer_summary_needs_refresh(player: Player) -> bool:
     expected_ships_played_total = len(played_rows) if has_battle_data else None
     expected_kill_ratio = _calculate_player_kill_ratio(
         battle_rows) if has_battle_data else None
+    expected_player_score = _calculate_player_score(
+        pvp_ratio=player.pvp_ratio,
+        kill_ratio=expected_kill_ratio,
+        pvp_survival_rate=player.pvp_survival_rate,
+        total_battles=player.total_battles or player.pvp_battles,
+        activity_rows=player.activity_json,
+        days_since_last_battle=player.days_since_last_battle,
+        battle_rows=battle_rows,
+    )
 
     if explorer_summary.ships_played_total != expected_ships_played_total:
         return True
     if explorer_summary.kill_ratio != expected_kill_ratio:
+        return True
+    if explorer_summary.player_score != expected_player_score:
         return True
     if explorer_summary.ranked_seasons_participated is None and isinstance(player.ranked_json, list):
         return True
@@ -278,6 +608,7 @@ def build_player_summary(
         'pvp_battles': player.pvp_battles,
         'pvp_survival_rate': player.pvp_survival_rate,
         'kill_ratio': None,
+        'player_score': None,
         'battles_last_29_days': None,
         'wins_last_29_days': None,
         'active_days_last_29_days': None,
@@ -309,6 +640,7 @@ def build_player_summary(
             'recent_win_rate': explorer_summary.recent_win_rate,
             'activity_trend_direction': explorer_summary.activity_trend_direction,
             'kill_ratio': explorer_summary.kill_ratio,
+            'player_score': explorer_summary.player_score,
             'ships_played_total': explorer_summary.ships_played_total,
             'ship_type_spread': explorer_summary.ship_type_spread,
             'tier_spread': explorer_summary.tier_spread,
@@ -348,6 +680,15 @@ def build_player_summary(
         'active_days_last_29_days': active_days_last_29_days,
         'recent_win_rate': round(wins_last_29_days / battles_last_29_days, 3) if battles_last_29_days > 0 else None,
         'activity_trend_direction': _calculate_activity_trend_direction(normalized_activity_rows),
+        'player_score': _calculate_player_score(
+            pvp_ratio=player.pvp_ratio,
+            kill_ratio=summary['kill_ratio'],
+            pvp_survival_rate=player.pvp_survival_rate,
+            total_battles=player.total_battles or player.pvp_battles,
+            activity_rows=normalized_activity_rows,
+            days_since_last_battle=player.days_since_last_battle,
+            battle_rows=normalized_battles_rows,
+        ),
         'ships_played_total': len(played_rows) if has_battle_data else None,
         'ship_type_spread': ship_type_spread if has_battle_data else None,
         'tier_spread': tier_spread if has_battle_data else None,
@@ -380,6 +721,7 @@ def refresh_player_explorer_summary(
             'active_days_last_29_days': summary['active_days_last_29_days'],
             'recent_win_rate': summary['recent_win_rate'],
             'activity_trend_direction': summary['activity_trend_direction'],
+            'player_score': summary['player_score'],
             'ships_played_total': summary['ships_played_total'],
             'ship_type_spread': summary['ship_type_spread'],
             'tier_spread': summary['tier_spread'],
@@ -545,13 +887,24 @@ def update_battle_data(player_id: str) -> None:
 
     # Fetch ship stats for the player
     ship_data = _fetch_ship_stats_for_player(player_id)
+    if not ship_data:
+        logging.warning(
+            f'No ship stats returned for player_id={player_id}; leaving battles_json unchanged.'
+        )
+        return player.battles_json
+
     prepared_data = []
 
     for ship in ship_data:
         ship_model = _fetch_ship_info(ship['ship_id'])
-
-        if not ship_model or not ship_model.name:
-            continue
+        ship_metadata = _build_ship_row_metadata(
+            ship.get('ship_id'), ship_model)
+        if ship_model is None:
+            logging.warning(
+                'Falling back to placeholder ship metadata for ship_id=%s while updating player_id=%s',
+                ship.get('ship_id'),
+                player_id,
+            )
 
         pvp_battles = ship['pvp']['battles']
         wins = ship['pvp']['wins']
@@ -561,15 +914,15 @@ def update_battle_data(player_id: str) -> None:
         distance = ship['distance']
 
         ship_info = {
-            'ship_id': ship_model.ship_id,
-            'ship_name': ship_model.name,
-            'ship_chart_name': ship_model.chart_name or build_ship_chart_name(ship_model.name),
-            'ship_tier': ship_model.tier,
+            'ship_id': ship_metadata['ship_id'],
+            'ship_name': ship_metadata['ship_name'],
+            'ship_chart_name': ship_metadata['ship_chart_name'],
+            'ship_tier': ship_metadata['ship_tier'],
             'all_battles': battles,
             'distance': distance,
             'wins': wins,
             'losses': losses,
-            'ship_type': ship_model.ship_type,
+            'ship_type': ship_metadata['ship_type'],
             'pve_battles': battles - (wins + losses),
             'pvp_battles': pvp_battles,
             'win_ratio': round(wins / pvp_battles, 2) if pvp_battles > 0 else 0,
@@ -832,6 +1185,21 @@ PLAYER_WR_SURVIVAL_CORRELATION_CONFIG = {
     'y_bin_width': 1.5,
 }
 
+PLAYER_TIER_TYPE_CORRELATION_CONFIG = {
+    'label': 'Tier vs Ship Type',
+    'x_label': 'Ship Type',
+    'y_label': 'Tier',
+    'min_population_battles': 100,
+}
+
+PLAYER_TIER_TYPE_ORDER = {
+    'Destroyer': 0,
+    'Cruiser': 1,
+    'Battleship': 2,
+    'Aircraft Carrier': 3,
+    'Submarine': 4,
+}
+
 
 def _player_distribution_cache_key(metric: str) -> str:
     return f'players:distribution:v1:{metric}'
@@ -947,6 +1315,156 @@ def _pearson_correlation(count: int, sum_x: float, sum_y: float, sum_xy: float, 
         return None
 
     return numerator / denominator
+
+
+def _tier_type_sort_key(ship_type: str, ship_tier: Optional[int] = None) -> tuple[int, str, int]:
+    tier_component = -(ship_tier or 0)
+    return (PLAYER_TIER_TYPE_ORDER.get(ship_type, len(PLAYER_TIER_TYPE_ORDER)), ship_type, tier_component)
+
+
+def _extract_tier_type_battle_rows(battles_json: Any) -> list[dict[str, int | float | str]]:
+    if not isinstance(battles_json, list):
+        return []
+
+    normalized_rows: list[dict[str, int | float | str]] = []
+    for row in battles_json:
+        if not isinstance(row, dict):
+            continue
+
+        ship_type = row.get('ship_type')
+        if not isinstance(ship_type, str) or not ship_type.strip():
+            continue
+
+        try:
+            ship_tier = int(row.get('ship_tier'))
+            pvp_battles = int(row.get('pvp_battles', 0) or 0)
+            wins = int(row.get('wins', 0) or 0)
+        except (TypeError, ValueError):
+            continue
+
+        if ship_tier <= 0 or pvp_battles <= 0:
+            continue
+
+        normalized_rows.append({
+            'ship_type': ship_type.strip(),
+            'ship_tier': ship_tier,
+            'pvp_battles': pvp_battles,
+            'wins': max(wins, 0),
+        })
+
+    return normalized_rows
+
+
+def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
+    aggregates: dict[tuple[str, int], dict[str, int]] = {}
+    for row in _extract_tier_type_battle_rows(battles_json):
+        ship_type = str(row['ship_type'])
+        ship_tier = int(row['ship_tier'])
+        aggregate = aggregates.setdefault((ship_type, ship_tier), {
+            'pvp_battles': 0,
+            'wins': 0,
+        })
+        aggregate['pvp_battles'] += int(row['pvp_battles'])
+        aggregate['wins'] += int(row['wins'])
+
+    player_cells = []
+    for (ship_type, ship_tier), aggregate in aggregates.items():
+        battles = aggregate['pvp_battles']
+        wins = aggregate['wins']
+        player_cells.append({
+            'ship_type': ship_type,
+            'ship_tier': ship_tier,
+            'pvp_battles': battles,
+            'wins': wins,
+            'win_ratio': round(wins / battles, 4) if battles > 0 else 0.0,
+        })
+
+    player_cells.sort(key=lambda row: (-row['pvp_battles'], _tier_type_sort_key(row['ship_type'], row['ship_tier'])))
+    return player_cells
+
+
+def _fetch_player_tier_type_population_correlation() -> dict:
+    cache_key = _player_correlation_cache_key('tier_type_population')
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
+    tile_counts: dict[tuple[str, int], int] = {}
+    trend_tier_weighted_sum: dict[str, float] = {}
+    trend_battles: dict[str, int] = {}
+    tracked_population = 0
+
+    rows = Player.objects.filter(
+        is_hidden=False,
+        pvp_battles__gte=config['min_population_battles'],
+        battles_json__isnull=False,
+    ).values_list('battles_json', flat=True)
+
+    for battles_json in rows.iterator(chunk_size=1000):
+        normalized_rows = _extract_tier_type_battle_rows(battles_json)
+        if not normalized_rows:
+            continue
+
+        tracked_population += 1
+        for row in normalized_rows:
+            ship_type = str(row['ship_type'])
+            ship_tier = int(row['ship_tier'])
+            pvp_battles = int(row['pvp_battles'])
+
+            tile_counts[(ship_type, ship_tier)] = tile_counts.get((ship_type, ship_tier), 0) + pvp_battles
+            trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(ship_type, 0.0) + (ship_tier * pvp_battles)
+            trend_battles[ship_type] = trend_battles.get(ship_type, 0) + pvp_battles
+
+    tiles = [
+        {
+            'ship_type': ship_type,
+            'ship_tier': ship_tier,
+            'count': count,
+        }
+        for (ship_type, ship_tier), count in sorted(
+            tile_counts.items(),
+            key=lambda item: _tier_type_sort_key(item[0][0], item[0][1]),
+        )
+    ]
+
+    trend = [
+        {
+            'ship_type': ship_type,
+            'avg_tier': round(trend_tier_weighted_sum[ship_type] / total_battles, 4),
+            'count': total_battles,
+        }
+        for ship_type, total_battles in sorted(
+            trend_battles.items(),
+            key=lambda item: _tier_type_sort_key(item[0]),
+        )
+        if total_battles > 0
+    ]
+
+    payload = {
+        'metric': 'tier_type',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'tracked_population': tracked_population,
+        'tiles': tiles,
+        'trend': trend,
+    }
+    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    return payload
+
+
+def fetch_player_tier_type_correlation(player_id: str) -> dict:
+    player = Player.objects.get(player_id=player_id)
+    if not player.battles_json:
+        update_battle_data(player_id)
+        player.refresh_from_db(fields=['battles_json'])
+
+    population_payload = _fetch_player_tier_type_population_correlation()
+    return {
+        **population_payload,
+        'player_cells': _build_tier_type_player_cells(player.battles_json),
+    }
 
 
 def fetch_player_wr_survival_correlation() -> dict:

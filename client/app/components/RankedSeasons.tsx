@@ -85,6 +85,12 @@ const formatSeasonStartDate = (startDate: string | null): string => {
     return 'Start date unavailable';
 };
 
+const RANKED_FETCH_RETRY_DELAY_MS = 350;
+
+const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
+    window.setTimeout(resolve, timeoutMs);
+});
+
 const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = false }) => {
     const [seasons, setSeasons] = useState<RankedSeason[]>([]);
     const [isChartLoading, setIsChartLoading] = useState(false);
@@ -100,23 +106,36 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
             setError(null);
 
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/ranked_data/${playerId}/`);
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch ranked data for ${playerId}`);
+                let result: RankedSeason[] | null = null;
+
+                for (let attempt = 0; attempt < 2; attempt += 1) {
+                    const response = await fetch(`http://localhost:8888/api/fetch/ranked_data/${playerId}/`);
+                    if (response.ok) {
+                        result = await response.json();
+                        break;
+                    }
+
+                    if (attempt === 0) {
+                        await delay(RANKED_FETCH_RETRY_DELAY_MS);
+                    }
                 }
 
-                const result: RankedSeason[] = await response.json();
                 if (!isMounted) {
+                    return;
+                }
+
+                if (result === null) {
+                    setError('Unable to load ranked data right now.');
+                    setSeasons([]);
                     return;
                 }
 
                 setSeasons(result.slice().sort((left, right) => right.season_id - left.season_id));
-            } catch (fetchError) {
+            } catch {
                 if (!isMounted) {
                     return;
                 }
 
-                console.error('Error fetching ranked data:', fetchError);
                 setError('Unable to load ranked data right now.');
                 setSeasons([]);
             } finally {

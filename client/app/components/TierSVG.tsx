@@ -5,6 +5,22 @@ interface TierSVGProps {
     playerId: number;
 }
 
+interface TierRow {
+    ship_tier: number;
+    pvp_battles: number;
+    wins: number;
+    win_ratio: number;
+}
+
+const normalizeTierRows = (data: unknown): TierRow[] => {
+    if (Array.isArray(data)) {
+        return data as TierRow[];
+    }
+
+    console.warn('Unexpected tier data payload:', data);
+    return [];
+};
+
 const selectTierColorByWr = (winRatio: number): string => {
     if (winRatio > 0.65) return '#810c9e';
     if (winRatio >= 0.60) return '#D042F3';
@@ -25,116 +41,182 @@ const drawTierPlot = (playerId: number) => {
 
     d3.select(container).selectAll('*').remove();
 
-    const totalSvgWidth = 500;
+    const totalSvgWidth = Math.max(container.clientWidth || 0, 680);
     const totalSvgHeight = 334;
-    const tierSvgMargin = { top: 44, right: 20, bottom: 50, left: 70 };
-    const svgWidth = totalSvgWidth - tierSvgMargin.left - tierSvgMargin.right;
-    const svgHeight = totalSvgHeight - tierSvgMargin.top - tierSvgMargin.bottom;
+    const margin = { top: 28, right: 96, bottom: 48, left: 68 };
+    const width = totalSvgWidth - margin.left - margin.right;
+    const height = totalSvgHeight - margin.top - margin.bottom;
 
-    const svg = d3.select('#tier_svg_container')
+    const svgRoot = d3.select(container)
         .append('svg')
         .attr('width', totalSvgWidth)
-        .attr('height', totalSvgHeight)
+        .attr('height', totalSvgHeight);
+
+    const svg = svgRoot
         .append('g')
-        .attr('transform', `translate(${tierSvgMargin.left}, ${tierSvgMargin.top})`);
+        .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    const path = `http://localhost:8888/api/fetch/tier_data/${playerId}`;
+    fetch(`http://localhost:8888/api/fetch/tier_data/${playerId}`)
+        .then((response) => response.json())
+        .then((data: unknown) => {
+            const rows = normalizeTierRows(data).sort((left, right) => right.ship_tier - left.ship_tier);
+            if (rows.length === 0) {
+                return;
+            }
 
-    const showTierDetails = (datum: { pvp_battles: number; wins: number }) => {
-        const detailX = 480;
-        const detailY = 26;
-        const winPercentage = ((datum.wins / datum.pvp_battles) * 100).toFixed(2);
-
-        const detailGroup = d3.select('#tier_svg_container').select('svg').append('g')
-            .classed('details', true);
-
-        detailGroup.append('text')
-            .attr('x', detailX)
-            .attr('y', detailY)
-            .style('font-size', '12px')
-            .attr('text-anchor', 'end')
-            .attr('font-weight', '700')
-            .text(`${datum.pvp_battles} Battles • ${winPercentage}% Win Rate`);
-    };
-
-    const hideTierDetails = () => {
-        d3.select('#tier_svg_container').select('.details').remove();
-    };
-
-    fetch(path)
-        .then(response => response.json())
-        .then(data => {
-            const max = d3.max(data, (datum: any) => +datum.pvp_battles);
-
-            svg.selectAll('*').remove();
-
+            const maxBattles = Math.max(d3.max(rows, (datum: TierRow) => datum.pvp_battles) || 0, 10);
             const x = d3.scaleLinear()
-                .domain([0, max])
-                .range([1, svgWidth]);
-            svg.append('g')
-                .attr('transform', `translate(0, ${svgHeight})`)
-                .call(d3.axisBottom(x))
-                .selectAll('text')
-                .attr('transform', 'translate(-10,0)rotate(-45)')
-                .style('text-anchor', 'end');
+                .domain([0, maxBattles * 1.08])
+                .range([0, width]);
 
             const y = d3.scaleBand()
-                .range([0, svgHeight])
-                .domain(data.map((datum: any) => datum.ship_tier))
-                .padding(.1);
+                .range([0, height])
+                .domain(rows.map((datum: TierRow) => String(datum.ship_tier)))
+                .padding(0.08);
+
             svg.append('g')
-                .call(d3.axisLeft(y));
+                .attr('class', 'tier-grid')
+                .attr('transform', `translate(0, ${height})`)
+                .call(d3.axisBottom(x).ticks(6).tickSize(-height).tickFormat(() => ''));
+
+            svg.select('.tier-grid')?.select('.domain')?.remove();
+            svg.selectAll('.tier-grid line')
+                .style('stroke', '#e2e8f0')
+                .style('stroke-width', 1);
+
+            svg.append('g')
+                .attr('transform', `translate(0, ${height})`)
+                .style('color', '#64748b')
+                .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => d3.format(',')(Number(value))).tickSizeOuter(0))
+                .selectAll('text')
+                .style('font-size', '10px');
+
+            svg.append('g')
+                .style('color', '#475569')
+                .call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+                .selectAll('text')
+                .style('font-size', '10px')
+                .style('font-weight', '500');
+
+            svg.selectAll('.domain').style('stroke', '#cbd5e1');
 
             svg.append('text')
-                .attr('x', svgWidth)
-                .attr('y', svgHeight + 44)
+                .attr('x', width)
+                .attr('y', height + 38)
                 .attr('text-anchor', 'end')
                 .style('font-size', '10px')
-                .style('fill', '#6b7280')
-                .text('Random Battles');
+                .style('fill', '#64748b')
+                .text('Random battles');
 
-            svg.append('text')
-                .attr('transform', 'rotate(-90)')
-                .attr('x', -2)
-                .attr('y', -52)
-                .attr('text-anchor', 'end')
-                .style('font-size', '10px')
-                .style('fill', '#6b7280')
-                .text('Ship Tier');
+            const detailGroup = svgRoot.append('g').attr('transform', `translate(${margin.left + width - 6}, 16)`);
 
-            const rectNodes = svg.selectAll('.rect')
-                .data(data)
+            const renderDetails = (datum: TierRow | null) => {
+                detailGroup.selectAll('*').remove();
+                if (!datum) {
+                    return;
+                }
+
+                const detailText = detailGroup.append('text')
+                    .attr('x', 0)
+                    .attr('y', 0)
+                    .attr('text-anchor', 'end')
+                    .attr('dominant-baseline', 'hanging');
+
+                detailText.append('tspan')
+                    .style('font-size', '11px')
+                    .style('font-weight', '700')
+                    .style('fill', '#084594')
+                    .text(`Tier ${datum.ship_tier}`);
+
+                detailText.append('tspan')
+                    .style('font-size', '10px')
+                    .style('font-weight', '400')
+                    .style('fill', '#94a3b8')
+                    .text('  •  ');
+
+                detailText.append('tspan')
+                    .style('font-size', '10px')
+                    .style('font-weight', '400')
+                    .style('fill', '#475569')
+                    .text(`${datum.pvp_battles.toLocaleString()} battles`);
+
+                detailText.append('tspan')
+                    .style('font-size', '10px')
+                    .style('font-weight', '400')
+                    .style('fill', '#94a3b8')
+                    .text('  •  ');
+
+                detailText.append('tspan')
+                    .style('font-size', '10px')
+                    .style('font-weight', '400')
+                    .style('fill', '#475569')
+                    .text(`${datum.wins.toLocaleString()} wins`);
+
+                detailText.append('tspan')
+                    .style('font-size', '10px')
+                    .style('font-weight', '400')
+                    .style('fill', '#94a3b8')
+                    .text('  •  ');
+
+                detailText.append('tspan')
+                    .style('font-size', '10px')
+                    .style('font-weight', '700')
+                    .style('fill', '#475569')
+                    .text(`${(datum.win_ratio * 100).toFixed(1)}% win rate`);
+            };
+
+            const rowNodes = svg.selectAll('.tier-row')
+                .data(rows)
                 .enter()
                 .append('g')
-                .classed('rect', true);
+                .classed('tier-row', true);
 
-            rectNodes.append('rect')
-                .attr('x', x(0))
-                .attr('y', (datum: any) => (y(datum.ship_tier) ?? 0) + 3)
-                .attr('width', (datum: any) => x(datum.pvp_battles))
-                .attr('height', y.bandwidth() * .7)
-                .attr('fill', '#d9d9d9');
+            rowNodes.append('rect')
+                .attr('x', 0)
+                .attr('y', (datum: TierRow) => (y(String(datum.ship_tier)) ?? 0) + (y.bandwidth() * 0.1))
+                .attr('width', (datum: TierRow) => x(datum.pvp_battles))
+                .attr('height', y.bandwidth() * 0.88)
+                .attr('rx', 3)
+                .attr('fill', '#dbe4f0');
 
-            rectNodes.append('rect')
-                .attr('x', x(0))
-                .attr('y', (datum: any) => y(datum.ship_tier) ?? 0)
-                .attr('width', (datum: any) => x(datum.wins))
+            rowNodes.append('rect')
+                .attr('x', 0)
+                .attr('y', (datum: TierRow) => y(String(datum.ship_tier)) ?? 0)
+                .attr('width', (datum: TierRow) => x(datum.wins))
                 .attr('height', y.bandwidth())
-                .style('stroke', '#444')
-                .style('stroke-width', 0.75)
-                .attr('fill', (datum: any) => selectTierColorByWr(datum.win_ratio))
-                .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: any) {
-                    showTierDetails(datum);
-                    d3.select(this).transition()
-                        .duration(50)
-                        .attr('fill', '#bcbddc');
+                .attr('rx', 3)
+                .style('stroke', '#334155')
+                .style('stroke-width', 0.7)
+                .attr('fill', (datum: TierRow) => selectTierColorByWr(datum.win_ratio))
+                .on('mouseover', function (this: SVGRectElement, _event: MouseEvent, datum: TierRow) {
+                    renderDetails(datum);
+                    d3.select(this)
+                        .transition()
+                        .duration(70)
+                        .attr('opacity', 0.82);
                 })
-                .on('mouseout', function (this: SVGRectElement, _event: MouseEvent, datum: any) {
-                    hideTierDetails();
-                    d3.select(this).transition()
-                        .duration(50)
-                        .attr('fill', selectTierColorByWr(datum.win_ratio));
+                .on('mouseout', function (this: SVGRectElement) {
+                    d3.select(this)
+                        .transition()
+                        .duration(70)
+                        .attr('opacity', 1);
                 });
+
+            rowNodes.append('text')
+                .attr('x', (datum: TierRow) => {
+                    const labelX = x(datum.pvp_battles) + 6;
+                    return labelX > width - 4 ? width - 4 : labelX;
+                })
+                .attr('y', (datum: TierRow) => (y(String(datum.ship_tier)) ?? 0) + (y.bandwidth() / 2) + 3)
+                .style('font-size', '10px')
+                .style('fill', '#64748b')
+                .attr('text-anchor', (datum: TierRow) => (x(datum.pvp_battles) + 6 > width - 4 ? 'end' : 'start'))
+                .text((datum: TierRow) => `${(datum.win_ratio * 100).toFixed(1)}%`);
+
+            renderDetails(rows[0]);
+        })
+        .catch((error) => {
+            console.error('Error fetching tier data:', error);
         });
 };
 

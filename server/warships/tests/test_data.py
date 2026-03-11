@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -153,6 +153,43 @@ class RandomsDataRefreshTests(TestCase):
         self.assertEqual(
             player.randoms_json[0]["ship_chart_name"], "Adm. Graf Spee")
 
+    @patch("warships.data._fetch_ship_info")
+    @patch("warships.data._fetch_ship_stats_for_player")
+    def test_update_battle_data_keeps_rows_when_ship_metadata_is_missing(
+        self,
+        mock_fetch_ship_stats_for_player,
+        mock_fetch_ship_info,
+    ):
+        player = Player.objects.create(
+            name="ShipFallbackUser",
+            player_id=4461,
+            pvp_battles=20,
+        )
+        mock_fetch_ship_stats_for_player.return_value = [
+            {
+                "ship_id": 999001,
+                "battles": 20,
+                "distance": 1000,
+                "pvp": {
+                    "battles": 20,
+                    "wins": 12,
+                    "losses": 8,
+                    "frags": 18,
+                },
+            },
+        ]
+        mock_fetch_ship_info.return_value = None
+
+        update_battle_data(player.player_id)
+        player.refresh_from_db()
+
+        self.assertEqual(len(player.battles_json), 1)
+        self.assertEqual(player.battles_json[0]["ship_id"], 999001)
+        self.assertEqual(
+            player.battles_json[0]["ship_name"], "Unknown Ship 999001")
+        self.assertEqual(player.battles_json[0]["ship_type"], "Unknown")
+        self.assertEqual(player.battles_json[0]["ship_tier"], 0)
+
 
 class AggregateChartDataTests(TestCase):
     def test_update_tiers_data_aggregates_without_pandas(self):
@@ -276,11 +313,15 @@ class RankedDataRefreshTests(TestCase):
 
 class PlayerDataHardeningTests(TestCase):
     def test_compute_player_verdict_uses_new_playstyle_bands(self):
+        self.assertEqual(compute_player_verdict(500, 65.0, 34.0), "Sealord")
+        self.assertEqual(compute_player_verdict(500, 64.8, 34.0), "Assassin")
         self.assertEqual(compute_player_verdict(500, 60.0, 34.0), "Assassin")
-        self.assertEqual(compute_player_verdict(500, 64.8, 28.0), "Assassin")
         self.assertEqual(compute_player_verdict(500, 57.1, 35.0), "Warrior")
         self.assertEqual(compute_player_verdict(500, 55.0, 35.0), "Stalwart")
         self.assertEqual(compute_player_verdict(500, 54.2, 28.0), "Daredevil")
+        self.assertEqual(compute_player_verdict(500, 50.0, 35.0), "Survivor")
+        self.assertEqual(compute_player_verdict(500, 50.0, 24.0), "Potato")
+        self.assertEqual(compute_player_verdict(500, 51.0, 35.0), "Flotsam")
         self.assertEqual(compute_player_verdict(500, 41.0, 24.0), "Hot Potato")
         self.assertEqual(compute_player_verdict(500, 42.0, 24.0), "Potato")
 
@@ -398,6 +439,41 @@ class PlayerDataHardeningTests(TestCase):
 
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_assigns_sealord_playstyle_at_super_unicum_threshold(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+    ):
+        player = Player.objects.create(
+            name="SealordCandidate",
+            player_id=9293,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 9293,
+            "nickname": "SealordCandidate",
+            "hidden_profile": False,
+            "statistics": {
+                "battles": 2200,
+                "pvp": {
+                    "battles": 2000,
+                    "wins": 1300,
+                    "losses": 700,
+                    "survived_battles": 700,
+                    "survived_wins": 450,
+                },
+            },
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.pvp_ratio, 65.0)
+        self.assertEqual(player.verdict, "Sealord")
+
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
     def test_update_player_data_assigns_stalwart_for_good_non_warrior_band(
         self,
         mock_fetch_player_personal_data,
@@ -430,6 +506,41 @@ class PlayerDataHardeningTests(TestCase):
         player.refresh_from_db()
         self.assertEqual(player.pvp_ratio, 55.0)
         self.assertEqual(player.verdict, "Stalwart")
+
+    @patch("warships.data._fetch_clan_membership_for_player")
+    @patch("warships.data._fetch_player_personal_data")
+    def test_update_player_data_assigns_survivor_to_average_stable_players(
+        self,
+        mock_fetch_player_personal_data,
+        mock_fetch_clan_membership,
+    ):
+        player = Player.objects.create(
+            name="AverageCandidate",
+            player_id=9394,
+            last_fetch=timezone.now() - timedelta(days=2),
+        )
+        mock_fetch_player_personal_data.return_value = {
+            "account_id": 9394,
+            "nickname": "AverageCandidate",
+            "hidden_profile": False,
+            "statistics": {
+                "battles": 1200,
+                "pvp": {
+                    "battles": 1000,
+                    "wins": 500,
+                    "losses": 500,
+                    "survived_battles": 360,
+                    "survived_wins": 180,
+                },
+            },
+        }
+        mock_fetch_clan_membership.return_value = {}
+
+        update_player_data(player, force_refresh=True)
+
+        player.refresh_from_db()
+        self.assertEqual(player.pvp_ratio, 50.0)
+        self.assertEqual(player.verdict, "Survivor")
 
 
 class PlayerExplorerSummaryTests(TestCase):
@@ -464,6 +575,7 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.wins_last_29_days, 4)
         self.assertEqual(summary.active_days_last_29_days, 2)
         self.assertEqual(summary.kill_ratio, 0.0)
+        self.assertEqual(summary.player_score, 3.16)
         self.assertEqual(summary.ships_played_total, 2)
         self.assertEqual(summary.ship_type_spread, 2)
         self.assertEqual(summary.tier_spread, 2)
@@ -487,8 +599,83 @@ class PlayerExplorerSummaryTests(TestCase):
 
         summary = refresh_player_explorer_summary(player)
 
-        self.assertEqual(summary.kill_ratio, 0.83)
+        self.assertEqual(summary.kill_ratio, 0.78)
+        self.assertEqual(summary.player_score, 1.89)
         self.assertEqual(summary.ships_played_total, 2)
+
+    def test_refresh_player_explorer_summary_heavily_discounts_low_tier_kill_ratio(self):
+        player = Player.objects.create(
+            name="ExplorerTierWeightedCaptain",
+            player_id=9916,
+            is_hidden=False,
+            pvp_battles=120,
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 3, "pvp_battles": 100, "kdr": 2.5},
+                {"ship_name": "Ship B", "ship_type": "Cruiser",
+                    "ship_tier": 10, "pvp_battles": 20, "kdr": 1.1},
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertEqual(summary.kill_ratio, 1.29)
+        self.assertEqual(summary.player_score, 1.91)
+
+    def test_refresh_player_explorer_summary_crushes_low_tier_farmed_scores(self):
+        player = Player.objects.create(
+            name="ExplorerLowTierFarmer",
+            player_id=9919,
+            is_hidden=False,
+            total_battles=34161,
+            pvp_battles=28873,
+            pvp_ratio=86.79,
+            pvp_survival_rate=78.33,
+            days_since_last_battle=0,
+            activity_json=[
+                {"date": "2026-03-09", "battles": 8, "wins": 7},
+                {"date": "2026-03-10", "battles": 6, "wins": 5},
+            ],
+            battles_json=[
+                {"ship_name": "Ship T1", "ship_type": "Cruiser",
+                    "ship_tier": 1, "pvp_battles": 28508, "kdr": 2.4},
+                {"ship_name": "Ship T5", "ship_type": "Cruiser",
+                    "ship_tier": 5, "pvp_battles": 106, "kdr": 1.4},
+                {"ship_name": "Ship T4", "ship_type": "Cruiser",
+                    "ship_tier": 4, "pvp_battles": 117, "kdr": 1.0},
+                {"ship_name": "Ship T3", "ship_type": "Cruiser",
+                    "ship_tier": 3, "pvp_battles": 88, "kdr": 0.9},
+                {"ship_name": "Ship T2", "ship_type": "Cruiser",
+                    "ship_tier": 2, "pvp_battles": 54, "kdr": 0.9},
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertLess(summary.player_score, 3.2)
+        self.assertGreater(summary.player_score, 2.5)
+
+    def test_refresh_player_explorer_summary_caps_dormant_accounts_below_one(self):
+        player = Player.objects.create(
+            name="DormantScoreCaptain",
+            player_id=9917,
+            is_hidden=False,
+            total_battles=12000,
+            pvp_battles=9200,
+            pvp_ratio=59.4,
+            pvp_survival_rate=41.0,
+            days_since_last_battle=500,
+            activity_json=[],
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 90, "kdr": 1.6},
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertGreater(summary.player_score, 0)
+        self.assertLess(summary.player_score, 1)
 
     def test_fetch_player_explorer_rows_refreshes_stale_battle_metrics(self):
         player = Player.objects.create(
@@ -509,14 +696,15 @@ class PlayerExplorerSummaryTests(TestCase):
             kill_ratio=None,
         )
 
-        rows = fetch_player_explorer_rows(query="ExplorerStaleSummary", hidden="visible")
+        rows = fetch_player_explorer_rows(
+            query="ExplorerStaleSummary", hidden="visible")
 
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["kill_ratio"], 0.83)
+        self.assertEqual(rows[0]["kill_ratio"], 0.78)
         self.assertEqual(rows[0]["ships_played_total"], 2)
 
         summary = PlayerExplorerSummary.objects.get(player=player)
-        self.assertEqual(summary.kill_ratio, 0.83)
+        self.assertEqual(summary.kill_ratio, 0.78)
         self.assertEqual(summary.ships_played_total, 2)
 
     def test_update_player_data_hidden_profile_clears_denormalized_summary_values(self):
@@ -614,8 +802,36 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(player.pvp_ratio, 62.0)
         self.assertEqual(player.verdict, "Assassin")
 
+    def test_clan_crawl_save_player_assigns_sealord_to_absolute_top_end_players(self):
+        clan = Clan.objects.create(clan_id=9918, name="SealordClan", tag="SC")
+
+        save_player(
+            {
+                "account_id": 9918,
+                "nickname": "SealordCrawler",
+                "created_at": int((timezone.now() - timedelta(days=700)).timestamp()),
+                "last_battle_time": int((timezone.now() - timedelta(days=1)).timestamp()),
+                "hidden_profile": False,
+                "statistics": {
+                    "battles": 5000,
+                    "pvp": {
+                        "battles": 4200,
+                        "wins": 2730,
+                        "losses": 1470,
+                        "survived_battles": 1300,
+                    },
+                },
+            },
+            clan,
+        )
+
+        player = Player.objects.get(player_id=9918)
+        self.assertEqual(player.pvp_ratio, 65.0)
+        self.assertEqual(player.verdict, "Sealord")
+
     def test_clan_crawl_save_player_assigns_hot_potato_to_bottom_shelf_players(self):
-        clan = Clan.objects.create(clan_id=9917, name="HotPotatoClan", tag="HP")
+        clan = Clan.objects.create(
+            clan_id=9917, name="HotPotatoClan", tag="HP")
 
         save_player(
             {

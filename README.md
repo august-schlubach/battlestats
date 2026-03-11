@@ -28,6 +28,38 @@ python manage.py run_agent_graph "add API caching around player detail fetch" --
 
 the current graph is a guarded workflow with planning, implementation notes, tool-boundary checks, verification gates, retry routing, and run summary.
 
+## agentic bootstrap (crewai)
+
+the repo now also includes a CrewAI adapter that turns the existing role markdown files under `agents/` into a runnable crew plan.
+
+from `server/`, dry-run the crew without calling a live model:
+
+```bash
+python manage.py run_agent_crew "plan CrewAI integration" --dry-run --json
+```
+
+or use the standalone script:
+
+```bash
+python scripts/run_agent_crew.py "plan CrewAI integration" --dry-run --json
+```
+
+when a model is configured, CrewAI can run in hierarchical mode with the current persona set:
+
+```bash
+CREWAI_LLM=gpt-4o-mini python manage.py run_agent_crew \
+	"design a ranked-player workflow rollout" \
+	--process hierarchical
+```
+
+see `agents/runbooks/runbook-crewai-integration.md` for the integration plan, persona mapping, rollout guidance, and validation steps.
+
+for automatic engine selection across LangGraph, CrewAI, and hybrid execution:
+
+```bash
+python scripts/run_agent_workflow.py "plan and implement CrewAI integration" --engine auto --json
+```
+
 when Postgres settings are available, the graph now uses durable Postgres checkpoints instead of in-memory-only state. you can pin a run to a durable thread with `--workflow-id`:
 
 ```bash

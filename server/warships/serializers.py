@@ -1,11 +1,14 @@
 from rest_framework import serializers
 from .models import Player, Clan, Ship
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, build_player_summary
 
 
 class PlayerSerializer(serializers.ModelSerializer):
     clan_name = serializers.SerializerMethodField()
     clan_id = serializers.SerializerMethodField()
     clan_tag = serializers.SerializerMethodField()
+    kill_ratio = serializers.SerializerMethodField()
+    player_score = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -19,6 +22,20 @@ class PlayerSerializer(serializers.ModelSerializer):
 
     def get_clan_tag(self, obj):
         return obj.clan.tag if obj.clan else None
+
+    def get_kill_ratio(self, obj):
+        explorer_summary = getattr(obj, 'explorer_summary', None)
+        if explorer_summary is not None and explorer_summary.kill_ratio is not None:
+            return explorer_summary.kill_ratio
+
+        return _calculate_player_kill_ratio(_coerce_battle_rows(obj.battles_json))
+
+    def get_player_score(self, obj):
+        explorer_summary = getattr(obj, 'explorer_summary', None)
+        if explorer_summary is not None and explorer_summary.player_score is not None:
+            return explorer_summary.player_score
+
+        return build_player_summary(obj, use_cached_summary=False).get('player_score')
 
 
 class ClanSerializer(serializers.ModelSerializer):
@@ -120,6 +137,7 @@ class ClanBattleSeasonSummarySerializer(serializers.Serializer):
 
 class PlayerSummarySerializer(serializers.Serializer):
     kill_ratio = serializers.FloatField(allow_null=True)
+    player_score = serializers.FloatField(allow_null=True)
     player_id = serializers.IntegerField()
     name = serializers.CharField()
     is_hidden = serializers.BooleanField()
@@ -197,8 +215,40 @@ class PlayerCorrelationDistributionSerializer(serializers.Serializer):
     trend = PlayerCorrelationTrendPointSerializer(many=True)
 
 
+class PlayerTierTypeTileSerializer(serializers.Serializer):
+    ship_type = serializers.CharField()
+    ship_tier = serializers.IntegerField()
+    count = serializers.IntegerField()
+
+
+class PlayerTierTypeTrendSerializer(serializers.Serializer):
+    ship_type = serializers.CharField()
+    avg_tier = serializers.FloatField()
+    count = serializers.IntegerField()
+
+
+class PlayerTierTypeCellSerializer(serializers.Serializer):
+    ship_type = serializers.CharField()
+    ship_tier = serializers.IntegerField()
+    pvp_battles = serializers.IntegerField()
+    wins = serializers.IntegerField()
+    win_ratio = serializers.FloatField()
+
+
+class PlayerTierTypeCorrelationSerializer(serializers.Serializer):
+    metric = serializers.CharField()
+    label = serializers.CharField()
+    x_label = serializers.CharField()
+    y_label = serializers.CharField()
+    tracked_population = serializers.IntegerField()
+    tiles = PlayerTierTypeTileSerializer(many=True)
+    trend = PlayerTierTypeTrendSerializer(many=True)
+    player_cells = PlayerTierTypeCellSerializer(many=True)
+
+
 class PlayerExplorerRowSerializer(serializers.Serializer):
     kill_ratio = serializers.FloatField(allow_null=True)
+    player_score = serializers.FloatField(allow_null=True)
     pvp_survival_rate = serializers.FloatField(allow_null=True)
     name = serializers.CharField()
     player_id = serializers.IntegerField()
