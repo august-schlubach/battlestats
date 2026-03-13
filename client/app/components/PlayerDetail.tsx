@@ -324,7 +324,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     )}
                 </div>
             </div>
-            <div className="mt-8 border-t border-[#c6dbef] pt-5">
+            <div className="mt-8 pt-5">
                 <button
                     type="button"
                     onClick={onBack}

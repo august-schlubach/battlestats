@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 
-type D3Selection = ReturnType<typeof d3.select>;
+type SvgGroupSelection = ReturnType<typeof d3.select>;
 
 interface TierTypeHeatmapSVGProps {
     playerId: number;
@@ -58,52 +58,6 @@ const buildShipTypeOrderMap = (): Map<string, number> => {
     return new Map(SHIP_TYPE_ORDER.map((label, index) => [label, index]));
 };
 
-const formatTrendDelta = (delta: number | null): string => {
-    if (delta == null) {
-        return 'Type trend unavailable';
-    }
-
-    if (Math.abs(delta) < 0.15) {
-        return 'Aligned with type trend';
-    }
-
-    const direction = delta > 0 ? 'above' : 'below';
-    return `${Math.abs(delta).toFixed(1)} tiers ${direction} type trend`;
-};
-
-const renderTextCard = (group: D3Selection, lines: Array<{ text: string; fill: string; weight?: string; size?: string }>) => {
-    const text = group.append('text')
-        .attr('x', 0)
-        .attr('y', 0)
-        .attr('text-anchor', 'end')
-        .attr('dominant-baseline', 'hanging');
-
-    lines.forEach((line, index) => {
-        text.append('tspan')
-            .attr('x', 0)
-            .attr('dy', index === 0 ? 0 : 14)
-            .style('font-size', line.size ?? '10px')
-            .style('font-weight', line.weight ?? '400')
-            .style('fill', line.fill)
-            .text(line.text);
-    });
-
-    const node = text.node();
-    if (!node) {
-        return;
-    }
-
-    const box = node.getBBox();
-    group.insert('rect', 'text')
-        .attr('x', box.x - 8)
-        .attr('y', box.y - 5)
-        .attr('width', box.width + 16)
-        .attr('height', box.height + 10)
-        .attr('rx', 5)
-        .attr('fill', 'rgba(255, 255, 255, 0.95)')
-        .attr('stroke', '#cbd5e1');
-};
-
 const drawMessage = (containerElement: HTMLDivElement, message: string, svgWidth: number, svgHeight: number) => {
     const container = d3.select(containerElement);
     container.selectAll('*').remove();
@@ -148,6 +102,68 @@ const normalizeTiers = (payload: TierTypePayload): number[] => {
     return [...tiers].sort((left, right) => right - left);
 };
 
+const renderSummaryCard = (
+    summaryGroup: SvgGroupSelection,
+    tile: TierTypeTile,
+    playerCell: TierTypePlayerCell | undefined,
+    trendDelta: number | null,
+) => {
+    const columns = [0, 106, 208, 330];
+    const headers = ['Type', 'Population', 'Player', 'Trend'];
+    const values = [
+        {
+            text: `${tile.ship_type} T${tile.ship_tier}`,
+            fill: '#084594',
+            weight: '700',
+        },
+        {
+            text: tile.count.toLocaleString(),
+            fill: '#475569',
+            weight: '600',
+        },
+        {
+            text: playerCell
+                ? `${playerCell.pvp_battles.toLocaleString()} @ ${(playerCell.win_ratio * 100).toFixed(1)}%`
+                : 'No battles in cell',
+            fill: playerCell ? selectColorByWR(playerCell.win_ratio) : '#64748b',
+            weight: playerCell ? '700' : '400',
+        },
+        {
+            text: trendDelta == null
+                ? 'Unavailable'
+                : Math.abs(trendDelta) < 0.15
+                    ? 'Aligned'
+                    : `${Math.abs(trendDelta).toFixed(1)} ${trendDelta > 0 ? 'above' : 'below'}`,
+            fill: trendDelta == null ? '#64748b' : (trendDelta >= 0 ? '#166534' : '#991b1b'),
+            weight: '600',
+        },
+    ];
+
+    headers.forEach((header, index) => {
+        summaryGroup.append('text')
+            .attr('x', columns[index])
+            .attr('y', 0)
+            .attr('text-anchor', 'start')
+            .attr('dominant-baseline', 'hanging')
+            .style('font-size', '9px')
+            .style('font-weight', '600')
+            .style('fill', '#64748b')
+            .text(header);
+    });
+
+    values.forEach((value, index) => {
+        summaryGroup.append('text')
+            .attr('x', columns[index])
+            .attr('y', 14)
+            .attr('text-anchor', 'start')
+            .attr('dominant-baseline', 'hanging')
+            .style('font-size', '10px')
+            .style('font-weight', value.weight)
+            .style('fill', value.fill)
+            .text(value.text);
+    });
+};
+
 const drawChart = (
     containerElement: HTMLDivElement,
     payload: TierTypePayload,
@@ -171,7 +187,7 @@ const drawChart = (
         return;
     }
 
-    const margin = { top: 56, right: 84, bottom: 42, left: 64 };
+    const margin = { top: 62, right: 18, bottom: 42, left: 42 };
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
     const container = d3.select(containerElement);
@@ -253,25 +269,7 @@ const drawChart = (
         .text(payload.x_label);
 
     const summaryGroup = svgRoot.append('g')
-        .attr('transform', `translate(${margin.left + width - 16}, 12)`);
-
-    const legendGroup = svgRoot.append('g')
-        .attr('transform', `translate(${margin.left}, 12)`);
-
-    legendGroup.append('circle')
-        .attr('cx', 5)
-        .attr('cy', 10)
-        .attr('r', 5)
-        .attr('fill', '#084594')
-        .attr('stroke', '#ffffff')
-        .attr('stroke-width', 1.4);
-
-    legendGroup.append('text')
-        .attr('x', 17)
-        .attr('y', 14)
-        .style('font-size', '10px')
-        .style('fill', '#475569')
-        .text('Circle size = player battles');
+        .attr('transform', `translate(${margin.left + 6}, 28)`);
 
     const renderSummary = (tile: TierTypeTile) => {
         summaryGroup.selectAll('*').remove();
@@ -280,18 +278,7 @@ const drawChart = (
         const trendPoint = trendByType.get(tile.ship_type);
         const trendDelta = trendPoint ? tile.ship_tier - trendPoint.avg_tier : null;
 
-        renderTextCard(summaryGroup, [
-            { text: `${tile.ship_type} • Tier ${tile.ship_tier}`, fill: '#084594', weight: '700', size: '11px' },
-            { text: `${tile.count.toLocaleString()} tracked battles`, fill: '#475569' },
-            {
-                text: playerCell
-                    ? `Player: ${playerCell.pvp_battles.toLocaleString()} battles • ${(playerCell.win_ratio * 100).toFixed(1)}% WR`
-                    : 'Player: no battles in this cell',
-                fill: playerCell ? selectColorByWR(playerCell.win_ratio) : '#64748b',
-                weight: playerCell ? '700' : '400',
-            },
-            { text: formatTrendDelta(trendDelta), fill: trendDelta == null ? '#64748b' : (trendDelta >= 0 ? '#166534' : '#991b1b') },
-        ]);
+        renderSummaryCard(summaryGroup, tile, playerCell, trendDelta);
     };
 
     const tileNodes = svg.selectAll('.tier-type-tile')
@@ -319,8 +306,14 @@ const drawChart = (
         });
 
     const trendLine = d3.line()
-        .x((row: TierTypeTrendPoint) => (x(row.ship_type) ?? 0) + (x.bandwidth() / 2))
-        .y((row: TierTypeTrendPoint) => yTrend(row.avg_tier))
+        .x((row: unknown) => {
+            const point = row as TierTypeTrendPoint;
+            return (x(point.ship_type) ?? 0) + (x.bandwidth() / 2);
+        })
+        .y((row: unknown) => {
+            const point = row as TierTypeTrendPoint;
+            return yTrend(point.avg_tier);
+        })
         .curve(d3.curveMonotoneX);
 
     svg.append('path')
@@ -393,11 +386,11 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
                     return;
                 }
 
-                const resolvedSvgWidth = containerElement.clientWidth || svgWidth;
+                const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
                 drawChart(containerElement, payload, resolvedSvgWidth, svgHeight);
             } catch {
                 if (!abortController.signal.aborted) {
-                    const resolvedSvgWidth = containerElement.clientWidth || svgWidth;
+                    const resolvedSvgWidth = Math.min(svgWidth, Math.max(containerElement.clientWidth || svgWidth, 320));
                     drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolvedSvgWidth, 112);
                 }
             }
@@ -407,7 +400,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
         return () => abortController.abort();
     }, [playerId, svgHeight, svgWidth]);
 
-    return <div ref={containerRef} className="w-full"></div>;
+    return <div ref={containerRef} className="w-full" />;
 };
 
 export default TierTypeHeatmapSVG;

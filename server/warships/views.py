@@ -2,7 +2,7 @@ import logging
 import random
 from datetime import timedelta
 from django.core.cache import cache
-from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField
+from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField, Count, Q
 from django.db.models.functions import Cast
 from django.http import Http404
 from rest_framework import generics, permissions, viewsets
@@ -486,6 +486,8 @@ def landing_clans(request) -> Response:
         qs = Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
             total_wins=Sum('player__pvp_wins'),
             total_battles=Sum('player__pvp_battles'),
+            active_members=Count('player', filter=Q(
+                player__days_since_last_battle__lte=30)),
         ).annotate(
             clan_wr=Case(
                 When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
@@ -494,11 +496,11 @@ def landing_clans(request) -> Response:
                 output_field=FloatField(),
             ),
         ).values(
-            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
+            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
         ).order_by(F('last_lookup').desc(nulls_last=True))
         return _prioritize_landing_clans(list(qs))
 
-    data = cache.get_or_set('landing:clans', _fetch_landing_clans, 60)
+    data = cache.get_or_set('landing:clans:v2', _fetch_landing_clans, 60)
     return Response(data)
 
 

@@ -35,6 +35,19 @@ interface HeatmapTile {
     count: number;
 }
 
+const expandDomain = (minValue: number, maxValue: number, paddingRatio: number, floor?: number, ceiling?: number): [number, number] => {
+    const span = Math.max(maxValue - minValue, 1);
+    const padding = span * paddingRatio;
+    const paddedMin = floor == null ? minValue - padding : Math.max(floor, minValue - padding);
+    const paddedMax = ceiling == null ? maxValue + padding : Math.min(ceiling, maxValue + padding);
+
+    if (paddedMin === paddedMax) {
+        return [paddedMin - 1, paddedMax + 1];
+    }
+
+    return [paddedMin, paddedMax];
+};
+
 const selectLandingClanColorByWR = (winRatio: number): string => {
     if (winRatio > 65) return '#810c9e';
     if (winRatio >= 60) return '#D042F3';
@@ -51,15 +64,17 @@ const formatCompactCount = (value: number): string => d3.format('~s')(value).rep
 
 const buildHeatmapTiles = (
     plotData: PlotDatum[],
+    xMin: number,
     xMax: number,
+    yMin: number,
     yMax: number,
     width: number,
     height: number,
 ): HeatmapTile[] => {
     const xBinCount = Math.max(6, Math.min(12, Math.round(width / 72)));
     const yBinCount = Math.max(5, Math.min(10, Math.round(height / 34)));
-    const xStep = xMax / xBinCount;
-    const yStep = yMax / yBinCount;
+    const xStep = (xMax - xMin) / xBinCount;
+    const yStep = (yMax - yMin) / yBinCount;
 
     if (xStep <= 0 || yStep <= 0) {
         return [];
@@ -67,8 +82,8 @@ const buildHeatmapTiles = (
 
     const counts = new Map<string, number>();
     plotData.forEach((datum) => {
-        const xIndex = Math.min(xBinCount - 1, Math.floor(datum.total_battles / xStep));
-        const yIndex = Math.min(yBinCount - 1, Math.floor(datum.total_wins / yStep));
+        const xIndex = Math.min(xBinCount - 1, Math.max(0, Math.floor((datum.clan_wr - xMin) / xStep)));
+        const yIndex = Math.min(yBinCount - 1, Math.max(0, Math.floor((datum.total_battles - yMin) / yStep)));
         const key = `${xIndex}:${yIndex}`;
         counts.set(key, (counts.get(key) || 0) + 1);
     });
@@ -78,14 +93,14 @@ const buildHeatmapTiles = (
         const [xIndexRaw, yIndexRaw] = key.split(':');
         const xIndex = Number(xIndexRaw);
         const yIndex = Number(yIndexRaw);
-        const xMin = xIndex * xStep;
-        const xMaxValue = xIndex === xBinCount - 1 ? xMax : (xIndex + 1) * xStep;
-        const yMin = yIndex * yStep;
-        const yMaxValue = yIndex === yBinCount - 1 ? yMax : (yIndex + 1) * yStep;
+        const tileXMin = xMin + (xIndex * xStep);
+        const xMaxValue = xIndex === xBinCount - 1 ? xMax : xMin + ((xIndex + 1) * xStep);
+        const tileYMin = yMin + (yIndex * yStep);
+        const yMaxValue = yIndex === yBinCount - 1 ? yMax : yMin + ((yIndex + 1) * yStep);
         tiles.push({
-            x_min: xMin,
+            x_min: tileXMin,
             x_max: xMaxValue,
-            y_min: yMin,
+            y_min: tileYMin,
             y_max: yMaxValue,
             count,
         });
@@ -146,16 +161,19 @@ const drawLandingClanChart = (
         return;
     }
 
-    const xMax = Math.max((d3.max(heatmapData, (datum: PlotDatum) => datum.total_battles) || 0) * 1.05, 10);
-    const yMax = Math.max((d3.max(heatmapData, (datum: PlotDatum) => datum.total_wins) || 0) * 1.08, 10);
-    const heatmapTiles = buildHeatmapTiles(heatmapData, xMax, yMax, width, height);
+    const extentSource = plotData.length > 0 ? plotData : heatmapData;
+    const wrExtent = d3.extent(extentSource, (datum: PlotDatum) => datum.clan_wr) as [number, number];
+    const battlesExtent = d3.extent(extentSource, (datum: PlotDatum) => datum.total_battles) as [number, number];
+    const [xMin, xMax] = expandDomain(wrExtent[0], wrExtent[1], 0.08, 0, 100);
+    const [yMin, yMax] = expandDomain(battlesExtent[0], battlesExtent[1], 0.1, 0);
+    const heatmapTiles = buildHeatmapTiles(heatmapData, xMin, xMax, yMin, yMax, width, height);
     const maxTileCount = d3.max(heatmapTiles, (tile: HeatmapTile) => tile.count) || 1;
     const tileOpacity = d3.scaleSqrt()
         .domain([0, maxTileCount])
         .range([0.08, 0.82]);
 
-    const x = d3.scaleLinear().domain([0, xMax]).range([0, width]);
-    const y = d3.scaleLinear().domain([0, yMax]).range([height, 0]);
+    const x = d3.scaleLinear().domain([xMin, xMax]).range([0, width]);
+    const y = d3.scaleLinear().domain([yMin, yMax]).range([height, 0]);
 
     svg.append('g')
         .attr('class', 'landing-clan-x-grid')
@@ -189,7 +207,7 @@ const drawLandingClanChart = (
     svg.append('g')
         .attr('transform', `translate(0, ${height})`)
         .style('color', '#64748b')
-        .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => formatCompactCount(value)).tickSizeOuter(0))
+        .call(d3.axisBottom(x).ticks(6).tickFormat((value: number) => `${value.toFixed(0)}%`).tickSizeOuter(0))
         .selectAll('text')
         .style('font-size', '10px');
 
@@ -206,7 +224,7 @@ const drawLandingClanChart = (
         .attr('text-anchor', 'middle')
         .attr('x', width / 2)
         .attr('y', height + 30)
-        .text('Clan Battles Played');
+        .text('Clan WR');
 
     svg.append('text')
         .attr('class', 'axisLabel')
@@ -216,7 +234,7 @@ const drawLandingClanChart = (
         .attr('transform', 'rotate(-90)')
         .attr('x', -height / 2)
         .attr('y', -34)
-        .text('Clan Wins');
+        .text('Total Battles Played');
 
     const summaryGroup = svgRoot
         .append('g')
@@ -304,8 +322,8 @@ const drawLandingClanChart = (
         .data(plotData)
         .enter()
         .append('circle')
-        .attr('cx', (datum: PlotDatum) => x(datum.total_battles))
-        .attr('cy', (datum: PlotDatum) => y(datum.total_wins))
+        .attr('cx', (datum: PlotDatum) => x(datum.clan_wr))
+        .attr('cy', (datum: PlotDatum) => y(datum.total_battles))
         .attr('r', 5)
         .style('cursor', onSelectClan ? 'pointer' : 'default')
         .attr('fill', (datum: PlotDatum) => selectLandingClanColorByWR(datum.clan_wr))

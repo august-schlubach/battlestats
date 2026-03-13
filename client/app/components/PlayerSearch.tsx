@@ -11,6 +11,7 @@ interface LandingClan {
     members_count: number;
     clan_wr: number | null;
     total_battles: number | null;
+    active_members?: number | null;
 }
 
 interface LandingPlayer {
@@ -120,12 +121,16 @@ const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./Play
 });
 
 const LANDING_LIMIT = 40;
+const BEST_CLAN_MIN_TOTAL_BATTLES = 100000;
+const BEST_CLAN_MIN_ACTIVE_SHARE = 0.3;
 const SEARCH_SUGGESTION_LIMIT = 8;
 const SEARCH_DEBOUNCE_MS = 180;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SEARCH_SUGGESTIONS_ID = 'player-search-suggestions';
 const SHOW_PLAYER_EXPLORER = false;
+
+type LandingClanMode = 'random' | 'best';
 
 const isAbortError = (error: unknown): boolean => {
     return error instanceof DOMException && error.name === 'AbortError';
@@ -141,6 +146,7 @@ const PlayerSearch: React.FC = () => {
     const [error, setError] = useState('');
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
     const [clans, setClans] = useState<LandingClan[]>([]);
+    const [clanMode, setClanMode] = useState<LandingClanMode>('random');
     const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
@@ -309,7 +315,37 @@ const PlayerSearch: React.FC = () => {
         }
     };
 
-    const visibleLandingClans = useMemo(() => clans.slice(0, LANDING_LIMIT), [clans]);
+    const visibleLandingClans = useMemo(() => {
+        if (clanMode === 'best') {
+            return [...clans]
+                .filter((clan) => {
+                    if ((clan.total_battles ?? 0) < BEST_CLAN_MIN_TOTAL_BATTLES) {
+                        return false;
+                    }
+
+                    const activeMembers = clan.active_members ?? 0;
+                    return (activeMembers / Math.max(clan.members_count, 1)) >= BEST_CLAN_MIN_ACTIVE_SHARE;
+                })
+                .sort((left, right) => {
+                    const leftWr = left.clan_wr ?? Number.NEGATIVE_INFINITY;
+                    const rightWr = right.clan_wr ?? Number.NEGATIVE_INFINITY;
+                    if (rightWr !== leftWr) {
+                        return rightWr - leftWr;
+                    }
+
+                    const leftBattles = left.total_battles ?? Number.NEGATIVE_INFINITY;
+                    const rightBattles = right.total_battles ?? Number.NEGATIVE_INFINITY;
+                    if (rightBattles !== leftBattles) {
+                        return rightBattles - leftBattles;
+                    }
+
+                    return left.name.localeCompare(right.name);
+                })
+                .slice(0, LANDING_LIMIT);
+        }
+
+        return clans.slice(0, LANDING_LIMIT);
+    }, [clanMode, clans]);
 
     const handleSelectMember = async (memberName: string) => {
         setSearchTerm(memberName);
@@ -517,7 +553,24 @@ const PlayerSearch: React.FC = () => {
 
                     {clans.length > 0 && (
                         <div className={`${landingActivity ? 'mt-8 border-t border-[#c6dbef] pt-6' : 'mt-8 pt-6'}`}>
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Some Active Clans</h3>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setClanMode('random')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'random' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    aria-pressed={clanMode === 'random'}
+                                >
+                                    Random
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setClanMode('best')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${clanMode === 'best' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    aria-pressed={clanMode === 'best'}
+                                >
+                                    Best
+                                </button>
+                            </div>
                             <div className="mt-3">
                                 <LandingClanSVG
                                     clans={visibleLandingClans}
@@ -530,11 +583,12 @@ const PlayerSearch: React.FC = () => {
                                     <button
                                         key={clan.clan_id}
                                         onClick={() => handleSelectClan(clan)}
-                                        className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                        className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                                        style={{ color: wrColor(clan.clan_wr) }}
                                         aria-label={`Show clan ${clan.name}`}
                                     >
-                                        <span style={{ color: wrColor(clan.clan_wr) }} aria-hidden="true">{"\u25C8"}</span>
-                                        [{clan.tag}] {clan.name}
+                                        <span className="text-[#6baed6]" aria-hidden="true">{"\u25C8"}</span>
+                                        [{clan.tag || '---'}]
                                     </button>
                                 ))}
                             </p>
@@ -546,11 +600,12 @@ const PlayerSearch: React.FC = () => {
                                         <button
                                             key={`recent-clan-${clan.clan_id}`}
                                             onClick={() => handleSelectClan(clan)}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                            className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                                            style={{ color: wrColor(clan.clan_wr) }}
                                             aria-label={`Show recent clan ${clan.name}`}
                                         >
-                                            <span style={{ color: wrColor(clan.clan_wr) }} aria-hidden="true">{"\u25C8"}</span>
-                                            [{clan.tag}] {clan.name}
+                                            <span className="text-[#6baed6]" aria-hidden="true">{"\u25C8"}</span>
+                                            [{clan.tag || '---'}]
                                         </button>
                                     ))}
                                 </p>
@@ -568,7 +623,8 @@ const PlayerSearch: React.FC = () => {
                                     player.is_hidden ? (
                                         <span
                                             key={player.name}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#6baed6]"
+                                            className="mr-3 inline-flex items-center gap-1 font-medium"
+                                            style={{ color: wrColor(player.pvp_ratio) }}
                                             aria-label={`${player.name} has hidden stats`}
                                         >
                                             <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
@@ -578,7 +634,8 @@ const PlayerSearch: React.FC = () => {
                                         <button
                                             key={player.name}
                                             onClick={() => handleSelectMember(player.name)}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                            className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                                            style={{ color: wrColor(player.pvp_ratio) }}
                                             aria-label={`Show player ${player.name}`}
                                         >
                                             <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
@@ -595,7 +652,8 @@ const PlayerSearch: React.FC = () => {
                                         <button
                                             key={`recent-${player.name}`}
                                             onClick={() => handleSelectMember(player.name)}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                            className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                                            style={{ color: wrColor(player.pvp_ratio) }}
                                             aria-label={`Show recent player ${player.name}`}
                                         >
                                             <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
