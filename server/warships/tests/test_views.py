@@ -38,6 +38,66 @@ class PlayerViewSetTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         player.refresh_from_db()
+        self.assertIsNotNone(player.last_lookup)
+        self.assertLess(
+            abs((timezone.now() - player.last_lookup).total_seconds()), 5)
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_lookup_invalidates_recent_players_cache(
+        self,
+        _mock_update_player_task,
+        _mock_update_clan_task,
+        _mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=953,
+            name="CacheClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        Player.objects.create(
+            name="CacheLookupPlayer",
+            player_id=9053,
+            clan=clan,
+            last_fetch=now,
+            last_lookup=None,
+        )
+        cache.set('landing:recent_players:last_lookup',
+                  [{'name': 'stale'}], 60)
+
+        response = self.client.get("/api/player/CacheLookupPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(cache.get('landing:recent_players:last_lookup'))
+
+    def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
+        cache.clear()
+        clan = Clan.objects.create(
+            clan_id=952,
+            name="RecentClanLookup",
+            tag="RCL",
+            members_count=1,
+            last_lookup=None,
+        )
+        Player.objects.create(
+            name="RecentClanMember",
+            player_id=9052,
+            clan=clan,
+            pvp_ratio=55.0,
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/952/")
+
+        self.assertEqual(response.status_code, 200)
+        clan.refresh_from_db()
+        self.assertIsNotNone(clan.last_lookup)
+        self.assertLess(
+            abs((timezone.now() - clan.last_lookup).total_seconds()), 5,
+        )
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -636,7 +696,7 @@ class ApiContractTests(TestCase):
             ["LandingHighScore", "LandingLowScore", "LandingNoScore"],
         )
 
-    def test_landing_recent_players_orders_recent_slice_by_player_score_desc(self):
+    def test_landing_recent_players_orders_by_last_lookup_desc(self):
         cache.clear()
         now = timezone.now()
         recent_high = Player.objects.create(
@@ -667,7 +727,46 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [row["name"] for row in response.json()[:3]],
-            ["RecentHighScore", "RecentLowScore", "RecentNoScore"],
+            ["RecentNoScore", "RecentLowScore", "RecentHighScore"],
+        )
+
+    def test_landing_recent_clans_orders_by_last_lookup_desc(self):
+        cache.clear()
+        now = timezone.now()
+        old_clan = Clan.objects.create(
+            clan_id=5401,
+            name="OlderClan",
+            tag="OLD",
+            members_count=40,
+            last_lookup=now - timedelta(hours=2),
+        )
+        mid_clan = Clan.objects.create(
+            clan_id=5402,
+            name="MidClan",
+            tag="MID",
+            members_count=35,
+            last_lookup=now - timedelta(minutes=30),
+        )
+        new_clan = Clan.objects.create(
+            clan_id=5403,
+            name="NewestClan",
+            tag="NEW",
+            members_count=32,
+            last_lookup=now - timedelta(minutes=5),
+        )
+        Player.objects.create(name="OldClanPlayer", player_id=6401,
+                              clan=old_clan, pvp_wins=55, pvp_battles=100)
+        Player.objects.create(name="MidClanPlayer", player_id=6402,
+                              clan=mid_clan, pvp_wins=60, pvp_battles=100)
+        Player.objects.create(name="NewClanPlayer", player_id=6403,
+                              clan=new_clan, pvp_wins=65, pvp_battles=100)
+
+        response = self.client.get("/api/landing/recent-clans/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:3]],
+            ["NewestClan", "MidClan", "OlderClan"],
         )
 
     def test_player_summary_returns_derived_metrics(self):
@@ -1189,7 +1288,7 @@ class ApiThrottleTests(TestCase):
                          PUBLIC_API_THROTTLES)
 
     def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
-        cache.delete('landing:recent_players')
+        cache.delete('landing:recent_players:last_lookup')
         now = timezone.now()
 
         for index in range(45):
@@ -1206,6 +1305,26 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(len(payload), 40)
         self.assertEqual(payload[0]["name"], "RecentPlayer0")
         self.assertEqual(payload[39]["name"], "RecentPlayer39")
+
+    def test_landing_recent_clans_orders_by_last_lookup_desc_and_limits_to_40(self):
+        cache.delete('landing:recent_clans:last_lookup')
+        now = timezone.now()
+
+        for index in range(45):
+            Clan.objects.create(
+                clan_id=20000 + index,
+                name=f"RecentClan{index}",
+                tag=f"R{index}",
+                last_lookup=now - timedelta(minutes=index),
+            )
+
+        response = self.client.get("/api/landing/recent-clans/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 40)
+        self.assertEqual(payload[0]["name"], "RecentClan0")
+        self.assertEqual(payload[39]["name"], "RecentClan39")
 
     def test_clan_data_rejects_invalid_filter_type(self):
         response = self.client.get("/api/fetch/clan_data/42:invalid")

@@ -19,6 +19,36 @@ interface LandingPlayer {
     is_hidden?: boolean;
 }
 
+interface LandingActivityAttritionMonth {
+    month: string;
+    total_players: number;
+    active_players: number;
+    cooling_players: number;
+    dormant_players: number;
+    active_share: number;
+}
+
+interface LandingActivityAttritionSummary {
+    latest_month: string;
+    population_signal: 'growing' | 'stable' | 'shrinking';
+    signal_delta_pct: number | null;
+    recent_active_avg: number;
+    prior_active_avg: number;
+    recent_new_avg: number;
+    prior_new_avg: number;
+    months_compared: number;
+}
+
+interface LandingActivityAttritionData {
+    metric: 'landing_activity_attrition';
+    label: string;
+    x_label: string;
+    y_label: string;
+    tracked_population: number;
+    months: LandingActivityAttritionMonth[];
+    summary: LandingActivityAttritionSummary;
+}
+
 const wrColor = (r: number | null): string => {
     if (r == null) return '#c6dbef';
     if (r > 65) return '#810c9e';
@@ -76,6 +106,14 @@ const LandingClanSVG = dynamic(
     },
 );
 
+const LandingActivityAttritionSVG = dynamic(
+    () => resilientDynamicImport(() => import('./LandingActivityAttritionSVG'), 'LandingActivityAttritionSVG'),
+    {
+        ssr: false,
+        loading: () => <LoadingPanel label="Loading activity and attrition..." minHeight={360} />,
+    },
+);
+
 const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./PlayerExplorer'), 'PlayerExplorer'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading player explorer..." minHeight={360} />,
@@ -89,6 +127,10 @@ const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SEARCH_SUGGESTIONS_ID = 'player-search-suggestions';
 const SHOW_PLAYER_EXPLORER = false;
 
+const isAbortError = (error: unknown): boolean => {
+    return error instanceof DOMException && error.name === 'AbortError';
+};
+
 const PlayerSearch: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [searchSuggestions, setSearchSuggestions] = useState<LandingPlayer[]>([]);
@@ -99,19 +141,25 @@ const PlayerSearch: React.FC = () => {
     const [error, setError] = useState('');
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
     const [clans, setClans] = useState<LandingClan[]>([]);
+    const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
+    const [landingActivity, setLandingActivity] = useState<LandingActivityAttritionData | null>(null);
     const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
     const suggestionHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const fetchLandingData = useCallback(async () => {
         try {
-            const [clansRes, playersRes, recentRes] = await Promise.all([
+            const [activityRes, clansRes, recentClansRes, playersRes, recentRes] = await Promise.all([
+                fetch('http://localhost:8888/api/landing/activity-attrition/'),
                 fetch('http://localhost:8888/api/landing/clans/'),
+                fetch('http://localhost:8888/api/landing/recent-clans/'),
                 fetch('http://localhost:8888/api/landing/players/'),
                 fetch('http://localhost:8888/api/landing/recent/'),
             ]);
+            setLandingActivity(await activityRes.json());
             setClans(await clansRes.json());
+            setRecentClans(await recentClansRes.json());
             setPlayers(await playersRes.json());
             setRecentPlayers(await recentRes.json());
         } catch (err) {
@@ -157,24 +205,36 @@ const PlayerSearch: React.FC = () => {
             return;
         }
 
+        const controller = new AbortController();
+
         const timeoutId = setTimeout(async () => {
             try {
-                const response = await fetch(`http://localhost:8888/api/landing/player-suggestions/?q=${encodeURIComponent(trimmedSearch)}`);
+                const response = await fetch(`http://localhost:8888/api/landing/player-suggestions/?q=${encodeURIComponent(trimmedSearch)}`, {
+                    signal: controller.signal,
+                });
                 if (!response.ok) {
-                    throw new Error(`Failed to fetch suggestions for ${trimmedSearch}`);
+                    setSearchSuggestions([]);
+                    setHighlightedSuggestionIndex(-1);
+                    return;
                 }
 
                 const suggestions: LandingPlayer[] = await response.json();
                 setSearchSuggestions(suggestions.slice(0, SEARCH_SUGGESTION_LIMIT));
                 setHighlightedSuggestionIndex(suggestions.length > 0 ? 0 : -1);
             } catch (err) {
-                console.error('Error fetching player suggestions:', err);
+                if (isAbortError(err)) {
+                    return;
+                }
+
                 setSearchSuggestions([]);
                 setHighlightedSuggestionIndex(-1);
             }
         }, SEARCH_DEBOUNCE_MS);
 
-        return () => clearTimeout(timeoutId);
+        return () => {
+            clearTimeout(timeoutId);
+            controller.abort();
+        };
     }, [searchTerm]);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
@@ -446,9 +506,18 @@ const PlayerSearch: React.FC = () => {
                     </form>
                     {error && <p className="mt-2 text-red-600">{error}</p>}
 
-                    {clans.length > 0 && (
+                    {landingActivity ? (
                         <div className="mt-8 pt-6">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Clans</h3>
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Player Activity and Attrition</h3>
+                            <div className="mt-3">
+                                <LandingActivityAttritionSVG data={landingActivity} />
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {clans.length > 0 && (
+                        <div className={`${landingActivity ? 'mt-8 border-t border-[#c6dbef] pt-6' : 'mt-8 pt-6'}`}>
+                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Some Active Clans</h3>
                             <div className="mt-3">
                                 <LandingClanSVG
                                     clans={visibleLandingClans}
@@ -469,6 +538,25 @@ const PlayerSearch: React.FC = () => {
                                     </button>
                                 ))}
                             </p>
+
+                            <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed Clans</h3>
+                            {recentClans.length > 0 ? (
+                                <p className="mt-2 text-sm leading-7 text-[#4292c6]">
+                                    {recentClans.slice(0, LANDING_LIMIT).map((clan) => (
+                                        <button
+                                            key={`recent-clan-${clan.clan_id}`}
+                                            onClick={() => handleSelectClan(clan)}
+                                            className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                            aria-label={`Show recent clan ${clan.name}`}
+                                        >
+                                            <span style={{ color: wrColor(clan.clan_wr) }} aria-hidden="true">{"\u25C8"}</span>
+                                            [{clan.tag}] {clan.name}
+                                        </button>
+                                    ))}
+                                </p>
+                            ) : (
+                                <p className="mt-2 text-sm text-[#6baed6]">No recently viewed clans yet.</p>
+                            )}
                         </div>
                     )}
 

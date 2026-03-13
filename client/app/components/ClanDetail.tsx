@@ -25,12 +25,7 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
 
 const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 'ClanDetail-ClanSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading clan chart..." minHeight={400} />,
-});
-
-const ClanActivityHistogram = dynamic(() => resilientDynamicImport(() => import('./ClanActivityHistogram'), 'ClanDetail-ClanActivityHistogram'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading clan activity..." minHeight={240} />,
+    loading: () => <LoadingPanel label="Loading clan chart..." minHeight={440} />,
 });
 
 const ClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./ClanBattleSeasons'), 'ClanDetail-ClanBattleSeasons'), {
@@ -46,7 +41,7 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
     return (
         <div className="bg-white p-6">
-            <div className="mb-3 border-b border-gray-100 pb-3">
+            <div className="mb-3 pb-3">
                 <h1 className="text-3xl font-semibold tracking-tight text-gray-900">
                     [{clan.tag}] {clan.name}
                 </h1>
@@ -56,11 +51,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             </div>
 
             <div className="mt-4">
-                <ClanActivityHistogram clanId={clan.clan_id} memberCount={clan.members_count} />
-            </div>
-
-            <div className="mt-8 border-t border-gray-100 pt-6">
-                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={400} />
+                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} />
             </div>
 
             <DeferredSection

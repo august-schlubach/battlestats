@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import logging.config
 import socket
+import sys
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -126,8 +127,16 @@ CORS_ALLOWED_ORIGINS = [
 
 # ── Caching ──────────────────────────────────────────────
 REDIS_URL = os.getenv('REDIS_URL', '')
+RUNNING_TESTS = 'test' in sys.argv
 
-if REDIS_URL:
+if RUNNING_TESTS:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'TIMEOUT': 60,
+        }
+    }
+elif REDIS_URL:
     CACHES = {
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
@@ -162,7 +171,8 @@ DEFAULT_RENDERER_CLASSES = [
     'rest_framework.renderers.JSONRenderer',
 ]
 if DEBUG:
-    DEFAULT_RENDERER_CLASSES.append('rest_framework.renderers.BrowsableAPIRenderer')
+    DEFAULT_RENDERER_CLASSES.append(
+        'rest_framework.renderers.BrowsableAPIRenderer')
 
 LOGGING_CONFIG = None
 

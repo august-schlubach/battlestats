@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -655,6 +655,38 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertLess(summary.player_score, 3.2)
         self.assertGreater(summary.player_score, 2.5)
 
+    def test_inactivity_score_cap_accelerates_toward_requested_thresholds(self):
+        self.assertEqual(_inactivity_score_cap(1), 10.0)
+        self.assertEqual(_inactivity_score_cap(7), 10.0)
+        self.assertEqual(_inactivity_score_cap(8), 10.0)
+        self.assertEqual(_inactivity_score_cap(30), 9.61)
+        self.assertEqual(_inactivity_score_cap(90), 6.24)
+        self.assertEqual(_inactivity_score_cap(140), 3.09)
+        self.assertEqual(_inactivity_score_cap(180), 2.0)
+        self.assertEqual(_inactivity_score_cap(365), 1.0)
+        self.assertEqual(_inactivity_score_cap(500), 0.47)
+
+    def test_refresh_player_explorer_summary_caps_long_inactive_players_at_curve_ceiling(self):
+        player = Player.objects.create(
+            name="ExplorerInactiveCapCaptain",
+            player_id=9920,
+            is_hidden=False,
+            total_battles=12000,
+            pvp_battles=9200,
+            pvp_ratio=59.4,
+            pvp_survival_rate=41.0,
+            days_since_last_battle=140,
+            activity_json=[],
+            battles_json=[
+                {"ship_name": "Ship A", "ship_type": "Destroyer",
+                    "ship_tier": 10, "pvp_battles": 90, "kdr": 1.6},
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertEqual(summary.player_score, 3.09)
+
     def test_refresh_player_explorer_summary_caps_dormant_accounts_below_one(self):
         player = Player.objects.create(
             name="DormantScoreCaptain",
@@ -674,8 +706,7 @@ class PlayerExplorerSummaryTests(TestCase):
 
         summary = refresh_player_explorer_summary(player)
 
-        self.assertGreater(summary.player_score, 0)
-        self.assertLess(summary.player_score, 1)
+        self.assertEqual(summary.player_score, 0.47)
 
     def test_fetch_player_explorer_rows_refreshes_stale_battle_metrics(self):
         player = Player.objects.create(

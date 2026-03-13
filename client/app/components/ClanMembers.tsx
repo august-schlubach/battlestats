@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 interface ClanMembersProps {
     clanId: number;
     onSelectMember: (memberName: string) => void;
+    layout?: 'inline' | 'stacked';
 }
 
 interface ClanMemberData {
@@ -32,7 +33,7 @@ const formatRecency = (daysSinceLastBattle: number | null): string => {
     return `${daysSinceLastBattle} days idle`;
 };
 
-const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => {
+const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layout = 'inline' }) => {
     const [members, setMembers] = useState<ClanMemberData[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -59,12 +60,14 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => 
             {loading && <p className="text-sm text-gray-500">Syncing clan members...</p>}
             {!loading && members.length === 0 && <p className="text-sm text-gray-500">No clan members found.</p>}
             {!loading && members.length > 0 && (
-                <p className="mt-2 text-sm leading-7 text-[#4292c6]">
+                <div className={layout === 'stacked' ? 'mt-2 space-y-1 text-sm text-[#4292c6]' : 'mt-2 text-sm leading-7 text-[#4292c6]'}>
                     {members.map((member, index) => (
                         <React.Fragment key={member.name}>
                             {member.is_hidden ? (
                                 <span
-                                    className="mr-3 inline-flex items-center gap-1 font-medium text-gray-500"
+                                    className={layout === 'stacked'
+                                        ? 'flex items-center gap-1 font-medium text-gray-500'
+                                        : 'mr-3 inline-flex items-center gap-1 font-medium text-gray-500'}
                                     title={formatRecency(member.days_since_last_battle)}
                                 >
                                     <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
@@ -74,7 +77,9 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => 
                             ) : (
                                 <button
                                     onClick={() => onSelectMember(member.name)}
-                                    className="mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]"
+                                    className={layout === 'stacked'
+                                        ? 'flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]'
+                                        : 'mr-3 inline-flex items-center gap-1 font-medium text-[#084594] underline-offset-2 hover:underline hover:text-[#2171b5]'}
                                     aria-label={`Show player ${member.name}`}
                                     title={formatRecency(member.days_since_last_battle)}
                                 >
@@ -85,7 +90,7 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember }) => 
                             )}
                         </React.Fragment>
                     ))}
-                </p>
+                </div>
             )}
         </div>
     );

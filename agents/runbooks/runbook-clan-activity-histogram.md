@@ -1,12 +1,20 @@
-# Runbook: Clan Activity Histogram
+# Runbook: Integrated Clan Activity Filter Strip
 
 ## Goal
 
-Add a first-draft clan activity chart to the clan detail view so a roster's live core and dormant tail are visible at a glance.
+Add a clan activity filter strip inside the top of the clan scatterplot so roster activity and player performance can be read in the same graphic.
+
+This version must satisfy these explicit requirements:
+
+- build the activity view into the top of the clan chart rather than rendering a separate graphic above it
+- use a one-line activity strip ordered from `active now` on the left to `no recency` on the right
+- when hovering an activity section, keep matching player circles visible in color and fade the other circles to light grey
+- preserve the main point of the clan plot: see which players are active and where they sit in the battles-vs-win-rate field
+- keep the chart width aligned to the `900px` clan chart width
 
 ## Product Framing
 
-The clan page already shows battle volume and win rate, but those views can flatter a dead roster. This chart answers a different question:
+The clan page already shows battle volume and win rate, but those views can flatter a dead roster. The integrated strip answers a different question:
 
 - how many members are still playing now
 - how many are cooling off
@@ -18,7 +26,7 @@ It uses the field the product already stores reliably for each player:
 
 ## Chart Design
 
-The first draft is a compact histogram of current inactivity bands.
+The first draft is a compact one-line activity strip embedded at the top of the scatterplot.
 
 - `0-7d`: active now
 - `8-30d`: still warm
@@ -27,16 +35,26 @@ The first draft is a compact histogram of current inactivity bands.
 - `181d+`: gone dark
 - `unknown`: recency unavailable
 
-Bar height is roster count.
+The full strip always represents `100%` of clan members. Each segment represents that inactivity band's share of the visible roster.
 
-Hover detail shows the roster slice and the average win rate for that inactivity band. That keeps the main view clean while still letting the user inspect whether the active core is also the strong core.
+Segments must appear in this fixed order:
+
+- `active now`
+- `still warm`
+- `cooling`
+- `dormant`
+- `gone dark`
+- `no recency`
+
+Hover detail shows the roster slice. More importantly, hover changes the scatterplot itself: matching players stay visible in color while the rest fade to light grey. That makes activity immediately legible in the same spatial field as performance.
 
 ## Design Principles
 
-- Keep the chart compact and comparison-first.
-- Use direct bucket labels instead of decorative framing.
+- Keep the activity strip and scatterplot in one visual system so one informs the other.
+- Use the strip as an interaction surface, not as a second independent chart.
+- Keep the left-to-right ordering fixed from most active to least known.
 - Let color encode recency severity, not ornament.
-- Keep support text outside the plotting area.
+- Keep support text and hover details light so the scatterplot remains the main field of attention.
 - Avoid pretending we have a full clan activity time series when we only have current recency.
 
 ## API Contract
@@ -62,9 +80,7 @@ Additional fields used by the chart:
 ## Files
 
 - `agents/designer.md`
-- `server/warships/serializers.py`
-- `server/warships/tests/test_views.py`
-- `client/app/components/ClanActivityHistogram.tsx`
+- `client/app/components/ClanSVG.tsx`
 - `client/app/components/ClanDetail.tsx`
 - `client/app/components/ClanMembers.tsx`
 
@@ -75,10 +91,12 @@ Additional fields used by the chart:
 2. Run the client build:
    - `cd client && npm run build`
 3. Manual UI check on a populated clan:
-   - verify the activity chart renders above the existing scatterplot
-   - verify hover text matches the names and counts in each inactivity band
+   - verify the activity strip renders inside the top of the clan chart, not as a separate panel
+   - verify the segments appear left-to-right from `active now` through `no recency`
+   - verify hovering a segment keeps matching players visible in color
+   - verify non-matching players fade to light grey instead of competing visually
+   - verify the filtered points still show their relative battles and win-rate positions clearly
    - verify member pills show recency text in the roster list
-   - verify the chart still reads on narrow widths without clipping
 
 ## Risks
 
@@ -89,5 +107,4 @@ Additional fields used by the chart:
 ## Non-Goals
 
 - Do not infer a true monthly clan-retention history from current player records.
-- Do not replace the existing clan scatterplot in this pass.
 - Do not redesign the clan members section beyond exposing recency clearly.

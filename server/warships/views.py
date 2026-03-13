@@ -17,15 +17,22 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, \
-    PlayerTierTypeCorrelationSerializer
+    PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
-    fetch_player_tier_type_correlation, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data
+    fetch_player_tier_type_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _record_clan_lookup(clan: Clan) -> None:
+    clan.last_lookup = timezone.now()
+    clan.save(update_fields=["last_lookup"])
+    cache.delete('landing:clans')
+    cache.delete('landing:recent_clans:last_lookup')
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
@@ -117,7 +124,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 update_fields.append("verdict")
 
         obj.save(update_fields=update_fields)
-        cache.delete('landing:recent_players')
+        cache.delete('landing:recent_players:last_lookup')
 
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)
@@ -166,10 +173,7 @@ class ClanViewSet(viewsets.ModelViewSet):
 
     def get_object(self):
         obj = super().get_object()
-        now = timezone.now()
-        obj.last_lookup = now
-        obj.save(update_fields=["last_lookup"])
-        cache.delete('landing:clans')
+        _record_clan_lookup(obj)
         return obj
 
 
@@ -411,6 +415,8 @@ def clan_members(request, clan_id: str) -> Response:
     except Clan.DoesNotExist:
         return Response([])
 
+    _record_clan_lookup(clan)
+
     from warships.data import update_clan_data, update_clan_members
     if not clan.members_count:
         update_clan_data(clan_id=clan_id)
@@ -441,6 +447,10 @@ def clan_data(request, clan_filter: str) -> Response:
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    clan = Clan.objects.filter(clan_id=clan_id).first()
+    if clan is not None:
+        _record_clan_lookup(clan)
+
     data = fetch_clan_plot_data(clan_id=clan_id, filter_type=filter_type)
     return _validated_list_response(data, ClanDataSerializer)
 
@@ -448,6 +458,10 @@ def clan_data(request, clan_filter: str) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def clan_battle_seasons(request, clan_id: str) -> Response:
+    clan = Clan.objects.filter(clan_id=clan_id).first()
+    if clan is not None:
+        _record_clan_lookup(clan)
+
     had_cached_summary = has_clan_battle_summary_cache(clan_id)
     data = fetch_clan_battle_seasons(clan_id)
     response = _validated_list_response(
@@ -456,6 +470,13 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
         response["X-Clan-Battles-Pending"] = "true"
 
     return response
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def landing_activity_attrition(request) -> Response:
+    data = fetch_landing_activity_attrition()
+    return _validated_single_response(data, LandingActivityAttritionSerializer)
 
 
 @api_view(["GET"])
@@ -483,6 +504,36 @@ def landing_clans(request) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def landing_recent_clans(request) -> Response:
+    def _fetch_recent_clans():
+        return list(
+            Clan.objects.exclude(name__isnull=True).exclude(name='').exclude(
+                last_lookup__isnull=True
+            ).annotate(
+                total_wins=Sum('player__pvp_wins'),
+                total_battles=Sum('player__pvp_battles'),
+            ).annotate(
+                clan_wr=Case(
+                    When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
+                    )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
+                    default=None,
+                    output_field=FloatField(),
+                ),
+            ).values(
+                'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
+            ).order_by(
+                F('last_lookup').desc(nulls_last=True),
+                'name',
+            )[:40]
+        )
+
+    data = cache.get_or_set(
+        'landing:recent_clans:last_lookup', _fetch_recent_clans, 60)
+    return Response(data)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def landing_players(request) -> Response:
     def _fetch_landing_players():
         return list(
@@ -501,22 +552,16 @@ def landing_players(request) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
     def _fetch_recent_players():
-        recent_player_ids = list(
+        return list(
             Player.objects.exclude(name='').exclude(
                 last_lookup__isnull=True
-            ).order_by(
+            ).values('name', 'pvp_ratio').order_by(
                 F('last_lookup').desc(nulls_last=True),
                 'name',
-            ).values_list('id', flat=True)[:LANDING_RECENT_PLAYER_SCORE_WINDOW]
-        )
-
-        return list(
-            Player.objects.filter(id__in=recent_player_ids).values('name', 'pvp_ratio').order_by(
-                * _player_score_ordering('last_lookup')
             )[:40]
         )
 
-    data = cache.get_or_set('landing:recent_players',
+    data = cache.get_or_set('landing:recent_players:last_lookup',
                             _fetch_recent_players, 60)
     return Response(data)
 

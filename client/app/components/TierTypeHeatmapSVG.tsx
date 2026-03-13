@@ -171,7 +171,7 @@ const drawChart = (
         return;
     }
 
-    const margin = { top: 56, right: 24, bottom: 42, left: 88 };
+    const margin = { top: 56, right: 84, bottom: 42, left: 64 };
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
     const container = d3.select(containerElement);
@@ -252,38 +252,14 @@ const drawChart = (
         .style('font-size', '10px')
         .text(payload.x_label);
 
-    svg.append('text')
-        .attr('transform', 'rotate(-90)')
-        .attr('x', -height / 2)
-        .attr('y', -58)
-        .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
-        .style('font-size', '10px')
-        .text(payload.y_label);
-
     const summaryGroup = svgRoot.append('g')
-        .attr('transform', `translate(${margin.left + width - 4}, 12)`);
+        .attr('transform', `translate(${margin.left + width - 16}, 12)`);
 
     const legendGroup = svgRoot.append('g')
         .attr('transform', `translate(${margin.left}, 12)`);
 
-    legendGroup.append('rect')
-        .attr('x', 0)
-        .attr('y', 4)
-        .attr('width', 12)
-        .attr('height', 12)
-        .attr('rx', 3)
-        .attr('fill', tileColor(maxTileCount * 0.8));
-
-    legendGroup.append('text')
-        .attr('x', 18)
-        .attr('y', 14)
-        .style('font-size', '10px')
-        .style('fill', '#475569')
-        .text('Darker tiles = more tracked battles');
-
     legendGroup.append('circle')
-        .attr('cx', 190)
+        .attr('cx', 5)
         .attr('cy', 10)
         .attr('r', 5)
         .attr('fill', '#084594')
@@ -291,7 +267,7 @@ const drawChart = (
         .attr('stroke-width', 1.4);
 
     legendGroup.append('text')
-        .attr('x', 202)
+        .attr('x', 17)
         .attr('y', 14)
         .style('font-size', '10px')
         .style('fill', '#475569')
@@ -417,10 +393,12 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
                     return;
                 }
 
-                drawChart(containerElement, payload, svgWidth, svgHeight);
+                const resolvedSvgWidth = containerElement.clientWidth || svgWidth;
+                drawChart(containerElement, payload, resolvedSvgWidth, svgHeight);
             } catch {
                 if (!abortController.signal.aborted) {
-                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', svgWidth, 112);
+                    const resolvedSvgWidth = containerElement.clientWidth || svgWidth;
+                    drawMessage(containerElement, 'Unable to load tier and ship-type heatmap.', resolvedSvgWidth, 112);
                 }
             }
         };
@@ -429,7 +407,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
         return () => abortController.abort();
     }, [playerId, svgHeight, svgWidth]);
 
-    return <div ref={containerRef}></div>;
+    return <div ref={containerRef} className="w-full"></div>;
 };
 
 export default TierTypeHeatmapSVG;

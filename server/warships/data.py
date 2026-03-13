@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Optional
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 import logging
 import math
 from django.core.cache import cache
+from django.db.models import Count, Q
+from django.db.models.functions import TruncMonth
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, build_ship_chart_name
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
@@ -33,9 +35,11 @@ PLAYER_SCORE_SURVIVAL_WEIGHT = 0.14
 PLAYER_SCORE_BATTLES_WEIGHT = 0.10
 PLAYER_SCORE_ACTIVITY_WEIGHT = 0.16
 PLAYER_SCORE_MAX = 10.0
+PLAYER_SCORE_INACTIVITY_GRACE_DAYS = 7
+PLAYER_SCORE_180_DAY_CAP = 2.0
+PLAYER_SCORE_365_DAY_CAP = 1.0
 PLAYER_SCORE_DORMANT_MIN = 0.05
-PLAYER_SCORE_DORMANT_MAX = 0.95
-PLAYER_SCORE_DORMANT_MULTIPLIER = 0.08
+PLAYER_SCORE_POST_YEAR_DECAY_DAYS = 180.0
 PLAYER_SCORE_ACTIVITY_SATURATION_BATTLES = 8.0
 PLAYER_SCORE_LOW_TIER_WEIGHT = 0.02
 PLAYER_SCORE_MID_TIER_WEIGHT = 0.60
@@ -448,6 +452,48 @@ def _fibonacci_activity_weight(day_age: int) -> float:
     return 0.08
 
 
+def _smoothstep(progress: float) -> float:
+    normalized = _clamp(progress, 0.0, 1.0)
+    return normalized * normalized * (3.0 - (2.0 * normalized))
+
+
+def _inactivity_score_cap(days_since_last_battle: Optional[int]) -> Optional[float]:
+    if days_since_last_battle is None:
+        return None
+
+    days = max(int(days_since_last_battle), 0)
+    if days <= PLAYER_SCORE_INACTIVITY_GRACE_DAYS:
+        return PLAYER_SCORE_MAX
+
+    if days <= 180:
+        progress = (days - PLAYER_SCORE_INACTIVITY_GRACE_DAYS) / \
+            (180.0 - PLAYER_SCORE_INACTIVITY_GRACE_DAYS)
+        return round(
+            PLAYER_SCORE_MAX -
+            ((PLAYER_SCORE_MAX - PLAYER_SCORE_180_DAY_CAP) * _smoothstep(progress)),
+            2,
+        )
+
+    if days <= 365:
+        progress = (days - 180) / 185.0
+        return round(
+            PLAYER_SCORE_180_DAY_CAP -
+            ((PLAYER_SCORE_180_DAY_CAP - PLAYER_SCORE_365_DAY_CAP)
+             * _smoothstep(progress)),
+            2,
+        )
+
+    overflow_days = days - 365
+    return round(
+        max(
+            PLAYER_SCORE_DORMANT_MIN,
+            PLAYER_SCORE_365_DAY_CAP *
+            math.exp(-overflow_days / PLAYER_SCORE_POST_YEAR_DECAY_DAYS),
+        ),
+        2,
+    )
+
+
 def _inactivity_activity_multiplier(days_since_last_battle: Optional[int]) -> float:
     if days_since_last_battle is None:
         return 1.0
@@ -540,8 +586,10 @@ def _calculate_player_score(
     score = round((weighted_sum / total_weight) * PLAYER_SCORE_MAX, 2)
     score = round(
         score * _calculate_competitive_tier_factor(battle_rows, total_battles), 2)
-    if days_since_last_battle is not None and days_since_last_battle > 365:
-        return round(_clamp(score * PLAYER_SCORE_DORMANT_MULTIPLIER, PLAYER_SCORE_DORMANT_MIN, PLAYER_SCORE_DORMANT_MAX), 2)
+
+    inactivity_cap = _inactivity_score_cap(days_since_last_battle)
+    if inactivity_cap is not None:
+        score = min(score, inactivity_cap)
 
     return score
 
@@ -1199,14 +1247,142 @@ PLAYER_TIER_TYPE_ORDER = {
     'Aircraft Carrier': 3,
     'Submarine': 4,
 }
+LANDING_ACTIVITY_ATTRITION_CACHE_TTL = 900
+LANDING_ACTIVITY_ATTRITION_MONTHS = 18
+LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW = 6
+LANDING_ACTIVITY_ACTIVE_DAYS = 30
+LANDING_ACTIVITY_COOLING_DAYS = 90
+
+
+def _shift_month_start(month_start: date, month_delta: int) -> date:
+    absolute_month = (month_start.year * 12) + \
+        month_start.month - 1 + month_delta
+    shifted_year = absolute_month // 12
+    shifted_month = (absolute_month % 12) + 1
+    return date(shifted_year, shifted_month, 1)
+
+
+def _classify_population_signal(recent_active_avg: float, prior_active_avg: float) -> tuple[str, Optional[float]]:
+    if prior_active_avg <= 0:
+        if recent_active_avg <= 0:
+            return 'stable', None
+        return 'growing', None
+
+    delta_pct = round(
+        ((recent_active_avg - prior_active_avg) / prior_active_avg) * 100, 1)
+    if delta_pct >= 8.0:
+        return 'growing', delta_pct
+    if delta_pct <= -8.0:
+        return 'shrinking', delta_pct
+    return 'stable', delta_pct
+
+
+def fetch_landing_activity_attrition() -> dict:
+    cache_key = 'landing:activity_attrition:v1'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    today = datetime.now(timezone.utc).date()
+    current_month_start = today.replace(day=1)
+    latest_complete_month = _shift_month_start(current_month_start, -1)
+    earliest_month = _shift_month_start(
+        latest_complete_month,
+        -(LANDING_ACTIVITY_ATTRITION_MONTHS - 1),
+    )
+
+    cohort_rows = list(
+        Player.objects.filter(
+            is_hidden=False,
+            creation_date__isnull=False,
+            creation_date__gte=earliest_month,
+            creation_date__lt=current_month_start,
+        ).annotate(
+            cohort_month=TruncMonth('creation_date'),
+        ).values('cohort_month').annotate(
+            total_players=Count('id'),
+            active_players=Count('id', filter=Q(
+                days_since_last_battle__lte=LANDING_ACTIVITY_ACTIVE_DAYS)),
+            cooling_players=Count(
+                'id',
+                filter=Q(
+                    days_since_last_battle__gt=LANDING_ACTIVITY_ACTIVE_DAYS,
+                    days_since_last_battle__lte=LANDING_ACTIVITY_COOLING_DAYS,
+                ),
+            ),
+            dormant_players=Count('id', filter=Q(
+                days_since_last_battle__gt=LANDING_ACTIVITY_COOLING_DAYS)),
+        ).order_by('cohort_month')
+    )
+
+    rows_by_month = {
+        row['cohort_month'].date(): row
+        for row in cohort_rows
+        if row.get('cohort_month') is not None
+    }
+
+    months = []
+    cursor = earliest_month
+    while cursor <= latest_complete_month:
+        row = rows_by_month.get(cursor, {})
+        total_players = int(row.get('total_players', 0) or 0)
+        active_players = int(row.get('active_players', 0) or 0)
+        cooling_players = int(row.get('cooling_players', 0) or 0)
+        dormant_players = int(row.get('dormant_players', 0) or 0)
+
+        months.append({
+            'month': cursor.isoformat(),
+            'total_players': total_players,
+            'active_players': active_players,
+            'cooling_players': cooling_players,
+            'dormant_players': dormant_players,
+            'active_share': round((active_players / total_players) * 100, 1) if total_players > 0 else 0.0,
+        })
+        cursor = _shift_month_start(cursor, 1)
+
+    recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    recent_active_avg = round(
+        sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
+    prior_active_avg = round(
+        sum(row['active_players'] for row in prior_window) / len(prior_window), 1) if prior_window else 0.0
+    recent_new_avg = round(
+        sum(row['total_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
+    prior_new_avg = round(
+        sum(row['total_players'] for row in prior_window) / len(prior_window), 1) if prior_window else 0.0
+    population_signal, signal_delta_pct = _classify_population_signal(
+        recent_active_avg,
+        prior_active_avg,
+    )
+
+    payload = {
+        'metric': 'landing_activity_attrition',
+        'label': 'Player Activity and Attrition',
+        'x_label': 'Account Creation Month',
+        'y_label': 'Players Observed',
+        'tracked_population': sum(row['total_players'] for row in months),
+        'months': months,
+        'summary': {
+            'latest_month': latest_complete_month.isoformat(),
+            'population_signal': population_signal,
+            'signal_delta_pct': signal_delta_pct,
+            'recent_active_avg': recent_active_avg,
+            'prior_active_avg': prior_active_avg,
+            'recent_new_avg': recent_new_avg,
+            'prior_new_avg': prior_new_avg,
+            'months_compared': LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW,
+        },
+    }
+    cache.set(cache_key, payload, LANDING_ACTIVITY_ATTRITION_CACHE_TTL)
+    return payload
 
 
 def _player_distribution_cache_key(metric: str) -> str:
-    return f'players:distribution:v1:{metric}'
+    return f'players:distribution:v2:{metric}'
 
 
 def _player_correlation_cache_key(metric: str) -> str:
-    return f'players:correlation:v1:{metric}'
+    return f'players:correlation:v2:{metric}'
 
 
 def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value_max: float, bin_width: float) -> list[dict]:
@@ -1379,7 +1555,8 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
             'win_ratio': round(wins / battles, 4) if battles > 0 else 0.0,
         })
 
-    player_cells.sort(key=lambda row: (-row['pvp_battles'], _tier_type_sort_key(row['ship_type'], row['ship_tier'])))
+    player_cells.sort(
+        key=lambda row: (-row['pvp_battles'], _tier_type_sort_key(row['ship_type'], row['ship_tier'])))
     return player_cells
 
 
@@ -1412,9 +1589,12 @@ def _fetch_player_tier_type_population_correlation() -> dict:
             ship_tier = int(row['ship_tier'])
             pvp_battles = int(row['pvp_battles'])
 
-            tile_counts[(ship_type, ship_tier)] = tile_counts.get((ship_type, ship_tier), 0) + pvp_battles
-            trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(ship_type, 0.0) + (ship_tier * pvp_battles)
-            trend_battles[ship_type] = trend_battles.get(ship_type, 0) + pvp_battles
+            tile_counts[(ship_type, ship_tier)] = tile_counts.get(
+                (ship_type, ship_tier), 0) + pvp_battles
+            trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(
+                ship_type, 0.0) + (ship_tier * pvp_battles)
+            trend_battles[ship_type] = trend_battles.get(
+                ship_type, 0) + pvp_battles
 
     tiles = [
         {

@@ -5,6 +5,7 @@ interface ClanActivityHistogramProps {
     clanId: number;
     memberCount: number;
     svgHeight?: number;
+    svgWidth?: number;
 }
 
 interface ClanMemberData {
@@ -28,6 +29,7 @@ interface ActivityBin {
     count: number;
     averageWinRate: number | null;
     averageDays: number | null;
+    shareOfRoster: number;
 }
 
 const BUCKET_ORDER: Array<{ key: ActivityBucketKey; label: string; subtitle: string; color: string }> = [
@@ -79,6 +81,7 @@ const buildBins = (members: ClanMemberData[]): ActivityBin[] => BUCKET_ORDER.map
         averageDays: membersWithDays.length > 0
             ? membersWithDays.reduce((sum, member) => sum + (member.days_since_last_battle || 0), 0) / membersWithDays.length
             : null,
+        shareOfRoster: members.length > 0 ? (bucketMembers.length / members.length) * 100 : 0,
     };
 });
 
@@ -115,7 +118,14 @@ const showDetails = (svgRoot: SvgRootSelection, bin: ActivityBin, totalMembers: 
         .style('fill', '#64748b')
         .text(memberPreview ? `${memberPreview}${overflow}` : 'No members in this band');
 
-    const nodes = [title.node(), meta.node(), names.node()].filter(Boolean) as SVGGraphicsElement[];
+    const averageDays = detailGroup.append('text')
+        .attr('x', 0)
+        .attr('y', 49)
+        .style('font-size', '10px')
+        .style('fill', '#64748b')
+        .text(bin.averageDays == null ? 'Average recency unavailable' : `${Math.round(bin.averageDays)} day average idle span`);
+
+    const nodes = [title.node(), meta.node(), names.node(), averageDays.node()].filter(Boolean) as SVGGraphicsElement[];
     const boxes = nodes.map((node) => node.getBBox());
     const minX = Math.min(...boxes.map((box) => box.x));
     const minY = Math.min(...boxes.map((box) => box.y));
@@ -132,7 +142,7 @@ const showDetails = (svgRoot: SvgRootSelection, bin: ActivityBin, totalMembers: 
 };
 
 const drawChart = (containerElement: HTMLDivElement, bins: ActivityBin[], totalMembers: number, containerWidth: number, svgHeight: number) => {
-    const margin = { top: 56, right: 16, bottom: 48, left: 42 };
+    const margin = { top: 10, right: 18, bottom: 34, left: 18 };
     const width = containerWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
     const container = d3.select(containerElement);
@@ -147,93 +157,73 @@ const drawChart = (containerElement: HTMLDivElement, bins: ActivityBin[], totalM
         .append('g')
         .attr('transform', `translate(${margin.left}, ${margin.top})`);
 
-    const visibleBins = bins.filter((bin) => bin.count > 0);
-    if (!visibleBins.length) {
+    if (!bins.length) {
         drawEmptyState(containerElement, 'No clan activity data available.', containerWidth, svgHeight);
         return;
     }
 
-    const x = d3.scaleBand()
-        .domain(visibleBins.map((bin: ActivityBin) => bin.key))
-        .range([0, width])
-        .paddingInner(0.22)
-        .paddingOuter(0.12);
+    const x = d3.scaleLinear()
+        .domain([0, 100])
+        .range([0, width]);
 
-    const maxCount = visibleBins.reduce((currentMax: number, bin: ActivityBin) => Math.max(currentMax, bin.count), 0);
+    const barHeight = Math.min(48, Math.max(34, height - 14));
+    const barY = Math.max(12, (height - barHeight) / 2);
 
-    const y = d3.scaleLinear()
-        .domain([0, maxCount || 1])
-        .nice()
-        .range([height, 0]);
+    let startShare = 0;
+    const segments = bins.map((bin: ActivityBin) => {
+        const segment = {
+            ...bin,
+            shareStart: startShare,
+            shareEnd: startShare + bin.shareOfRoster,
+        };
+        startShare = segment.shareEnd;
+        return segment;
+    });
 
     svg.append('g')
-        .call(d3.axisLeft(y).ticks(Math.min(5, totalMembers || 1)).tickSize(-width).tickFormat(() => ''));
-    svg.selectAll('.tick line')
-        .style('stroke', '#e2e8f0');
-    svg.selectAll('.domain').remove();
+        .attr('class', 'clan-activity-grid')
+        .attr('transform', `translate(0, ${barY + barHeight})`)
+        .call(d3.axisBottom(x).tickValues([0, 20, 40, 60, 80, 100]).tickSize(8).tickFormat(() => ''));
+    svg.select('.clan-activity-grid')?.select('.domain')?.remove();
+    svg.selectAll('.clan-activity-grid line')
+        .style('stroke', '#e2e8f0')
+        .style('stroke-width', 1);
 
     svg.append('g')
+        .attr('transform', `translate(0, ${barY + barHeight + 8})`)
         .style('color', '#64748b')
-        .call(d3.axisLeft(y).ticks(Math.min(5, totalMembers || 1)).tickSizeOuter(0));
+        .call(d3.axisBottom(x).tickValues([0, 20, 40, 60, 80, 100]).tickFormat((value: number) => `${value}%`).tickSizeOuter(0))
+        .selectAll('text')
+        .style('font-size', '10px');
 
-    svg.append('g')
-        .attr('transform', `translate(0, ${height})`)
-        .style('color', '#64748b')
-        .call(d3.axisBottom(x).tickFormat((value: string) => {
-            const matched = visibleBins.find((bin: ActivityBin) => bin.key === value);
-            return matched ? matched.label : String(value);
-        }).tickSizeOuter(0));
+    svg.append('rect')
+        .attr('x', 0)
+        .attr('y', barY)
+        .attr('width', width)
+        .attr('height', barHeight)
+        .attr('rx', 5)
+        .attr('fill', '#f8fafc')
+        .attr('stroke', '#e2e8f0')
+        .attr('stroke-width', 1);
 
-    svg.append('text')
-        .attr('x', width / 2)
-        .attr('y', height + 36)
-        .attr('text-anchor', 'middle')
-        .style('fill', '#64748b')
-        .style('font-size', '10px')
-        .text('Days Since Last Battle');
-
-    const barGroups = svg.append('g')
-        .selectAll('g')
-        .data(visibleBins)
+    const row = svg.append('g')
+        .selectAll('rect')
+        .data(segments)
         .enter()
-        .append('g');
-
-    barGroups.append('rect')
-        .attr('x', (bin: ActivityBin) => x(bin.key) || 0)
-        .attr('y', (bin: ActivityBin) => y(bin.count))
-        .attr('width', x.bandwidth())
-        .attr('height', (bin: ActivityBin) => height - y(bin.count))
-        .attr('rx', 4)
-        .attr('fill', (bin: ActivityBin) => bin.color)
-        .on('mouseover', (_event: MouseEvent, bin: ActivityBin) => showDetails(svgRoot, bin, totalMembers))
+        .append('rect')
+        .attr('x', (segment: ActivityBin & { shareStart: number }) => x(segment.shareStart))
+        .attr('y', barY)
+        .attr('width', (segment: ActivityBin & { shareStart: number; shareEnd: number }) => Math.max(0, x(segment.shareEnd) - x(segment.shareStart)))
+        .attr('height', barHeight)
+        .attr('fill', (segment: ActivityBin) => segment.color)
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 1)
+        .style('cursor', 'default')
+        .on('mouseover', (_event: MouseEvent, segment: ActivityBin) => showDetails(svgRoot, segment, totalMembers))
         .on('mouseout', () => svgRoot.select('.clan-activity-details').remove());
-
-    barGroups.append('text')
-        .attr('x', (bin: ActivityBin) => (x(bin.key) || 0) + (x.bandwidth() / 2))
-        .attr('y', (bin: ActivityBin) => y(bin.count) - 8)
-        .attr('text-anchor', 'middle')
-        .style('font-size', '10px')
-        .style('font-weight', '700')
-        .style('fill', '#334155')
-        .text((bin: ActivityBin) => String(bin.count));
-
-    barGroups.append('text')
-        .attr('x', (bin: ActivityBin) => (x(bin.key) || 0) + (x.bandwidth() / 2))
-        .attr('y', height + 16)
-        .attr('text-anchor', 'middle')
-        .style('font-size', '10px')
-        .style('fill', '#94a3b8')
-        .text((bin: ActivityBin) => bin.subtitle);
-
-    svgRoot.append('text')
-        .attr('x', margin.left)
-        .attr('y', 18)
-        .style('font-size', '10px')
-        .style('fill', '#64748b')
-        .text('Bar height = members. Hover for roster slice and average WR.');
 };
 
-const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, memberCount, svgHeight = 264 }) => {
+const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, memberCount, svgHeight = 246, svgWidth = 900 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const [members, setMembers] = useState<ClanMemberData[]>([]);
     const [loading, setLoading] = useState(true);
@@ -307,8 +297,8 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
             return;
         }
 
-        drawChart(containerRef.current, bins, members.length, Math.max(containerWidth, 320), svgHeight);
-    }, [bins, containerWidth, loadError, loading, members.length, svgHeight]);
+        drawChart(containerRef.current, bins, members.length, svgWidth, svgHeight);
+    }, [bins, containerWidth, loadError, loading, members.length, svgHeight, svgWidth]);
 
     const rosterSize = members.length || memberCount;
     const activeShare = rosterSize > 0 ? Math.round((activeThirtyCount / rosterSize) * 100) : 0;
@@ -317,7 +307,7 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
         <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Clan Activity</h3>
             <p className="mt-2 max-w-4xl text-sm leading-7 text-[#4a5568]">
-                {activeThirtyCount} of {rosterSize} members have played within the last 30 days. {dormantCount} have been dark for more than 90 days. Read left to right to see whether this roster still has a live core or just a nameplate.
+                {activeThirtyCount} of {rosterSize} members have played within the last 30 days. {dormantCount} have been dark for more than 90 days. The single 100% bar keeps every inactivity band on one stable line, so you can read the clan&apos;s full composition from active now at the left edge to no recency at the right edge before comparing skill and volume below.
             </p>
             <p className="mt-1 text-xs uppercase tracking-[0.18em] text-[#718096]">
                 {activeShare}% active within 30 days
@@ -327,7 +317,7 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
                     Loading clan activity...
                 </div>
             ) : (
-                <div ref={containerRef} className="mt-4 w-full overflow-hidden" />
+                <div ref={containerRef} className="mt-3 w-[900px] max-w-full overflow-x-auto overflow-y-hidden" />
             )}
         </section>
     );

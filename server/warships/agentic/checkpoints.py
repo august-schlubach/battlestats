@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 try:
     from langgraph.checkpoint.postgres import PostgresSaver
-except ModuleNotFoundError:
+except ImportError:
     PostgresSaver = None
 
 

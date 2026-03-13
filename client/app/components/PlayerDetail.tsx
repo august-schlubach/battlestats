@@ -110,14 +110,6 @@ const formatKillRatio = (killRatio: number | null): string => {
     return killRatio.toFixed(2);
 };
 
-const formatPlayerScore = (playerScore: number | null): string => {
-    if (playerScore == null) {
-        return '—';
-    }
-
-    return playerScore.toFixed(playerScore < 1 ? 2 : 1);
-};
-
 const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
     Sealord: 'Owns the map, dictates the pace, dominates, turns tables and wins.',
     Assassin: 'Wins relentlessly, wastes little, and closes games with intent.',
@@ -182,7 +174,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
                             >
                                 <div id="clan_members_container">
-                                    <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} />
+                                    <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} layout="stacked" />
                                 </div>
                             </DeferredSection>
                         </>
@@ -194,20 +186,12 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 {/* Second Column */}
                 <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
                     <div className="mb-3 border-b border-[#c6dbef] pb-3">
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
-                                <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
-                                    {player.name}
-                                </h1>
-                                <p className="mt-1 text-sm text-[#4292c6]">
-                                    Last played {player.days_since_last_battle} days ago
-                                </p>
-                            </div>
-                            <div className="shrink-0 rounded-md border border-[#dbe9f6] bg-[#f7fbff] px-4 py-2 text-right">
-                                <p className="text-[11px] uppercase tracking-wide text-[#4292c6]">Player Score</p>
-                                <p className="mt-1 text-2xl font-semibold text-[#084594]">{formatPlayerScore(player.player_score)}</p>
-                            </div>
-                        </div>
+                        <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
+                            {player.name}
+                        </h1>
+                        <p className="mt-1 text-sm text-[#4292c6]">
+                            Last played {player.days_since_last_battle} days ago
+                        </p>
                     </div>
 
                     {player.is_hidden ? (

@@ -34,6 +34,7 @@ services:
                   gunicorn --config gunicorn.conf.py battlestats.wsgi:application --bind 0.0.0.0:8888"
     volumes:
       - ./server:/usr/src/app
+      - ./agents:/usr/src/agents:ro
     env_file:
       - server/.env
     environment:
@@ -68,6 +69,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./server:/usr/src/app
+      - ./agents:/usr/src/agents:ro
     command: celery -A battlestats worker -l INFO --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle
     env_file:
       - server/.env
@@ -85,6 +87,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./server:/usr/src/app
+      - ./agents:/usr/src/agents:ro
     command: celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
     env_file:
       - server/.env

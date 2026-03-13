@@ -140,6 +140,27 @@ to remove containers and volumes (including local postgres data):
 docker compose down -v
 ```
 
+## test suite
+
+to run the full repo test pass from the repository root:
+
+```bash
+./run_test_suite.sh
+```
+
+this command:
+
+- ensures the docker services are up
+- runs the full Django test suite under `warships.tests`
+- runs the Next.js production build
+- runs the API smoke suite
+
+if the script is not executable in your shell, run:
+
+```bash
+bash ./run_test_suite.sh
+```
+
 Charts:
 
 Player activity is summarized with a chart that shows battles within the last 30 days. Gray bars indicate total games played by date, and overlayed green bars indicate wins in that session. Mousing over a particular day will show the numbers for that day on the top of the chart.

@@ -2,14 +2,14 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-import dotenv
+from battlestats.env import load_env_file
 
 
 def main():
     path = '.env'
     print(f'Loading environment variables from {path}')
 
-    dotenv.read_dotenv(path)
+    load_env_file(path)
     """Run administrative tasks."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'battlestats.settings')
     try:
