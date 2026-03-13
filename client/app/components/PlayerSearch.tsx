@@ -99,6 +99,30 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
+const ClanTagGrid: React.FC<{
+    clans: LandingClan[];
+    onSelectClan: (clan: LandingClan) => void;
+    ariaLabelPrefix: string;
+}> = ({ clans, onSelectClan, ariaLabelPrefix }) => (
+    <div
+        className="mt-4 grid gap-x-4 gap-y-2 text-sm"
+        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(5.25rem, 1fr))' }}
+    >
+        {clans.map((clan) => (
+            <button
+                key={`${ariaLabelPrefix}-${clan.clan_id}`}
+                type="button"
+                onClick={() => onSelectClan(clan)}
+                className="min-w-0 text-left font-medium underline-offset-2 hover:underline"
+                style={{ color: wrColor(clan.clan_wr) }}
+                aria-label={`${ariaLabelPrefix} clan ${clan.name}`}
+            >
+                [{clan.tag || '---'}]
+            </button>
+        ))}
+    </div>
+);
+
 const LandingClanSVG = dynamic(
     () => resilientDynamicImport(() => import('./LandingClanSVG'), 'LandingClanSVG'),
     {
@@ -578,37 +602,19 @@ const PlayerSearch: React.FC = () => {
                                     onSelectClan={handleSelectClan}
                                 />
                             </div>
-                            <p className="mt-6 text-sm leading-7 text-[#4292c6]">
-                                {visibleLandingClans.map((clan) => (
-                                    <button
-                                        key={clan.clan_id}
-                                        onClick={() => handleSelectClan(clan)}
-                                        className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
-                                        style={{ color: wrColor(clan.clan_wr) }}
-                                        aria-label={`Show clan ${clan.name}`}
-                                    >
-                                        <span className="text-[#6baed6]" aria-hidden="true">{"\u25C8"}</span>
-                                        [{clan.tag || '---'}]
-                                    </button>
-                                ))}
-                            </p>
+                            <ClanTagGrid
+                                clans={visibleLandingClans}
+                                onSelectClan={handleSelectClan}
+                                ariaLabelPrefix="Show"
+                            />
 
                             <h3 className="mt-5 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Recently Viewed Clans</h3>
                             {recentClans.length > 0 ? (
-                                <p className="mt-2 text-sm leading-7 text-[#4292c6]">
-                                    {recentClans.slice(0, LANDING_LIMIT).map((clan) => (
-                                        <button
-                                            key={`recent-clan-${clan.clan_id}`}
-                                            onClick={() => handleSelectClan(clan)}
-                                            className="mr-3 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
-                                            style={{ color: wrColor(clan.clan_wr) }}
-                                            aria-label={`Show recent clan ${clan.name}`}
-                                        >
-                                            <span className="text-[#6baed6]" aria-hidden="true">{"\u25C8"}</span>
-                                            [{clan.tag || '---'}]
-                                        </button>
-                                    ))}
-                                </p>
+                                <ClanTagGrid
+                                    clans={recentClans.slice(0, LANDING_LIMIT)}
+                                    onSelectClan={handleSelectClan}
+                                    ariaLabelPrefix="Show recent"
+                                />
                             ) : (
                                 <p className="mt-2 text-sm text-[#6baed6]">No recently viewed clans yet.</p>
                             )}
