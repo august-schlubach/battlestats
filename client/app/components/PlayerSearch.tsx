@@ -18,6 +18,7 @@ interface LandingPlayer {
     name: string;
     pvp_ratio: number | null;
     is_hidden?: boolean;
+    pvp_battles?: number | null;
 }
 
 interface LandingActivityAttritionMonth {
@@ -105,19 +106,23 @@ const ClanTagGrid: React.FC<{
     ariaLabelPrefix: string;
 }> = ({ clans, onSelectClan, ariaLabelPrefix }) => (
     <div
-        className="mt-4 grid gap-x-4 gap-y-2 text-sm"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(5.25rem, 1fr))' }}
+        className="mt-4 grid max-w-[910px] gap-x-4 gap-y-2 rounded-md px-2 py-1 text-sm"
+        style={{
+            gridTemplateColumns: 'repeat(auto-fit, minmax(5.25rem, 1fr))',
+            backgroundImage: 'repeating-linear-gradient(to bottom, transparent 0, transparent 2.25rem, rgba(239, 243, 255, 0.9) 2.25rem, rgba(239, 243, 255, 0.9) 4.5rem)',
+        }}
     >
         {clans.map((clan) => (
             <button
                 key={`${ariaLabelPrefix}-${clan.clan_id}`}
                 type="button"
                 onClick={() => onSelectClan(clan)}
-                className="min-w-0 text-left font-medium underline-offset-2 hover:underline"
+                className="min-w-0 rounded-sm px-2 py-1 text-left font-medium underline-offset-2 hover:underline"
                 style={{ color: wrColor(clan.clan_wr) }}
                 aria-label={`${ariaLabelPrefix} clan ${clan.name}`}
+                title={clan.tag || clan.name}
             >
-                [{clan.tag || '---'}]
+                <span className="block truncate">[{clan.tag || '---'}]</span>
             </button>
         ))}
     </div>
@@ -129,8 +134,11 @@ const PlayerNameGrid: React.FC<{
     ariaLabelPrefix: string;
 }> = ({ players, onSelectMember, ariaLabelPrefix }) => (
     <div
-        className="mt-4 grid max-w-[900px] gap-x-4 gap-y-2 text-sm"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))' }}
+        className="mt-4 grid max-w-[910px] gap-x-4 gap-y-2 rounded-md px-2 py-1 text-sm"
+        style={{
+            gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))',
+            backgroundImage: 'repeating-linear-gradient(to bottom, transparent 0, transparent 2.25rem, rgba(239, 243, 255, 0.9) 2.25rem, rgba(239, 243, 255, 0.9) 4.5rem)',
+        }}
     >
         {players.map((player) => {
             const label = player.name;
@@ -140,7 +148,7 @@ const PlayerNameGrid: React.FC<{
                 return (
                     <span
                         key={`${ariaLabelPrefix}-${label}`}
-                        className="inline-flex min-w-0 items-center gap-1 font-medium"
+                        className="inline-flex min-w-0 items-center gap-1 rounded-sm px-2 py-1 font-medium"
                         style={{ color }}
                         aria-label={`${label} has hidden stats`}
                         title={label}
@@ -156,7 +164,7 @@ const PlayerNameGrid: React.FC<{
                     key={`${ariaLabelPrefix}-${label}`}
                     type="button"
                     onClick={() => onSelectMember(label)}
-                    className="inline-flex min-w-0 items-center gap-1 font-medium underline-offset-2 hover:underline"
+                    className="inline-flex min-w-0 items-center gap-1 rounded-sm px-2 py-1 font-medium underline-offset-2 hover:underline"
                     style={{ color }}
                     aria-label={`${ariaLabelPrefix} player ${label}`}
                     title={label}
@@ -193,6 +201,8 @@ const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./Play
 const LANDING_LIMIT = 40;
 const BEST_CLAN_MIN_TOTAL_BATTLES = 100000;
 const BEST_CLAN_MIN_ACTIVE_SHARE = 0.3;
+const RANDOM_PLAYER_MIN_PVP_BATTLES = 500;
+const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const SEARCH_SUGGESTION_LIMIT = 8;
 const SEARCH_DEBOUNCE_MS = 180;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
@@ -201,6 +211,7 @@ const SEARCH_SUGGESTIONS_ID = 'player-search-suggestions';
 const SHOW_PLAYER_EXPLORER = false;
 
 type LandingClanMode = 'random' | 'best';
+type LandingPlayerMode = 'random' | 'best';
 
 const isAbortError = (error: unknown): boolean => {
     return error instanceof DOMException && error.name === 'AbortError';
@@ -219,6 +230,7 @@ const PlayerSearch: React.FC = () => {
     const [clanMode, setClanMode] = useState<LandingClanMode>('random');
     const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
+    const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const [landingActivity, setLandingActivity] = useState<LandingActivityAttritionData | null>(null);
     const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
@@ -416,6 +428,34 @@ const PlayerSearch: React.FC = () => {
 
         return clans.slice(0, LANDING_LIMIT);
     }, [clanMode, clans]);
+
+    const visibleLandingPlayers = useMemo(() => {
+        const randomEligiblePlayers = players.filter((player) => (player.pvp_battles ?? 0) > RANDOM_PLAYER_MIN_PVP_BATTLES);
+
+        if (playerMode === 'best') {
+            return randomEligiblePlayers
+                .filter((player) => (player.pvp_battles ?? 0) > BEST_PLAYER_MIN_PVP_BATTLES)
+                .slice()
+                .sort((left, right) => {
+                    const leftWr = left.pvp_ratio ?? Number.NEGATIVE_INFINITY;
+                    const rightWr = right.pvp_ratio ?? Number.NEGATIVE_INFINITY;
+                    if (rightWr !== leftWr) {
+                        return rightWr - leftWr;
+                    }
+
+                    return left.name.localeCompare(right.name);
+                })
+                .slice(0, LANDING_LIMIT);
+        }
+
+        const shuffled = [...randomEligiblePlayers];
+        for (let index = shuffled.length - 1; index > 0; index -= 1) {
+            const swapIndex = Math.floor(Math.random() * (index + 1));
+            [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+        }
+
+        return shuffled.slice(0, LANDING_LIMIT);
+    }, [playerMode, players]);
 
     const handleSelectMember = async (memberName: string) => {
         setSearchTerm(memberName);
@@ -669,9 +709,27 @@ const PlayerSearch: React.FC = () => {
 
                     {players.length > 0 && (
                         <div className="mt-6 border-t border-[#c6dbef] pt-6">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="mr-2 text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Active Players</h3>
+                                <button
+                                    type="button"
+                                    onClick={() => setPlayerMode('random')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'random' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    aria-pressed={playerMode === 'random'}
+                                >
+                                    Random
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPlayerMode('best')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'best' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    aria-pressed={playerMode === 'best'}
+                                >
+                                    Best
+                                </button>
+                            </div>
                             <PlayerNameGrid
-                                players={players.slice(0, LANDING_LIMIT)}
+                                players={visibleLandingPlayers}
                                 onSelectMember={handleSelectMember}
                                 ariaLabelPrefix="Show"
                             />

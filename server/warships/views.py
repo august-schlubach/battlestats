@@ -543,10 +543,10 @@ def landing_players(request) -> Response:
                 is_hidden=False,
             ).exclude(
                 last_battle_date__isnull=True
-            ).values('name', 'pvp_ratio', 'is_hidden').order_by(*_player_score_ordering('last_battle_date'))
+            ).values('name', 'pvp_ratio', 'is_hidden', 'pvp_battles').order_by(*_player_score_ordering('last_battle_date'))
         )
 
-    data = cache.get_or_set('landing:players', _fetch_landing_players, 60)
+    data = cache.get_or_set('landing:players:v3', _fetch_landing_players, 60)
     return Response(data)
 
 
