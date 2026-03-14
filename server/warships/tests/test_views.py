@@ -1107,6 +1107,72 @@ class ApiContractTests(TestCase):
             for point in payload["trend"]
         ))
 
+    def test_player_correlation_distribution_returns_ranked_wr_battles_payload(self):
+        cache.clear()
+
+        Player.objects.create(
+            name="RankedHeatmapOne",
+            player_id=8841,
+            is_hidden=False,
+            ranked_json=[
+                {"season_id": 9, "total_battles": 40,
+                    "total_wins": 24, "win_rate": 0.6},
+                {"season_id": 8, "total_battles": 20,
+                    "total_wins": 10, "win_rate": 0.5},
+            ],
+        )
+        Player.objects.create(
+            name="RankedHeatmapTwo",
+            player_id=8842,
+            is_hidden=False,
+            ranked_json=[
+                {"season_id": 9, "total_battles": 140,
+                    "total_wins": 84, "win_rate": 0.6},
+            ],
+        )
+        Player.objects.create(
+            name="RankedHeatmapTooSmall",
+            player_id=8844,
+            is_hidden=False,
+            ranked_json=[
+                {"season_id": 9, "total_battles": 30,
+                    "total_wins": 18, "win_rate": 0.6},
+            ],
+        )
+        Player.objects.create(
+            name="RankedHeatmapHidden",
+            player_id=8843,
+            is_hidden=True,
+            ranked_json=[
+                {"season_id": 9, "total_battles": 60,
+                    "total_wins": 54, "win_rate": 0.9},
+            ],
+        )
+
+        response = self.client.get(
+            "/api/fetch/player_correlation/ranked_wr_battles/8841/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["metric"], "ranked_wr_battles")
+        self.assertEqual(payload["label"], "Ranked Games vs Win Rate")
+        self.assertEqual(payload["x_label"], "Total Ranked Games")
+        self.assertEqual(payload["y_label"], "Ranked Win Rate")
+        self.assertEqual(payload["x_scale"], "log")
+        self.assertEqual(payload["x_domain"]["min"], 50.0)
+        self.assertEqual(payload["x_ticks"][0], 50.0)
+        self.assertEqual(payload["tracked_population"], 2)
+        self.assertEqual(payload["player_point"]["x"], 60.0)
+        self.assertEqual(payload["player_point"]["y"], 56.67)
+        self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
+        self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
+
+    def test_player_correlation_distribution_returns_404_for_missing_ranked_wr_battles_player(self):
+        response = self.client.get(
+            "/api/fetch/player_correlation/ranked_wr_battles/999999/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_player_correlation_distribution_returns_404_for_missing_tier_type_player(self):
         response = self.client.get(
             "/api/fetch/player_correlation/tier_type/999999/")

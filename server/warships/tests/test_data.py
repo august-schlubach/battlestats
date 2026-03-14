@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -544,6 +544,16 @@ class PlayerDataHardeningTests(TestCase):
 
 
 class PlayerExplorerSummaryTests(TestCase):
+    def test_calculate_ranked_record_aggregates_battles_and_wins(self):
+        battles, win_rate = _calculate_ranked_record([
+            {"season_id": 9, "total_battles": 20, "total_wins": 12},
+            {"season_id": 8, "total_battles": 15, "win_rate": 0.6},
+            {"season_id": 7, "total_battles": 0, "total_wins": 0},
+        ])
+
+        self.assertEqual(battles, 35)
+        self.assertEqual(win_rate, 60.0)
+
     def test_calculate_tier_filtered_pvp_record_ignores_tiers_one_through_four(self):
         battles, win_rate = _calculate_tier_filtered_pvp_record([
             {"ship_tier": 3, "pvp_battles": 400, "wins": 320},

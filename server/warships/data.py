@@ -1266,6 +1266,19 @@ PLAYER_WR_SURVIVAL_CORRELATION_CONFIG = {
     'y_bin_width': 1.5,
 }
 
+PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG = {
+    'label': 'Ranked Games vs Win Rate',
+    'x_label': 'Total Ranked Games',
+    'y_label': 'Ranked Win Rate',
+    'x_scale': 'log',
+    'y_scale': 'linear',
+    'min_battles': 50,
+    'base_x_edges': [50, 100, 200, 400],
+    'y_min': 35.0,
+    'y_max': 75.0,
+    'y_bin_width': 1.5,
+}
+
 PLAYER_TIER_TYPE_CORRELATION_CONFIG = {
     'label': 'Tier vs Ship Type',
     'x_label': 'Ship Type',
@@ -1374,7 +1387,8 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
+                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -1416,6 +1430,17 @@ def _player_distribution_cache_key(metric: str) -> str:
 
 def _player_correlation_cache_key(metric: str) -> str:
     return f'players:correlation:v2:{metric}'
+
+
+def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int]:
+    if not seed_edges:
+        return [1, max(2, max_value)]
+
+    edges = sorted(set(max(1, int(edge)) for edge in seed_edges))
+    while edges[-1] < max_value:
+        edges.append(edges[-1] * 2)
+
+    return edges
 
 
 def _build_linear_distribution_bins(qs, field_name: str, value_min: float, value_max: float, bin_width: float) -> list[dict]:
@@ -1524,6 +1549,46 @@ def _pearson_correlation(count: int, sum_x: float, sum_y: float, sum_xy: float, 
         return None
 
     return numerator / denominator
+
+
+def _calculate_ranked_record(ranked_rows: Any) -> tuple[int, Optional[float]]:
+    total_battles = 0
+    total_wins = 0.0
+
+    for row in _coerce_ranked_rows(ranked_rows):
+        battles = int(row.get('total_battles', 0) or 0)
+        if battles <= 0:
+            continue
+
+        wins = row.get('total_wins')
+        if wins is None and row.get('win_rate') is not None:
+            win_rate = float(row.get('win_rate') or 0.0)
+            if win_rate > 1.0:
+                win_rate /= 100.0
+            wins = win_rate * battles
+
+        total_battles += battles
+        total_wins += float(wins or 0.0)
+
+    if total_battles <= 0:
+        return 0, None
+
+    return total_battles, round((total_wins / total_battles) * 100, 2)
+
+
+def _find_explicit_bin_index(value: float, edges: list[int]) -> Optional[int]:
+    if len(edges) < 2:
+        return None
+
+    for index, lower in enumerate(edges[:-1]):
+        upper = edges[index + 1]
+        if index == len(edges) - 2:
+            if value >= lower:
+                return index
+        elif lower <= value < upper:
+            return index
+
+    return None
 
 
 def _tier_type_sort_key(ship_type: str, ship_tier: Optional[int] = None) -> tuple[int, str, int]:
@@ -1783,6 +1848,129 @@ def fetch_player_wr_survival_correlation() -> dict:
 
     cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
     return payload
+
+
+def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
+    cache_key = _player_correlation_cache_key('ranked_wr_battles:v3')
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    config = PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG
+    y_min = config['y_min']
+    y_max = config['y_max']
+    y_bin_width = config['y_bin_width']
+    y_bin_count = int((y_max - y_min) / y_bin_width)
+
+    records: list[tuple[int, float]] = []
+    max_battles = config['min_battles']
+    rows = Player.objects.filter(
+        is_hidden=False,
+        ranked_json__isnull=False,
+    ).values_list('ranked_json', flat=True)
+
+    for ranked_rows in rows.iterator(chunk_size=2000):
+        total_battles, win_rate = _calculate_ranked_record(ranked_rows)
+        if total_battles < config['min_battles'] or win_rate is None:
+            continue
+
+        records.append((total_battles, win_rate))
+        max_battles = max(max_battles, total_battles)
+
+    x_edges = _build_doubling_bin_edges(max_battles, config['base_x_edges'])
+    tile_counts: dict[tuple[int, int], int] = {}
+    trend_sum_y = [0.0 for _ in range(len(x_edges) - 1)]
+    trend_counts = [0 for _ in range(len(x_edges) - 1)]
+    tracked_population = 0
+    sum_x = 0.0
+    sum_y = 0.0
+    sum_xy = 0.0
+    sum_x2 = 0.0
+    sum_y2 = 0.0
+
+    for total_battles, win_rate in records:
+        x_index = _find_explicit_bin_index(total_battles, x_edges)
+        if x_index is None:
+            continue
+
+        y_clamped = _clamp_to_open_upper_bound(win_rate, y_min, y_max)
+        y_index = min(int((y_clamped - y_min) / y_bin_width), y_bin_count - 1)
+
+        tracked_population += 1
+        sum_x += float(total_battles)
+        sum_y += win_rate
+        sum_xy += float(total_battles) * win_rate
+        sum_x2 += float(total_battles) * float(total_battles)
+        sum_y2 += win_rate * win_rate
+
+        tile_counts[(x_index, y_index)] = tile_counts.get(
+            (x_index, y_index), 0) + 1
+        trend_sum_y[x_index] += win_rate
+        trend_counts[x_index] += 1
+
+    tiles = []
+    for (x_index, y_index), count in sorted(tile_counts.items()):
+        tiles.append({
+            'x_min': float(x_edges[x_index]),
+            'x_max': float(x_edges[x_index + 1]),
+            'y_min': round(y_min + (y_index * y_bin_width), 4),
+            'y_max': round(y_min + ((y_index + 1) * y_bin_width), 4),
+            'count': count,
+        })
+
+    trend = []
+    for index, count in enumerate(trend_counts):
+        if count == 0:
+            continue
+
+        trend.append({
+            'x': round(math.sqrt(x_edges[index] * x_edges[index + 1]), 4),
+            'y': round(trend_sum_y[index] / count, 4),
+            'count': count,
+        })
+
+    payload = {
+        'metric': 'ranked_wr_battles',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'x_scale': config['x_scale'],
+        'y_scale': config['y_scale'],
+        'x_ticks': x_edges,
+        'tracked_population': tracked_population,
+        'correlation': round(_pearson_correlation(tracked_population, sum_x, sum_y, sum_xy, sum_x2, sum_y2), 4) if tracked_population > 1 else None,
+        'x_domain': {
+            'min': float(x_edges[0]),
+            'max': float(x_edges[-1]),
+            'bin_width': None,
+        },
+        'y_domain': {
+            'min': y_min,
+            'max': y_max,
+            'bin_width': y_bin_width,
+        },
+        'tiles': tiles,
+        'trend': trend,
+    }
+
+    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
+    return payload
+
+
+def fetch_player_ranked_wr_battles_correlation(player_id: str) -> dict:
+    player = Player.objects.get(player_id=player_id)
+    ranked_rows = fetch_ranked_data(player_id)
+    total_battles, win_rate = _calculate_ranked_record(ranked_rows)
+    population_payload = _fetch_player_ranked_wr_battles_population_correlation()
+
+    return {
+        **population_payload,
+        'player_point': {
+            'x': float(total_battles),
+            'y': win_rate,
+            'label': player.name,
+        } if total_battles > 0 and win_rate is not None else None,
+    }
 
 
 def fetch_wr_distribution() -> list[dict]:

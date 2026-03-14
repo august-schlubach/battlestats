@@ -161,6 +161,21 @@ if the script is not executable in your shell, run:
 bash ./run_test_suite.sh
 ```
 
+to backfill ranked history durably, use the resumable management command from `server/`:
+
+```bash
+python manage.py backfill_ranked_data --state-file logs/backfill_ranked_data_state.json
+```
+
+or use the helper runner script:
+
+```bash
+python scripts/backfill_ranked_data.py --state-file logs/backfill_ranked_data_state.json
+python scripts/backfill_ranked_data.py --state-file logs/backfill_ranked_data_state.json --status-only
+```
+
+it writes an atomic JSON checkpoint after each player attempt, retries previously failed player IDs on the next run, and resumes from the last processed player ID if the job is interrupted. by default it targets visible players missing ranked data; add `--refresh-older-than-hours 168` to revisit stale rows or `--force` to sweep all players in scope.
+
 Charts:
 
 Player activity is summarized with a chart that shows battles within the last 30 days. Gray bars indicate total games played by date, and overlayed green bars indicate wins in that session. Mousing over a particular day will show the numbers for that day on the top of the chart.

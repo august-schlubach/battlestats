@@ -66,6 +66,11 @@ const RankedSeasons = dynamic(() => resilientDynamicImport(() => import('./Ranke
     loading: () => <LoadingPanel label="Loading ranked seasons..." minHeight={220} />,
 });
 
+const RankedWRBattlesHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./RankedWRBattlesHeatmapSVG'), 'PlayerDetail-RankedWRBattlesHeatmapSVG'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading ranked heatmap..." minHeight={280} />,
+});
+
 const TierSVG = dynamic(() => resilientDynamicImport(() => import('./TierSVG'), 'PlayerDetail-TierSVG'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading tier chart..." minHeight={334} />,
@@ -281,6 +286,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Top Ships (Random Battles)</h3>
                                 <p className="mb-2 text-xs text-[#6baed6]">Returns to the wins-versus-battles bar design, but with cleaner axis treatment, inline summary text, and styling aligned with the other player-page charts.</p>
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
+                            </div>
+                            <div className="mt-4">
+                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Games vs Win Rate</h3>
+                                <p className="mb-3 text-xs text-[#6baed6]">Each tile shows how many ranked players fall into a total-games and win-rate pocket. The outlined marker places this captain against that field.</p>
+                                <RankedWRBattlesHeatmapSVG playerId={player.player_id} isLoading={isLoading} />
                             </div>
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Seasons</h3>

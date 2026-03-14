@@ -16,12 +16,12 @@ from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
-    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, \
+    WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
-    fetch_player_tier_type_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record
+    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
@@ -303,6 +303,14 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
     if metric == 'win_rate_survival' and player_id is None:
         data = fetch_player_wr_survival_correlation()
         return _validated_single_response(data, PlayerCorrelationDistributionSerializer)
+
+    if metric == 'ranked_wr_battles' and player_id is not None:
+        try:
+            data = fetch_player_ranked_wr_battles_correlation(player_id)
+        except Player.DoesNotExist:
+            return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        return _validated_single_response(data, PlayerExtendedCorrelationDistributionSerializer)
 
     if metric == 'tier_type' and player_id is not None:
         try:

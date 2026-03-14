@@ -204,7 +204,7 @@ class PlayerPopulationDistributionSerializer(serializers.Serializer):
 class PlayerCorrelationDomainSerializer(serializers.Serializer):
     min = serializers.FloatField()
     max = serializers.FloatField()
-    bin_width = serializers.FloatField()
+    bin_width = serializers.FloatField(allow_null=True, required=False)
 
 
 class PlayerCorrelationTileSerializer(serializers.Serializer):
@@ -232,6 +232,21 @@ class PlayerCorrelationDistributionSerializer(serializers.Serializer):
     y_domain = PlayerCorrelationDomainSerializer()
     tiles = PlayerCorrelationTileSerializer(many=True)
     trend = PlayerCorrelationTrendPointSerializer(many=True)
+
+
+class PlayerCorrelationPointSerializer(serializers.Serializer):
+    x = serializers.FloatField()
+    y = serializers.FloatField()
+    label = serializers.CharField(required=False)
+
+
+class PlayerExtendedCorrelationDistributionSerializer(PlayerCorrelationDistributionSerializer):
+    x_scale = serializers.ChoiceField(choices=['linear', 'log'])
+    y_scale = serializers.ChoiceField(choices=['linear', 'log'])
+    x_ticks = serializers.ListField(
+        child=serializers.FloatField(), required=False)
+    player_point = PlayerCorrelationPointSerializer(
+        allow_null=True, required=False)
 
 
 class PlayerTierTypeTileSerializer(serializers.Serializer):
