@@ -669,21 +669,33 @@ class ApiContractTests(TestCase):
             player_id=4301,
             is_hidden=False,
             pvp_ratio=55.0,
+            pvp_battles=3200,
             last_battle_date=today - timedelta(days=3),
+            battles_json=[
+                {"ship_tier": 10, "pvp_battles": 3200, "wins": 1760},
+            ],
         )
         low = Player.objects.create(
             name="LandingLowScore",
             player_id=4302,
             is_hidden=False,
             pvp_ratio=53.0,
+            pvp_battles=3100,
             last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 3100, "wins": 1550},
+            ],
         )
         no_score = Player.objects.create(
             name="LandingNoScore",
             player_id=4303,
             is_hidden=False,
             pvp_ratio=57.0,
+            pvp_battles=3300,
             last_battle_date=today - timedelta(days=1),
+            battles_json=[
+                {"ship_tier": 9, "pvp_battles": 3300, "wins": 1914},
+            ],
         )
         PlayerExplorerSummary.objects.create(player=high, player_score=9.1)
         PlayerExplorerSummary.objects.create(player=low, player_score=4.2)
@@ -695,6 +707,33 @@ class ApiContractTests(TestCase):
             [row["name"] for row in response.json()[:3]],
             ["LandingHighScore", "LandingLowScore", "LandingNoScore"],
         )
+
+    def test_landing_players_exposes_high_tier_record_excluding_low_tiers(self):
+        cache.clear()
+        today = timezone.now().date()
+        Player.objects.create(
+            name="LandingTierFilter",
+            player_id=4311,
+            is_hidden=False,
+            pvp_ratio=70.0,
+            pvp_battles=3500,
+            last_battle_date=today,
+            battles_json=[
+                {"ship_tier": 2, "pvp_battles": 1800, "wins": 1500},
+                {"ship_tier": 4, "pvp_battles": 900, "wins": 650},
+                {"ship_tier": 5, "pvp_battles": 1200, "wins": 630},
+                {"ship_tier": 10, "pvp_battles": 600, "wins": 330},
+            ],
+        )
+
+        response = self.client.get("/api/landing/players/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        row = next(
+            item for item in payload if item["name"] == "LandingTierFilter")
+        self.assertEqual(row["high_tier_pvp_battles"], 1800)
+        self.assertEqual(row["high_tier_pvp_ratio"], 53.33)
 
     def test_landing_recent_players_orders_by_last_lookup_desc(self):
         cache.clear()

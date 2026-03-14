@@ -21,7 +21,7 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
-    fetch_player_tier_type_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data
+    fetch_player_tier_type_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
@@ -538,15 +538,25 @@ def landing_recent_clans(request) -> Response:
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_players(request) -> Response:
     def _fetch_landing_players():
-        return list(
+        rows = list(
             Player.objects.exclude(name='').filter(
                 is_hidden=False,
             ).exclude(
                 last_battle_date__isnull=True
-            ).values('name', 'pvp_ratio', 'is_hidden', 'pvp_battles').order_by(*_player_score_ordering('last_battle_date'))
+            ).values('name', 'pvp_ratio', 'is_hidden', 'pvp_battles', 'battles_json').order_by(*_player_score_ordering('last_battle_date'))
         )
 
-    data = cache.get_or_set('landing:players:v3', _fetch_landing_players, 60)
+        for row in rows:
+            high_tier_battles, high_tier_ratio = _calculate_tier_filtered_pvp_record(
+                row.pop('battles_json', None),
+                minimum_tier=5,
+            )
+            row['high_tier_pvp_battles'] = high_tier_battles
+            row['high_tier_pvp_ratio'] = high_tier_ratio
+
+        return rows
+
+    data = cache.get_or_set('landing:players:v4', _fetch_landing_players, 60)
     return Response(data)
 
 

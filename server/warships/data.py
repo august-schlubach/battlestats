@@ -299,6 +299,39 @@ def _calculate_player_kill_ratio(battle_rows: list[dict]) -> Optional[float]:
     return round(weighted_sum / total_weight, 2)
 
 
+def _calculate_tier_filtered_pvp_record(
+    battles_rows: Any,
+    minimum_tier: int = 5,
+) -> tuple[int, Optional[float]]:
+    total_battles = 0
+    total_wins = 0.0
+
+    for row in _coerce_battle_rows(battles_rows):
+        try:
+            ship_tier = int(row.get('ship_tier') or 0)
+        except (TypeError, ValueError):
+            continue
+
+        if ship_tier < minimum_tier:
+            continue
+
+        battles = int(row.get('pvp_battles', 0) or 0)
+        if battles <= 0:
+            continue
+
+        wins = row.get('wins')
+        if wins is None and row.get('win_ratio') is not None:
+            wins = float(row.get('win_ratio') or 0.0) * battles
+
+        total_battles += battles
+        total_wins += float(wins or 0.0)
+
+    if total_battles <= 0:
+        return 0, None
+
+    return total_battles, round((total_wins / total_battles) * 100, 2)
+
+
 def _summary_has_battle_data(player: Player, battle_rows: list[dict]) -> bool:
     if battle_rows:
         return True

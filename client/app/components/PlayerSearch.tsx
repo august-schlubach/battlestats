@@ -19,6 +19,8 @@ interface LandingPlayer {
     pvp_ratio: number | null;
     is_hidden?: boolean;
     pvp_battles?: number | null;
+    high_tier_pvp_ratio?: number | null;
+    high_tier_pvp_battles?: number | null;
 }
 
 interface LandingActivityAttritionMonth {
@@ -434,17 +436,21 @@ const PlayerSearch: React.FC = () => {
 
         if (playerMode === 'best') {
             return randomEligiblePlayers
-                .filter((player) => (player.pvp_battles ?? 0) > BEST_PLAYER_MIN_PVP_BATTLES)
+                .filter((player) => (player.high_tier_pvp_battles ?? 0) > BEST_PLAYER_MIN_PVP_BATTLES)
                 .slice()
                 .sort((left, right) => {
-                    const leftWr = left.pvp_ratio ?? Number.NEGATIVE_INFINITY;
-                    const rightWr = right.pvp_ratio ?? Number.NEGATIVE_INFINITY;
+                    const leftWr = left.high_tier_pvp_ratio ?? Number.NEGATIVE_INFINITY;
+                    const rightWr = right.high_tier_pvp_ratio ?? Number.NEGATIVE_INFINITY;
                     if (rightWr !== leftWr) {
                         return rightWr - leftWr;
                     }
 
                     return left.name.localeCompare(right.name);
                 })
+                .map((player) => ({
+                    ...player,
+                    pvp_ratio: player.high_tier_pvp_ratio ?? player.pvp_ratio,
+                }))
                 .slice(0, LANDING_LIMIT);
         }
 

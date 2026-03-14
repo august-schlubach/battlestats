@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -544,6 +544,26 @@ class PlayerDataHardeningTests(TestCase):
 
 
 class PlayerExplorerSummaryTests(TestCase):
+    def test_calculate_tier_filtered_pvp_record_ignores_tiers_one_through_four(self):
+        battles, win_rate = _calculate_tier_filtered_pvp_record([
+            {"ship_tier": 3, "pvp_battles": 400, "wins": 320},
+            {"ship_tier": 4, "pvp_battles": 300, "wins": 210},
+            {"ship_tier": 5, "pvp_battles": 120, "wins": 66},
+            {"ship_tier": 10, "pvp_battles": 80, "wins": 44},
+        ])
+
+        self.assertEqual(battles, 200)
+        self.assertEqual(win_rate, 55.0)
+
+    def test_calculate_tier_filtered_pvp_record_returns_none_without_eligible_rows(self):
+        battles, win_rate = _calculate_tier_filtered_pvp_record([
+            {"ship_tier": 1, "pvp_battles": 200, "wins": 150},
+            {"ship_tier": 4, "pvp_battles": 100, "wins": 55},
+        ])
+
+        self.assertEqual(battles, 0)
+        self.assertIsNone(win_rate)
+
     def test_refresh_player_explorer_summary_persists_denormalized_metrics(self):
         now = timezone.now()
         player = Player.objects.create(
