@@ -153,7 +153,8 @@ this command:
 
 - ensures the docker services are up
 - runs the full Django test suite under `warships.tests`
-- runs the Next.js production build
+- runs the Next.js production build in the Dockerized client environment
+- warms the clan-battle smoke fixture cache for the verified Naumachia test clan
 - runs the API smoke suite
 
 if the script is not executable in your shell, run:

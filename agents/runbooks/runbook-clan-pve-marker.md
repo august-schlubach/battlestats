@@ -8,7 +8,7 @@ This version must satisfy these explicit requirements:
 
 - derive PvE battle count as `total_battles - pvp_battles`
 - only mark players when `total_battles > 500`
-- only mark players when their derived PvE count is greater than their PvP count
+- only mark players when their derived PvE count is more than `75%` of their PvP count, or at least `4000`
 - show the marker in clan member lists with a robot or equivalent machine-themed icon
 - avoid adding stale denormalized state if the signal can be derived cheaply from existing player fields
 
@@ -30,7 +30,8 @@ For a player:
 - `pve_battles = max(total_battles - pvp_battles, 0)`
 - mark them as PvE-focused when:
   - `total_battles > 500`
-  - `pve_battles > pvp_battles`
+  - `pve_battles > 0.75 * pvp_battles`, or
+  - `pve_battles >= 4000`
 
 ## API Surface
 
@@ -57,12 +58,13 @@ This field is derived at response build time from the current player totals.
 1. Run focused backend tests:
    - `docker compose exec -T server python manage.py test warships.tests.test_views.ClanMembersEndpointTests`
 2. Run the client build:
-   - `cd client && npm run build`
+   - `docker compose run --rm --no-deps react-app npm run build`
 3. Manual UI check on a populated clan:
    - verify the leader still shows the crown marker
-   - verify PvE-heavy members show a robot marker
-   - verify members with `total_battles <= 500` do not show the robot marker even if their PvE count exceeds PvP
-   - verify PvP-majority members do not show the robot marker
+   - verify members with PvE totals above `75%` of PvP show a robot marker
+   - verify members with `>= 4000` derived PvE battles still show a robot marker even when PvP remains higher
+   - verify members with `total_battles <= 500` do not show the robot marker
+   - verify members exactly at `75%` of PvP do not show the robot marker
 
 ## Risks
 

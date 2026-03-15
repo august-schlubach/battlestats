@@ -481,22 +481,22 @@ class ClanMembersEndpointTests(TestCase):
             },
         )
 
-    def test_clan_members_marks_pve_players_from_total_minus_pvp_battles(self):
+    def test_clan_members_marks_pve_players_from_updated_thresholds(self):
         clan = Clan.objects.create(
             clan_id=80,
             name="PvE Clan",
-            members_count=3,
+            members_count=5,
         )
         Player.objects.create(
-            name="MostlyPvE",
+            name="AboveSeventyFivePercent",
             player_id=8001,
             clan=clan,
             total_battles=1200,
-            pvp_battles=400,
+            pvp_battles=600,
             last_battle_date=timezone.now().date(),
         )
         Player.objects.create(
-            name="MostlyPvP",
+            name="BelowSeventyFivePercent",
             player_id=8002,
             clan=clan,
             total_battles=1200,
@@ -511,6 +511,22 @@ class ClanMembersEndpointTests(TestCase):
             pvp_battles=40,
             last_battle_date=timezone.now().date(),
         )
+        Player.objects.create(
+            name="HighAbsolutePvE",
+            player_id=8004,
+            clan=clan,
+            total_battles=10000,
+            pvp_battles=5500,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="ExactlySeventyFivePercent",
+            player_id=8005,
+            clan=clan,
+            total_battles=1750,
+            pvp_battles=1000,
+            last_battle_date=timezone.now().date(),
+        )
 
         response = self.client.get("/api/fetch/clan_members/80/")
 
@@ -518,9 +534,11 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(
             {row["name"]: row["is_pve_player"] for row in response.json()},
             {
-                "MostlyPvE": True,
-                "MostlyPvP": False,
+                "AboveSeventyFivePercent": True,
+                "BelowSeventyFivePercent": False,
                 "TooSmallSample": False,
+                "HighAbsolutePvE": True,
+                "ExactlySeventyFivePercent": False,
             },
         )
 
@@ -1393,10 +1411,19 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["x_scale"], "log")
         self.assertEqual(payload["x_domain"]["min"], 50.0)
         self.assertEqual(payload["x_ticks"][0], 50.0)
+        self.assertEqual(payload["x_ticks"][1], 100.0)
         self.assertEqual(payload["tracked_population"], 2)
         self.assertEqual(payload["player_point"]["x"], 60.0)
         self.assertEqual(payload["player_point"]["y"], 56.67)
         self.assertTrue(any(tile["count"] > 0 for tile in payload["tiles"]))
+        self.assertTrue(any(
+            tile["x_min"] == 50.0 and tile["x_max"] == 71.0 and tile["count"] == 1
+            for tile in payload["tiles"]
+        ))
+        self.assertTrue(any(
+            tile["x_min"] == 100.0 and tile["x_max"] == 141.0 and tile["count"] == 1
+            for tile in payload["tiles"]
+        ))
         self.assertTrue(any(point["count"] > 0 for point in payload["trend"]))
 
     def test_player_correlation_distribution_returns_404_for_missing_ranked_wr_battles_player(self):

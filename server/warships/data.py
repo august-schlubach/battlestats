@@ -347,7 +347,7 @@ def is_pve_player(total_battles: Optional[int], pvp_battles: Optional[int]) -> b
     total = max(int(total_battles or 0), 0)
     pvp = max(int(pvp_battles or 0), 0)
     pve = calculate_pve_battle_count(total, pvp)
-    return total > 500 and pve > pvp
+    return total > 500 and (pve > (0.75 * pvp) or pve >= 4000)
 
 
 def is_ranked_player(ranked_rows: Any, minimum_ranked_battles: int = 100) -> bool:
@@ -1328,7 +1328,8 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_CONFIG = {
     'x_scale': 'log',
     'y_scale': 'linear',
     'min_battles': 50,
-    'base_x_edges': [50, 100, 200, 400],
+    'base_x_edges': [50],
+    'x_bin_growth_factor': math.sqrt(2),
     'y_min': 35.0,
     'y_max': 75.0,
     'y_bin_width': 1.5,
@@ -1493,6 +1494,26 @@ def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int
     edges = sorted(set(max(1, int(edge)) for edge in seed_edges))
     while edges[-1] < max_value:
         edges.append(edges[-1] * 2)
+
+    return edges
+
+
+def _build_geometric_bin_edges(max_value: int, seed_edges: list[int], growth_factor: float) -> list[int]:
+    if not seed_edges:
+        return [1, max(2, max_value)]
+
+    edges = sorted(set(max(1, int(edge)) for edge in seed_edges))
+    if growth_factor <= 1.0:
+        return edges
+
+    base_edge = edges[0]
+    power = 0
+    while edges[-1] < max_value:
+        power += 1
+        next_edge = int(round(base_edge * (growth_factor ** power)))
+        if next_edge <= edges[-1]:
+            next_edge = edges[-1] + 1
+        edges.append(next_edge)
 
     return edges
 
@@ -1905,7 +1926,7 @@ def fetch_player_wr_survival_correlation() -> dict:
 
 
 def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
-    cache_key = _player_correlation_cache_key('ranked_wr_battles:v3')
+    cache_key = _player_correlation_cache_key('ranked_wr_battles:v4')
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -1931,7 +1952,12 @@ def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
         records.append((total_battles, win_rate))
         max_battles = max(max_battles, total_battles)
 
-    x_edges = _build_doubling_bin_edges(max_battles, config['base_x_edges'])
+    x_edges = _build_geometric_bin_edges(
+        max_battles,
+        config['base_x_edges'],
+        config['x_bin_growth_factor'],
+    )
+    major_x_ticks = _build_doubling_bin_edges(max_battles, config['base_x_edges'])
     tile_counts: dict[tuple[int, int], int] = {}
     trend_sum_y = [0.0 for _ in range(len(x_edges) - 1)]
     trend_counts = [0 for _ in range(len(x_edges) - 1)]
@@ -1990,7 +2016,7 @@ def _fetch_player_ranked_wr_battles_population_correlation() -> dict:
         'y_label': config['y_label'],
         'x_scale': config['x_scale'],
         'y_scale': config['y_scale'],
-        'x_ticks': x_edges,
+        'x_ticks': major_x_ticks,
         'tracked_population': tracked_population,
         'correlation': round(_pearson_correlation(tracked_population, sum_x, sum_y, sum_xy, sum_x2, sum_y2), 4) if tracked_population > 1 else None,
         'x_domain': {
