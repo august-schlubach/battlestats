@@ -128,22 +128,26 @@ const ClanTagGrid: React.FC<{
     ariaLabelPrefix: string;
 }> = ({ clans, onSelectClan, ariaLabelPrefix }) => (
     <div
-        className="mt-4 grid max-w-[910px] gap-x-2.5 gap-y-2 rounded-md px-1.5 py-1 text-sm"
-        style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(5.25rem, 1fr))',
-        }}
+        className="mt-4 flex max-w-[910px] flex-wrap items-center gap-x-4 gap-y-2 rounded-md py-1 text-sm"
+        style={{ paddingInline: '0.3rem' }}
     >
         {clans.map((clan) => (
             <button
                 key={`${ariaLabelPrefix}-${clan.clan_id}`}
                 type="button"
                 onClick={() => onSelectClan(clan)}
-                className="min-w-0 rounded-sm px-1.5 py-1 text-left font-medium underline-offset-2 hover:underline"
-                style={{ color: wrColor(clan.clan_wr) }}
+                className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 text-left font-medium text-[#334155]"
+                style={{ paddingInline: '0.3rem' }}
                 aria-label={`${ariaLabelPrefix} clan ${clan.name}`}
                 title={clan.tag || clan.name}
             >
-                <span className="block truncate">[{clan.tag || '---'}]</span>
+                <span style={{ color: wrColor(clan.clan_wr) }} aria-hidden="true">{"\u{1F79C}"}</span>
+                <span
+                    className="truncate underline decoration-2 underline-offset-4"
+                    style={{ textDecorationColor: wrColor(clan.clan_wr) }}
+                >
+                    {clan.tag || '---'}
+                </span>
             </button>
         ))}
     </div>
