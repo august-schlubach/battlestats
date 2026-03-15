@@ -43,6 +43,29 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         },
     )
 
+    ranked_hour = os.getenv("RANKED_INCREMENTAL_SCHEDULE_HOUR", "10")
+    ranked_minute = os.getenv("RANKED_INCREMENTAL_SCHEDULE_MINUTE", "30")
+    ranked_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute=ranked_minute,
+        hour=ranked_hour,
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="daily-ranked-incrementals",
+        defaults={
+            "task": "warships.tasks.incremental_ranked_data_task",
+            "crontab": ranked_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Daily incremental refresh of ranked history, scheduled away from the clan crawl.",
+        },
+    )
+
     watchdog_minutes = int(os.getenv("CLAN_CRAWL_WATCHDOG_MINUTES", "5"))
     watchdog_schedule, _ = IntervalSchedule.objects.get_or_create(
         every=watchdog_minutes,

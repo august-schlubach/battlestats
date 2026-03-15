@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Q
 from django.utils import timezone
 
-from warships.data import update_ranked_data
+from warships.data import _ranked_rows_have_top_ship, update_ranked_data
 from warships.models import Player
 
 
@@ -116,6 +116,9 @@ class Command(BaseCommand):
         include_hidden = bool(options['include_hidden'])
         force = bool(options['force'])
         state_path = Path(options['state_file']).expanduser().resolve()
+        stale_cutoff = None
+        if refresh_older_than_hours > 0:
+            stale_cutoff = timezone.now() - timedelta(hours=refresh_older_than_hours)
 
         state = _load_state(
             state_path, reset_state=bool(options['reset_state']))
@@ -157,6 +160,21 @@ class Command(BaseCommand):
         def should_stop() -> bool:
             return (limit and attempted_this_run >= limit) or errors_this_run >= max_errors
 
+        def needs_ranked_backfill(player: Player) -> bool:
+            if force:
+                return True
+
+            if player.ranked_json is None or player.ranked_updated_at is None:
+                return True
+
+            if stale_cutoff is not None and player.ranked_updated_at < stale_cutoff:
+                return True
+
+            if player.ranked_json and not _ranked_rows_have_top_ship(player.ranked_json):
+                return True
+
+            return False
+
         pending_failures = list(dict.fromkeys(int(player_id)
                                 for player_id in state.get('failed_player_ids', [])))
         if pending_failures:
@@ -185,19 +203,14 @@ class Command(BaseCommand):
             if not include_hidden:
                 queryset = queryset.filter(is_hidden=False)
 
-            if not force:
-                selection_filter = Q(ranked_json__isnull=True) | Q(
-                    ranked_updated_at__isnull=True)
-                if refresh_older_than_hours > 0:
-                    stale_cutoff = timezone.now() - timedelta(hours=refresh_older_than_hours)
-                    selection_filter |= Q(ranked_updated_at__lt=stale_cutoff)
-                queryset = queryset.filter(selection_filter)
-
             queryset = queryset.filter(id__gt=state['last_player_id'])
 
             for player in queryset.iterator(chunk_size=batch_size):
                 if should_stop():
                     break
+
+                if not needs_ranked_backfill(player):
+                    continue
 
                 try:
                     update_ranked_data(player.player_id)

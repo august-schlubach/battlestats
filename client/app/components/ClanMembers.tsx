@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCrown, faRobot, faStar } from '@fortawesome/free-solid-svg-icons';
+import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
 
 interface ClanMembersProps {
     clanId: number;
@@ -11,6 +14,10 @@ interface ClanMemberData {
     is_hidden: boolean;
     pvp_ratio: number | null;
     days_since_last_battle: number | null;
+    is_leader: boolean;
+    is_pve_player: boolean;
+    is_ranked_player: boolean;
+    highest_ranked_league: RankedLeagueName | null;
     activity_bucket: 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
 }
 
@@ -32,6 +39,34 @@ const formatRecency = (daysSinceLastBattle: number | null): string => {
     if (daysSinceLastBattle === 1) return '1 day idle';
     return `${daysSinceLastBattle} days idle`;
 };
+
+const LeaderCrown = () => (
+    <FontAwesomeIcon
+        icon={faCrown}
+        className="text-[11px] text-amber-500"
+        title="Clan leader"
+        aria-label="Clan leader"
+    />
+);
+
+const PveRobot = () => (
+    <FontAwesomeIcon
+        icon={faRobot}
+        className="text-[11px] text-slate-500"
+        title="pve enjoyer"
+        aria-label="pve enjoyer"
+    />
+);
+
+const RankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) => (
+    <FontAwesomeIcon
+        icon={faStar}
+        className="text-[11px]"
+        style={{ color: getRankedLeagueColor(league) }}
+        title={getRankedLeagueTooltip(league)}
+        aria-label={getRankedLeagueTooltip(league)}
+    />
+);
 
 const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layout = 'inline' }) => {
     const [members, setMembers] = useState<ClanMemberData[]>([]);
@@ -72,6 +107,9 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layou
                                 >
                                     <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                     {member.name}
+                                    {member.is_leader && <LeaderCrown />}
+                                    {member.is_pve_player && <PveRobot />}
+                                    {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
                                     <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
                                 </span>
                             ) : (
@@ -85,6 +123,9 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layou
                                 >
                                     <span style={{ color: wrColor(member.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
                                     {member.name}
+                                    {member.is_leader && <LeaderCrown />}
+                                    {member.is_pve_player && <PveRobot />}
+                                    {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
                                     <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
                                 </button>
                             )}

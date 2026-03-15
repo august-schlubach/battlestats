@@ -20,6 +20,27 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
 
+## Font Awesome
+
+Font Awesome is installed for the React client with the SVG React packages:
+
+```bash
+npm install @fortawesome/fontawesome-svg-core @fortawesome/free-solid-svg-icons @fortawesome/free-regular-svg-icons @fortawesome/free-brands-svg-icons @fortawesome/react-fontawesome
+```
+
+The one-time Next.js setup lives in `app/layout.tsx`, where the Font Awesome stylesheet is imported and `config.autoAddCss = false` is set to avoid duplicate CSS injection.
+
+Example usage in a component:
+
+```tsx
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faTrophy } from "@fortawesome/free-solid-svg-icons";
+
+export function RankedBadge() {
+  return <FontAwesomeIcon icon={faTrophy} className="text-amber-500" />;
+}
+```
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

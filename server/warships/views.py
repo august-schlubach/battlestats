@@ -1,6 +1,7 @@
 import logging
 import random
 from datetime import timedelta
+from kombu.exceptions import OperationalError as KombuOperationalError
 from django.core.cache import cache
 from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField, Count, Q
 from django.db.models.functions import Cast
@@ -21,11 +22,23 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
-    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record
+    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_pve_player, is_ranked_player, \
+    get_highest_ranked_league_name
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
 
 logging.basicConfig(level=logging.INFO)
+
+
+def _delay_task_safely(task, **kwargs) -> None:
+    try:
+        task.delay(**kwargs)
+    except KombuOperationalError as error:
+        logging.warning(
+            'Skipping async task enqueue for %s due to broker error: %s',
+            getattr(task, 'name', repr(task)),
+            error,
+        )
 
 
 def _record_clan_lookup(clan: Clan) -> None:
@@ -135,12 +148,13 @@ class PlayerViewSet(viewsets.ModelViewSet):
         # When clan is still missing, force a refresh task so we do not get
         # stuck on fresh-but-incomplete player records.
         if not obj.clan:
-            update_player_data_task.delay(
+            _delay_task_safely(
+                update_player_data_task,
                 player_id=obj.player_id,
                 force_refresh=True,
             )
         elif player_refresh_stale:
-            update_player_data_task.delay(player_id=obj.player_id)
+            _delay_task_safely(update_player_data_task, player_id=obj.player_id)
 
         if obj.clan:
             clan = obj.clan
@@ -151,10 +165,10 @@ class PlayerViewSet(viewsets.ModelViewSet):
             if clan_refresh_stale:
                 logging.info(
                     f'Updating clan data: {obj.name} : {clan.name} {obj.player_id}')
-                update_clan_data_task.delay(clan_id=clan.clan_id)
+                _delay_task_safely(update_clan_data_task, clan_id=clan.clan_id)
 
             if clan_refresh_stale or clan_members_incomplete:
-                update_clan_members_task.delay(clan_id=clan.clan_id)
+                _delay_task_safely(update_clan_members_task, clan_id=clan.clan_id)
         return obj
 
 
@@ -426,7 +440,7 @@ def clan_members(request, clan_id: str) -> Response:
     _record_clan_lookup(clan)
 
     from warships.data import update_clan_data, update_clan_members
-    if not clan.members_count:
+    if not clan.members_count or (clan.leader_id is None and not clan.leader_name):
         update_clan_data(clan_id=clan_id)
         clan.refresh_from_db()
 
@@ -437,7 +451,25 @@ def clan_members(request, clan_id: str) -> Response:
         members = clan.player_set.exclude(name='').order_by(
             *_player_score_ordering('last_battle_date'))
 
-    serializer = ClanMemberSerializer(members, many=True)
+    leader_name = (clan.leader_name or '').strip().lower()
+    member_rows = [
+        {
+            'name': member.name,
+            'is_hidden': member.is_hidden,
+            'pvp_ratio': member.pvp_ratio,
+            'days_since_last_battle': member.days_since_last_battle,
+            'is_leader': (
+                (clan.leader_id is not None and member.player_id == clan.leader_id)
+                or (leader_name and member.name.strip().lower() == leader_name)
+            ),
+            'is_pve_player': is_pve_player(member.total_battles, member.pvp_battles),
+            'is_ranked_player': is_ranked_player(member.ranked_json),
+            'highest_ranked_league': get_highest_ranked_league_name(member.ranked_json),
+        }
+        for member in members
+    ]
+
+    serializer = ClanMemberSerializer(member_rows, many=True)
     return Response(serializer.data)
 
 

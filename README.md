@@ -117,6 +117,7 @@ DJANGO_SECRET_KEY=your_django_secret_key
 notes:
 
 - `DB_HOST` must be `db` for Docker networking.
+- Host-based `python manage.py ...` runs automatically remap `DB_HOST=db` to `127.0.0.1`, so the same `server/.env` works after activating the virtualenv.
 - `DB_PORT` should be `5432`.
 - `DB_NAME`/`DB_USER` should match compose defaults (`battlestats` / `django`).
 - `DB_PASSWORD` must match the password used by the Postgres container.
@@ -175,6 +176,22 @@ python scripts/backfill_ranked_data.py --state-file logs/backfill_ranked_data_st
 ```
 
 it writes an atomic JSON checkpoint after each player attempt, retries previously failed player IDs on the next run, and resumes from the last processed player ID if the job is interrupted. by default it targets visible players missing ranked data; add `--refresh-older-than-hours 168` to revisit stale rows or `--force` to sweep all players in scope.
+
+for the ongoing ranked incremental refresh, use the queue-based command that keeps known ranked players fresh and samples likely discovery candidates without sweeping the entire player table every day:
+
+```bash
+python manage.py incremental_ranked_data --state-file logs/incremental_ranked_data_state.json
+```
+
+for manual runs outside Django command wiring, the wrapper script is available:
+
+```bash
+python scripts/incremental_ranked_data.py --limit 100 --status-only
+```
+
+the scheduled daily incremental task is created via `django-celery-beat` as `daily-ranked-incrementals`, defaulting to `10:30 UTC`, which is intentionally offset from the default `03:00 UTC` clan crawl. it also skips execution if the clan crawl lock is active.
+
+the docker workflow now tunes the daily ranked incremental defaults to stay conservative on upstream request volume: `RANKED_INCREMENTAL_LIMIT=150`, `RANKED_INCREMENTAL_SKIP_FRESH_HOURS=24`, `RANKED_INCREMENTAL_KNOWN_LIMIT=300`, and `RANKED_INCREMENTAL_DISCOVERY_LIMIT=75`. the queue now interleaves discovery candidates among known-ranked refreshes, so `known-limit` and `discovery-limit` control the approximate mix within a run instead of discovery always waiting behind the full known backlog. adjust those environment variables on the `server` and `task-runner` services if you want a faster or broader sweep.
 
 Charts:
 

@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary
 
 
@@ -267,6 +267,101 @@ class AggregateChartDataTests(TestCase):
 
 
 class RankedDataRefreshTests(TestCase):
+    def test_aggregate_ranked_seasons_keeps_full_non_empty_history(self):
+        result = _aggregate_ranked_seasons(
+            {
+                "1001": {
+                    "1": {
+                        "1": {"battles": 3, "victories": 2, "rank": 6, "best_rank_in_sprint": 6},
+                    },
+                },
+                "1002": {
+                    "1": {
+                        "1": {"battles": 4, "victories": 3, "rank": 5, "best_rank_in_sprint": 5},
+                    },
+                },
+                "1003": {
+                    "1": {
+                        "1": {"battles": 5, "victories": 4, "rank": 4, "best_rank_in_sprint": 4},
+                    },
+                },
+                "1004": {
+                    "1": {
+                        "1": {"battles": 6, "victories": 4, "rank": 3, "best_rank_in_sprint": 3},
+                    },
+                },
+                "1005": {
+                    "1": {
+                        "1": {"battles": 7, "victories": 5, "rank": 2, "best_rank_in_sprint": 2},
+                    },
+                },
+                "1006": {
+                    "1": {
+                        "1": {"battles": 8, "victories": 6, "rank": 1, "best_rank_in_sprint": 1},
+                    },
+                },
+                "1007": {
+                    "1": {
+                        "1": {"battles": 9, "victories": 6, "rank": 4, "best_rank_in_sprint": 4},
+                    },
+                },
+                "1008": {
+                    "1": {
+                        "1": {"battles": 10, "victories": 7, "rank": 3, "best_rank_in_sprint": 3},
+                    },
+                },
+                "1009": {
+                    "1": {
+                        "1": {"battles": 11, "victories": 8, "rank": 2, "best_rank_in_sprint": 2},
+                    },
+                },
+                "1010": {
+                    "1": {
+                        "1": {"battles": 12, "victories": 9, "rank": 1, "best_rank_in_sprint": 1},
+                    },
+                },
+                "1011": {
+                    "1": {
+                        "1": {"battles": 13, "victories": 9, "rank": 5, "best_rank_in_sprint": 5},
+                    },
+                },
+                "1012": {
+                    "1": {
+                        "1": {"battles": 14, "victories": 10, "rank": 4, "best_rank_in_sprint": 4},
+                    },
+                },
+            },
+            {season_id: {"label": f"S{season_id - 1000}"}
+                for season_id in range(1001, 1013)},
+        )
+
+        self.assertEqual([row["season_id"]
+                         for row in result], list(range(1001, 1013)))
+
+    @patch("warships.data.update_ranked_data")
+    def test_fetch_ranked_data_uses_fresh_cache_even_without_top_ship_enrichment(self, mock_update_ranked_data):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="FreshRankedCache",
+            player_id=7010,
+            ranked_updated_at=now,
+            ranked_json=[
+                {
+                    "season_id": 1100,
+                    "highest_league": 2,
+                    "highest_league_name": "Silver",
+                    "total_battles": 25,
+                    "total_wins": 14,
+                    "win_rate": 0.56,
+                }
+            ],
+        )
+
+        result = fetch_ranked_data(str(player.player_id))
+
+        self.assertEqual(result, player.ranked_json)
+        mock_update_ranked_data.assert_not_called()
+
     @patch("warships.data._fetch_ranked_ship_stats_for_player")
     @patch("warships.data._fetch_ship_info")
     @patch("warships.data._fetch_ranked_account_info")
@@ -313,17 +408,23 @@ class RankedDataRefreshTests(TestCase):
 
 class PlayerDataHardeningTests(TestCase):
     def test_compute_player_verdict_uses_new_playstyle_bands(self):
-        self.assertEqual(compute_player_verdict(500, 65.0, 34.0), "Sealord")
-        self.assertEqual(compute_player_verdict(500, 64.8, 34.0), "Assassin")
-        self.assertEqual(compute_player_verdict(500, 60.0, 34.0), "Assassin")
-        self.assertEqual(compute_player_verdict(500, 57.1, 35.0), "Warrior")
-        self.assertEqual(compute_player_verdict(500, 55.0, 35.0), "Stalwart")
-        self.assertEqual(compute_player_verdict(500, 54.2, 28.0), "Daredevil")
-        self.assertEqual(compute_player_verdict(500, 50.0, 35.0), "Survivor")
-        self.assertEqual(compute_player_verdict(500, 50.0, 24.0), "Potato")
-        self.assertEqual(compute_player_verdict(500, 51.0, 35.0), "Flotsam")
-        self.assertEqual(compute_player_verdict(500, 41.0, 24.0), "Hot Potato")
-        self.assertEqual(compute_player_verdict(500, 42.0, 24.0), "Potato")
+        self.assertEqual(compute_player_verdict(500, 65.1, 34.0), "Sealord")
+        self.assertEqual(compute_player_verdict(500, 65.0, 34.0), "Assassin")
+        self.assertEqual(compute_player_verdict(500, 60.0, 24.0), "Kraken")
+        self.assertEqual(compute_player_verdict(500, 57.1, 35.0), "Stalwart")
+        self.assertEqual(compute_player_verdict(500, 57.1, 28.0), "Daredevil")
+        self.assertEqual(compute_player_verdict(500, 55.0, 35.0), "Warrior")
+        self.assertEqual(compute_player_verdict(500, 55.0, 28.0), "Raider")
+        self.assertEqual(compute_player_verdict(500, 53.0, 35.0), "Survivor")
+        self.assertEqual(compute_player_verdict(500, 53.0, 28.0), "Jetsam")
+        self.assertEqual(compute_player_verdict(500, 50.0, 35.0), "Flotsam")
+        self.assertEqual(compute_player_verdict(500, 50.0, 28.0), "Drifter")
+        self.assertEqual(compute_player_verdict(500, 45.0, 35.0), "Pirate")
+        self.assertEqual(compute_player_verdict(500, 45.0, 24.0), "Potato")
+        self.assertEqual(compute_player_verdict(500, 44.9, 35.0), "Hot Potato")
+        self.assertEqual(compute_player_verdict(
+            500, 44.9, 24.0), "Leroy Jenkins")
+        self.assertIsNone(compute_player_verdict(500, 50.0, None))
 
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
@@ -424,7 +525,7 @@ class PlayerDataHardeningTests(TestCase):
                     "battles": 1800,
                     "wins": 1080,
                     "losses": 720,
-                    "survived_battles": 500,
+                    "survived_battles": 650,
                     "survived_wins": 350,
                 },
             },
@@ -439,7 +540,7 @@ class PlayerDataHardeningTests(TestCase):
 
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
-    def test_update_player_data_assigns_sealord_playstyle_at_super_unicum_threshold(
+    def test_update_player_data_assigns_sealord_playstyle_above_super_unicum_threshold(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
@@ -457,8 +558,8 @@ class PlayerDataHardeningTests(TestCase):
                 "battles": 2200,
                 "pvp": {
                     "battles": 2000,
-                    "wins": 1300,
-                    "losses": 700,
+                    "wins": 1310,
+                    "losses": 690,
                     "survived_battles": 700,
                     "survived_wins": 450,
                 },
@@ -469,12 +570,12 @@ class PlayerDataHardeningTests(TestCase):
         update_player_data(player, force_refresh=True)
 
         player.refresh_from_db()
-        self.assertEqual(player.pvp_ratio, 65.0)
+        self.assertEqual(player.pvp_ratio, 65.5)
         self.assertEqual(player.verdict, "Sealord")
 
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
-    def test_update_player_data_assigns_stalwart_for_good_non_warrior_band(
+    def test_update_player_data_assigns_warrior_playstyle_for_good_band(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
@@ -505,11 +606,11 @@ class PlayerDataHardeningTests(TestCase):
 
         player.refresh_from_db()
         self.assertEqual(player.pvp_ratio, 55.0)
-        self.assertEqual(player.verdict, "Stalwart")
+        self.assertEqual(player.verdict, "Warrior")
 
     @patch("warships.data._fetch_clan_membership_for_player")
     @patch("warships.data._fetch_player_personal_data")
-    def test_update_player_data_assigns_survivor_to_average_stable_players(
+    def test_update_player_data_assigns_flotsam_to_average_band_players(
         self,
         mock_fetch_player_personal_data,
         mock_fetch_clan_membership,
@@ -540,7 +641,7 @@ class PlayerDataHardeningTests(TestCase):
 
         player.refresh_from_db()
         self.assertEqual(player.pvp_ratio, 50.0)
-        self.assertEqual(player.verdict, "Survivor")
+        self.assertEqual(player.verdict, "Flotsam")
 
 
 class PlayerExplorerSummaryTests(TestCase):
@@ -612,6 +713,17 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.ranked_seasons_participated, 1)
         self.assertEqual(summary.latest_ranked_battles, 12)
         self.assertEqual(summary.highest_ranked_league_recent, "Silver")
+
+    def test_get_highest_ranked_league_name_returns_best_historical_league(self):
+        self.assertEqual(
+            get_highest_ranked_league_name([
+                {"season_id": 7, "highest_league_name": "Bronze", "total_battles": 21},
+                {"season_id": 8, "highest_league": 1,
+                    "highest_league_name": "Gold", "total_battles": 11},
+                {"season_id": 9, "highest_league_name": "Silver", "total_battles": 0},
+            ]),
+            "Gold",
+        )
 
     def test_refresh_player_explorer_summary_calculates_weighted_kill_ratio_from_kdr_rows(self):
         player = Player.objects.create(
@@ -830,7 +942,7 @@ class PlayerExplorerSummaryTests(TestCase):
         summary = PlayerExplorerSummary.objects.get(player=player)
 
         self.assertEqual(player.clan, clan)
-        self.assertEqual(player.verdict, "Stalwart")
+        self.assertEqual(player.verdict, "Warrior")
         self.assertEqual(summary.player, player)
         self.assertEqual(summary.battles_last_29_days, 0)
         self.assertIsNone(summary.ships_played_total)
@@ -852,7 +964,7 @@ class PlayerExplorerSummaryTests(TestCase):
                         "battles": 4200,
                         "wins": 2604,
                         "losses": 1596,
-                        "survived_battles": 1200,
+                        "survived_battles": 1500,
                     },
                 },
             },
@@ -877,8 +989,8 @@ class PlayerExplorerSummaryTests(TestCase):
                     "battles": 5000,
                     "pvp": {
                         "battles": 4200,
-                        "wins": 2730,
-                        "losses": 1470,
+                        "wins": 2772,
+                        "losses": 1428,
                         "survived_battles": 1300,
                     },
                 },
@@ -887,10 +999,10 @@ class PlayerExplorerSummaryTests(TestCase):
         )
 
         player = Player.objects.get(player_id=9918)
-        self.assertEqual(player.pvp_ratio, 65.0)
+        self.assertEqual(player.pvp_ratio, 66.0)
         self.assertEqual(player.verdict, "Sealord")
 
-    def test_clan_crawl_save_player_assigns_hot_potato_to_bottom_shelf_players(self):
+    def test_clan_crawl_save_player_assigns_leroy_jenkins_to_bottom_shelf_players(self):
         clan = Clan.objects.create(
             clan_id=9917, name="HotPotatoClan", tag="HP")
 
@@ -916,7 +1028,7 @@ class PlayerExplorerSummaryTests(TestCase):
 
         player = Player.objects.get(player_id=9917)
         self.assertEqual(player.pvp_ratio, 40.0)
-        self.assertEqual(player.verdict, "Hot Potato")
+        self.assertEqual(player.verdict, "Leroy Jenkins")
 
     @patch("warships.data._fetch_clan_data")
     def test_update_clan_data_does_not_blank_existing_clan_on_empty_upstream_response(self, mock_fetch_clan_data):

@@ -27,9 +27,14 @@ Use `agents/knowledge/` instead when the main value is narrative investigation, 
 ## Current Starting Point
 
 - `data-products/player-daily-snapshots.odcs.yaml`
+- `data-products/player-summary.odcs.yaml`
+- `data-products/player-explorer-rows.odcs.yaml`
+- `upstream/wows-account-info.yaml`
+- `upstream/wows-account-list.yaml`
 - `upstream/wows-account-statsbydate.yaml`
+- `upstream/wows-clans-accountinfo.yaml`
 
-This first contract reflects the repo's derived daily player activity dataset, which is a better ODCS fit than the raw WoWS `account/statsbydate` endpoint.
+The current contract set now covers the main derived player activity dataset, the player summary/detail payload, the explorer row payload, and the most relied-on upstream account and clan-membership endpoints.
 
 For upstream endpoints, the YAML profile should capture:
 

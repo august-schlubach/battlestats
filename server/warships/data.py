@@ -17,13 +17,14 @@ logging.basicConfig(level=logging.INFO)
 
 
 PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD = 100
-PLAYSTYLE_SEALORD_WR_THRESHOLD = 65.0
-PLAYSTYLE_ASSASSIN_WR_THRESHOLD = 60.0
-PLAYSTYLE_WARRIOR_WR_THRESHOLD = 56.0
-PLAYSTYLE_STALWART_WR_THRESHOLD = 52.0
-PLAYSTYLE_FLOTSAM_WR_THRESHOLD = 51.0
-PLAYSTYLE_HOT_POTATO_WR_THRESHOLD = 42.0
-PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD = 33.0
+PLAYSTYLE_SUPER_UNICUM_WR_THRESHOLD = 65.0
+PLAYSTYLE_UNICUM_WR_THRESHOLD = 60.0
+PLAYSTYLE_GREAT_WR_THRESHOLD = 56.0
+PLAYSTYLE_GOOD_WR_THRESHOLD = 54.0
+PLAYSTYLE_ABOVE_AVERAGE_WR_THRESHOLD = 52.0
+PLAYSTYLE_AVERAGE_WR_THRESHOLD = 50.0
+PLAYSTYLE_BELOW_AVERAGE_WR_THRESHOLD = 45.0
+PLAYSTYLE_LOW_SURVIVABILITY_THRESHOLD = 33.0
 KILL_RATIO_LOW_TIER_WEIGHT = 0.15
 KILL_RATIO_MID_TIER_WEIGHT = 0.65
 KILL_RATIO_HIGH_TIER_WEIGHT = 1.0
@@ -51,32 +52,36 @@ def compute_player_verdict(pvp_battles: int, pvp_ratio: Optional[float], pvp_sur
     if pvp_battles < PLAYSTYLE_RECRUIT_BATTLES_THRESHOLD:
         return 'Recruit'
 
-    if pvp_ratio is None or pvp_survival_rate is None:
+    if pvp_ratio is None:
         return None
 
-    # 65% WR aligns with the repo's super-unicum shelf and is rare enough to earn
-    # a distinct top-end label.
-    if pvp_ratio >= PLAYSTYLE_SEALORD_WR_THRESHOLD:
+    if pvp_ratio > PLAYSTYLE_SUPER_UNICUM_WR_THRESHOLD:
         return 'Sealord'
 
-    # 60% WR lines up with the WoWS unicum band and stays elite without claiming
-    # the absolute top shelf.
-    if pvp_ratio >= PLAYSTYLE_ASSASSIN_WR_THRESHOLD:
-        return 'Assassin'
+    if pvp_survival_rate is None:
+        return None
 
-    if pvp_ratio >= PLAYSTYLE_WARRIOR_WR_THRESHOLD:
-        return 'Daredevil' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Warrior'
+    is_low_survivability = pvp_survival_rate < PLAYSTYLE_LOW_SURVIVABILITY_THRESHOLD
 
-    if pvp_ratio >= PLAYSTYLE_STALWART_WR_THRESHOLD:
-        return 'Daredevil' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Stalwart'
+    if pvp_ratio >= PLAYSTYLE_UNICUM_WR_THRESHOLD:
+        return 'Kraken' if is_low_survivability else 'Assassin'
 
-    if pvp_ratio >= PLAYSTYLE_FLOTSAM_WR_THRESHOLD:
-        return 'Jetsam' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Flotsam'
+    if pvp_ratio >= PLAYSTYLE_GREAT_WR_THRESHOLD:
+        return 'Daredevil' if is_low_survivability else 'Stalwart'
 
-    if pvp_ratio >= PLAYSTYLE_HOT_POTATO_WR_THRESHOLD:
-        return 'Potato' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Survivor'
+    if pvp_ratio >= PLAYSTYLE_GOOD_WR_THRESHOLD:
+        return 'Raider' if is_low_survivability else 'Warrior'
 
-    return 'Hot Potato' if pvp_survival_rate < PLAYSTYLE_AGGRESSIVE_SURVIVAL_THRESHOLD else 'Survivor'
+    if pvp_ratio >= PLAYSTYLE_ABOVE_AVERAGE_WR_THRESHOLD:
+        return 'Jetsam' if is_low_survivability else 'Survivor'
+
+    if pvp_ratio >= PLAYSTYLE_AVERAGE_WR_THRESHOLD:
+        return 'Drifter' if is_low_survivability else 'Flotsam'
+
+    if pvp_ratio >= PLAYSTYLE_BELOW_AVERAGE_WR_THRESHOLD:
+        return 'Potato' if is_low_survivability else 'Pirate'
+
+    return 'Leroy Jenkins' if is_low_survivability else 'Hot Potato'
 
 
 def _coerce_activity_rows(activity_rows: Any) -> list[dict]:
@@ -330,6 +335,56 @@ def _calculate_tier_filtered_pvp_record(
         return 0, None
 
     return total_battles, round((total_wins / total_battles) * 100, 2)
+
+
+def calculate_pve_battle_count(total_battles: Optional[int], pvp_battles: Optional[int]) -> int:
+    total = max(int(total_battles or 0), 0)
+    pvp = max(int(pvp_battles or 0), 0)
+    return max(total - pvp, 0)
+
+
+def is_pve_player(total_battles: Optional[int], pvp_battles: Optional[int]) -> bool:
+    total = max(int(total_battles or 0), 0)
+    pvp = max(int(pvp_battles or 0), 0)
+    pve = calculate_pve_battle_count(total, pvp)
+    return total > 500 and pve > pvp
+
+
+def is_ranked_player(ranked_rows: Any, minimum_ranked_battles: int = 100) -> bool:
+    total_battles, _win_rate = _calculate_ranked_record(ranked_rows)
+    return total_battles > minimum_ranked_battles
+
+
+def get_highest_ranked_league_name(ranked_rows: Any) -> Optional[str]:
+    normalized_rows = _coerce_ranked_rows(ranked_rows)
+    best_league: Optional[int] = None
+
+    for row in normalized_rows:
+        if int(row.get('total_battles', 0) or 0) <= 0:
+            continue
+
+        league_value = row.get('highest_league')
+        try:
+            league = int(league_value)
+        except (TypeError, ValueError):
+            league_name = str(row.get('highest_league_name')
+                              or '').strip().lower()
+            league = {
+                'gold': 1,
+                'silver': 2,
+                'bronze': 3,
+            }.get(league_name)
+
+        if league is None or league < 1 or league > 3:
+            continue
+
+        if best_league is None or league < best_league:
+            best_league = league
+
+    if best_league is None:
+        return None
+
+    return LEAGUE_NAMES.get(best_league)
 
 
 def _summary_has_battle_data(player: Player, battle_rows: list[dict]) -> bool:
@@ -1387,8 +1442,7 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
-                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)                          :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(
@@ -2317,9 +2371,9 @@ def _aggregate_ranked_seasons(rank_info: dict, season_meta: dict, top_ship_names
             'sprints': sorted(sprint_details, key=lambda x: x['sprint_number']),
         })
 
-    # Sort by season_id ascending, take last 10
+    # Persist the full non-empty ranked history so downstream views can render all seasons.
     seasons.sort(key=lambda x: x['season_id'])
-    return seasons[-10:]
+    return seasons
 
 
 def fetch_ranked_data(player_id: str) -> list:
@@ -2332,9 +2386,8 @@ def fetch_ranked_data(player_id: str) -> list:
     # Return cached if fresh
     if player.ranked_json and player.ranked_updated_at and \
             datetime.now() - player.ranked_updated_at < timedelta(hours=1):
-        if _ranked_rows_have_top_ship(player.ranked_json):
-            logging.info(f'Ranked data cache fresh for {player.name}')
-            return player.ranked_json
+        logging.info(f'Ranked data cache fresh for {player.name}')
+        return player.ranked_json
 
     logging.info(f'Fetching ranked data for {player.name}')
     update_ranked_data(player_id)
@@ -2372,6 +2425,14 @@ def update_ranked_data(player_id) -> None:
     # Aggregate into per-season summaries
     result = _aggregate_ranked_seasons(
         rank_info, season_meta, top_ship_names_by_season=top_ship_names_by_season)
+
+    if len(result) > 50:
+        logging.warning(
+            'Unusually large ranked history for %s (%s): %s seasons',
+            player.name,
+            player.player_id,
+            len(result),
+        )
 
     player.ranked_json = result
     player.ranked_updated_at = datetime.now()

@@ -1,5 +1,6 @@
 from unittest.mock import patch
 from datetime import datetime, timedelta
+from kombu.exceptions import OperationalError as KombuOperationalError
 
 from django.core.cache import cache
 from django.test import TestCase, override_settings
@@ -10,6 +11,74 @@ from warships.views import PUBLIC_API_THROTTLES, landing_players
 
 
 class PlayerViewSetTests(TestCase):
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay", side_effect=KombuOperationalError("broker-down"))
+    def test_player_detail_returns_200_when_background_enqueue_fails(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=953,
+            name="BrokerFailureClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        Player.objects.create(
+            name="BrokerFailurePlayer",
+            player_id=9053,
+            clan=clan,
+            last_fetch=now - timedelta(hours=1),
+            pvp_battles=0,
+            is_hidden=False,
+        )
+
+        with self.assertLogs(level="WARNING") as captured_logs:
+            response = self.client.get("/api/player/BrokerFailurePlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "BrokerFailurePlayer")
+        self.assertTrue(
+            any("Skipping async task enqueue" in line for line in captured_logs.output))
+        mock_update_player_task.assert_called_once()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_exposes_clan_leader_flag(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=954,
+            name="Leader Flag Clan",
+            members_count=1,
+            last_fetch=now,
+            leader_id=9054,
+        )
+        Player.objects.create(
+            name="LeaderFlagPlayer",
+            player_id=9054,
+            clan=clan,
+            last_fetch=now,
+        )
+
+        response = self.client.get("/api/player/LeaderFlagPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["is_clan_leader"])
+        mock_update_player_task.assert_not_called()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
@@ -299,9 +368,9 @@ class PlayerViewSetTests(TestCase):
         response = self.client.get("/api/player/VerdictGapPlayer/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["verdict"], "Survivor")
+        self.assertEqual(response.json()["verdict"], "Flotsam")
         player.refresh_from_db()
-        self.assertEqual(player.verdict, "Survivor")
+        self.assertEqual(player.verdict, "Flotsam")
         mock_update_player_task.assert_not_called()
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
@@ -352,7 +421,7 @@ class ClanMembersEndpointTests(TestCase):
         mock_update_clan_members,
     ):
         clan = Clan.objects.create(
-            clan_id=42, name="Test Clan", members_count=1)
+            clan_id=42, name="Test Clan", members_count=1, leader_id=1, leader_name="MemberOne")
         Player.objects.create(
             name="MemberOne",
             player_id=1,
@@ -370,10 +439,147 @@ class ClanMembersEndpointTests(TestCase):
                              "is_hidden": False,
                              "pvp_ratio": None,
                              "days_since_last_battle": 6,
+                             "is_leader": True,
+                             "is_pve_player": False,
+                             "is_ranked_player": False,
+                             "highest_ranked_league": None,
                              "activity_bucket": "active_7d",
                          }])
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
+
+    def test_clan_members_marks_leader_by_name_when_leader_id_missing(self):
+        clan = Clan.objects.create(
+            clan_id=79,
+            name="Leader Name Clan",
+            members_count=2,
+            leader_name="NamedLeader",
+        )
+        Player.objects.create(
+            name="NamedLeader",
+            player_id=7901,
+            clan=clan,
+            days_since_last_battle=1,
+            last_battle_date=timezone.now().date() - timedelta(days=1),
+        )
+        Player.objects.create(
+            name="OtherMember",
+            player_id=7902,
+            clan=clan,
+            days_since_last_battle=3,
+            last_battle_date=timezone.now().date() - timedelta(days=3),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/79/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["name"]: row["is_leader"] for row in response.json()},
+            {
+                "NamedLeader": True,
+                "OtherMember": False,
+            },
+        )
+
+    def test_clan_members_marks_pve_players_from_total_minus_pvp_battles(self):
+        clan = Clan.objects.create(
+            clan_id=80,
+            name="PvE Clan",
+            members_count=3,
+        )
+        Player.objects.create(
+            name="MostlyPvE",
+            player_id=8001,
+            clan=clan,
+            total_battles=1200,
+            pvp_battles=400,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="MostlyPvP",
+            player_id=8002,
+            clan=clan,
+            total_battles=1200,
+            pvp_battles=800,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="TooSmallSample",
+            player_id=8003,
+            clan=clan,
+            total_battles=500,
+            pvp_battles=40,
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/80/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["name"]: row["is_pve_player"] for row in response.json()},
+            {
+                "MostlyPvE": True,
+                "MostlyPvP": False,
+                "TooSmallSample": False,
+            },
+        )
+
+    def test_clan_members_marks_ranked_players_with_over_100_ranked_battles(self):
+        clan = Clan.objects.create(
+            clan_id=81,
+            name="Ranked Clan",
+            members_count=3,
+        )
+        Player.objects.create(
+            name="RankedMain",
+            player_id=8101,
+            clan=clan,
+            ranked_json=[
+                {"season_id": 1, "total_battles": 65,
+                    "total_wins": 35, "win_rate": 53.85, "highest_league": 1, "highest_league_name": "Gold"},
+                {"season_id": 2, "total_battles": 45,
+                    "total_wins": 20, "win_rate": 44.44, "highest_league": 2, "highest_league_name": "Silver"},
+            ],
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="RankedDabbler",
+            player_id=8102,
+            clan=clan,
+            ranked_json=[
+                {"season_id": 3, "total_battles": 100,
+                    "total_wins": 55, "win_rate": 55.0, "highest_league": 2, "highest_league_name": "Silver"},
+            ],
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="NoRanked",
+            player_id=8103,
+            clan=clan,
+            ranked_json=[],
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/81/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {row["name"]: row["is_ranked_player"] for row in response.json()},
+            {
+                "RankedMain": True,
+                "RankedDabbler": False,
+                "NoRanked": False,
+            },
+        )
+        self.assertEqual(
+            {row["name"]: row["highest_ranked_league"]
+                for row in response.json()},
+            {
+                "RankedMain": "Gold",
+                "RankedDabbler": "Silver",
+                "NoRanked": None,
+            },
+        )
 
     def test_clan_members_exposes_activity_buckets_for_histogram(self):
         clan = Clan.objects.create(
@@ -881,6 +1087,28 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.json()["kill_ratio"], 0.78)
         self.assertEqual(response.json()["player_score"], 3.22)
 
+    def test_player_detail_exposes_highest_ranked_league_from_history(self):
+        now = timezone.now()
+        Player.objects.create(
+            name="DetailRankedLeaguePlayer",
+            player_id=8185,
+            is_hidden=False,
+            pvp_ratio=54.0,
+            pvp_battles=400,
+            pvp_survival_rate=39.0,
+            creation_date=now - timedelta(days=180),
+            ranked_json=[
+                {"season_id": 8, "highest_league_name": "Silver", "total_battles": 34},
+                {"season_id": 6, "highest_league": 1,
+                    "highest_league_name": "Gold", "total_battles": 12},
+            ],
+        )
+
+        response = self.client.get("/api/player/DetailRankedLeaguePlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["highest_ranked_league"], "Gold")
+
     def test_player_detail_backfills_missing_kill_ratio_from_stale_summary(self):
         now = timezone.now()
         player = Player.objects.create(
@@ -1114,38 +1342,42 @@ class ApiContractTests(TestCase):
             name="RankedHeatmapOne",
             player_id=8841,
             is_hidden=False,
+            ranked_updated_at=timezone.now(),
             ranked_json=[
                 {"season_id": 9, "total_battles": 40,
-                    "total_wins": 24, "win_rate": 0.6},
+                    "total_wins": 24, "win_rate": 0.6, "top_ship_name": None},
                 {"season_id": 8, "total_battles": 20,
-                    "total_wins": 10, "win_rate": 0.5},
+                    "total_wins": 10, "win_rate": 0.5, "top_ship_name": None},
             ],
         )
         Player.objects.create(
             name="RankedHeatmapTwo",
             player_id=8842,
             is_hidden=False,
+            ranked_updated_at=timezone.now(),
             ranked_json=[
                 {"season_id": 9, "total_battles": 140,
-                    "total_wins": 84, "win_rate": 0.6},
+                    "total_wins": 84, "win_rate": 0.6, "top_ship_name": None},
             ],
         )
         Player.objects.create(
             name="RankedHeatmapTooSmall",
             player_id=8844,
             is_hidden=False,
+            ranked_updated_at=timezone.now(),
             ranked_json=[
                 {"season_id": 9, "total_battles": 30,
-                    "total_wins": 18, "win_rate": 0.6},
+                    "total_wins": 18, "win_rate": 0.6, "top_ship_name": None},
             ],
         )
         Player.objects.create(
             name="RankedHeatmapHidden",
             player_id=8843,
             is_hidden=True,
+            ranked_updated_at=timezone.now(),
             ranked_json=[
                 {"season_id": 9, "total_battles": 60,
-                    "total_wins": 54, "win_rate": 0.9},
+                    "total_wins": 54, "win_rate": 0.9, "top_ship_name": None},
             ],
         )
 

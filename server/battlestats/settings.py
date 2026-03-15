@@ -5,6 +5,8 @@ import logging.config
 import socket
 import sys
 
+from battlestats.env import resolve_db_host, resolve_db_user
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -70,9 +72,9 @@ DATABASES = {
             os.getenv('DB_ENGINE', 'postgresql_psycopg2')
         ),
         'NAME': os.getenv('DB_NAME', 'battlestats'),
-        'USER': os.getenv('DB_USERNAME', 'django'),
+        'USER': resolve_db_user(),
         'PASSWORD': os.getenv('DB_PASSWORD', 'XVIB58E5rWnAsU6'),
-        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
+        'HOST': resolve_db_host(),
         'PORT': os.getenv('DB_PORT', '5432'),
     }
 }

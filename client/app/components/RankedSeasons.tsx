@@ -5,6 +5,10 @@ interface RankedSeasonsProps {
     isLoading?: boolean;
 }
 
+const RANKED_TABLE_VISIBLE_ROWS = 5;
+const RANKED_TABLE_HEADER_HEIGHT_REM = 2.5;
+const RANKED_TABLE_ROW_HEIGHT_REM = 3.5;
+
 interface RankedSprint {
     sprint_number: number;
     league: number;
@@ -170,8 +174,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
 
         return sortDirection === 'asc' ? comparison : -comparison;
     });
-    const visibleSeasons = sortedSeasons.slice(0, 6);
-    const shouldShowTable = shouldGrayOut || visibleSeasons.length > 0;
+    const shouldShowTable = shouldGrayOut || sortedSeasons.length > 0;
 
     const handleSort = (nextKey: SortKey): void => {
         if (sortKey === nextKey) {
@@ -207,7 +210,12 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                 <div className="relative">
                     <div className={shouldGrayOut ? 'pointer-events-none opacity-60 grayscale transition' : 'transition'} aria-busy={shouldGrayOut}>
                         <div className="overflow-x-auto rounded-lg border border-[#c6dbef] bg-white">
-                            <div className="max-h-[21rem] overflow-y-auto">
+                            <div
+                                className="overflow-y-auto"
+                                style={{
+                                    maxHeight: `calc(${RANKED_TABLE_HEADER_HEIGHT_REM}rem + (${RANKED_TABLE_VISIBLE_ROWS} * ${RANKED_TABLE_ROW_HEIGHT_REM}rem))`,
+                                }}
+                            >
                                 <table className="min-w-full divide-y divide-[#dbe9f6] text-sm">
                                     <thead className="sticky top-0 bg-[#f0f7ff]">
                                         <tr>
@@ -242,7 +250,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#edf4fb]">
-                                        {visibleSeasons.map((season) => {
+                                        {sortedSeasons.map((season) => {
                                             const badgeClassName = leagueColors[season.highest_league_name] || leagueColors.Bronze;
 
                                             return (

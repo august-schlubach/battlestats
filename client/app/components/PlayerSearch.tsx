@@ -108,10 +108,9 @@ const ClanTagGrid: React.FC<{
     ariaLabelPrefix: string;
 }> = ({ clans, onSelectClan, ariaLabelPrefix }) => (
     <div
-        className="mt-4 grid max-w-[910px] gap-x-4 gap-y-2 rounded-md px-2 py-1 text-sm"
+        className="mt-4 grid max-w-[910px] gap-x-2.5 gap-y-2 rounded-md px-1.5 py-1 text-sm"
         style={{
             gridTemplateColumns: 'repeat(auto-fit, minmax(5.25rem, 1fr))',
-            backgroundImage: 'repeating-linear-gradient(to bottom, transparent 0, transparent 2.25rem, rgba(239, 243, 255, 0.9) 2.25rem, rgba(239, 243, 255, 0.9) 4.5rem)',
         }}
     >
         {clans.map((clan) => (
@@ -119,7 +118,7 @@ const ClanTagGrid: React.FC<{
                 key={`${ariaLabelPrefix}-${clan.clan_id}`}
                 type="button"
                 onClick={() => onSelectClan(clan)}
-                className="min-w-0 rounded-sm px-2 py-1 text-left font-medium underline-offset-2 hover:underline"
+                className="min-w-0 rounded-sm px-1.5 py-1 text-left font-medium underline-offset-2 hover:underline"
                 style={{ color: wrColor(clan.clan_wr) }}
                 aria-label={`${ariaLabelPrefix} clan ${clan.name}`}
                 title={clan.tag || clan.name}

@@ -1,0 +1,237 @@
+apiVersion: v3.1.0
+kind: DataContract
+
+id: player-summary-odcs-2026
+name: player_summary
+version: 0.1.0
+status: draft
+domain: battlestats
+dataProduct: player-summary
+tenant: battlestats
+
+description:
+  purpose: Normalized player summary payload used by the player summary API and downstream UI summary cards.
+  limitations: Derived metrics depend on normalized local player, activity, battle, and ranked history data and may intentionally diverge from raw upstream responses.
+  usage: Use for player-summary API responses and UI summary panels, not as a canonical replay-grade battle ledger.
+  authoritativeDefinitions:
+    - url: https://developers.wargaming.net/reference/all/wows/account/info/
+      type: implementation
+      description: Primary upstream cumulative player stats source.
+    - url: https://developers.wargaming.net/reference/all/wows/account/statsbydate/
+      type: businessDefinition
+      description: Documented upstream daily stats endpoint, currently not trusted for PvP daily slices.
+
+tags:
+  - world-of-warships
+  - player-summary
+  - normalized
+
+team:
+  - role: owner
+    description: battlestats maintainers
+
+support:
+  - channel: repo knowledge base
+    description: See agents/knowledge for upstream API investigations and behavioral notes.
+    tool: other
+
+servers:
+  - server: battlestats-django
+    type: other
+    description: Derived inside the Django application from Player, PlayerExplorerSummary, and normalized activity, battle, and ranked rows.
+
+schema:
+  - id: player_summary_obj
+    name: player_summary
+    logicalType: object
+    physicalType: table
+    description: One normalized player summary object returned by the player summary API.
+    dataGranularityDescription: One row per player.
+    properties:
+      - id: player_id_prop
+        name: player_id
+        businessName: player id
+        logicalType: integer
+        physicalType: integer
+        required: true
+        description: World of Warships account identifier for the summarized player.
+        classification: public
+      - id: name_prop
+        name: name
+        businessName: player name
+        logicalType: string
+        physicalType: string
+        required: true
+        description: Display name used across the player detail and explorer interfaces.
+        classification: public
+      - id: is_hidden_prop
+        name: is_hidden
+        businessName: hidden profile flag
+        logicalType: boolean
+        physicalType: boolean
+        required: true
+        description: Whether the player profile is hidden according to upstream or local hydration state.
+        classification: public
+      - id: days_since_last_battle_prop
+        name: days_since_last_battle
+        businessName: days since last battle
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Number of days since the player last played, or null when unknown.
+        classification: public
+      - id: last_battle_date_prop
+        name: last_battle_date
+        businessName: last battle date
+        logicalType: date
+        physicalType: string
+        required: false
+        description: ISO date string for the last known battle date, or null when unavailable.
+        classification: public
+      - id: account_age_days_prop
+        name: account_age_days
+        businessName: account age days
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Age of the account in days, or null when creation date is unavailable.
+        classification: public
+      - id: pvp_ratio_prop
+        name: pvp_ratio
+        businessName: PvP win rate
+        logicalType: number
+        physicalType: float
+        required: false
+        description: Player PvP win rate percentage, or null when unknown.
+        classification: public
+      - id: pvp_battles_prop
+        name: pvp_battles
+        businessName: PvP battles
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Total known PvP battle count, or null when unavailable.
+        classification: public
+      - id: pvp_survival_rate_prop
+        name: pvp_survival_rate
+        businessName: PvP survival rate
+        logicalType: number
+        physicalType: float
+        required: false
+        description: PvP survival rate percentage, or null when unavailable.
+        classification: public
+      - id: kill_ratio_prop
+        name: kill_ratio
+        businessName: kill ratio
+        logicalType: number
+        physicalType: float
+        required: false
+        description: Derived player kill ratio, or null when battle data is insufficient.
+        classification: public
+      - id: player_score_prop
+        name: player_score
+        businessName: player score
+        logicalType: number
+        physicalType: float
+        required: false
+        description: Derived composite player score used by explorer ordering and summaries.
+        classification: public
+      - id: battles_last_29_days_prop
+        name: battles_last_29_days
+        businessName: battles last 29 days
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Sum of battles across the recent 29-day activity window, or null for hidden profiles.
+        classification: public
+      - id: wins_last_29_days_prop
+        name: wins_last_29_days
+        businessName: wins last 29 days
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Sum of wins across the recent 29-day activity window, or null for hidden profiles.
+        classification: public
+      - id: active_days_last_29_days_prop
+        name: active_days_last_29_days
+        businessName: active days last 29 days
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Count of days with at least one battle in the recent activity window, or null for hidden profiles.
+        classification: public
+      - id: recent_win_rate_prop
+        name: recent_win_rate
+        businessName: recent win rate
+        logicalType: number
+        physicalType: float
+        required: false
+        description: Recent 29-day win rate expressed as a ratio, or null when there are no recent battles.
+        classification: public
+      - id: activity_trend_direction_prop
+        name: activity_trend_direction
+        businessName: activity trend direction
+        logicalType: string
+        physicalType: string
+        required: false
+        description: Derived qualitative activity trend label, or null when insufficient activity history exists.
+        classification: public
+      - id: ships_played_total_prop
+        name: ships_played_total
+        businessName: ships played total
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Count of ships with recorded PvP battles in normalized battle rows, or null when battle data is unavailable.
+        classification: public
+      - id: ship_type_spread_prop
+        name: ship_type_spread
+        businessName: ship type spread
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Number of distinct ship types represented in played battle rows, or null when battle data is unavailable.
+        classification: public
+      - id: tier_spread_prop
+        name: tier_spread
+        businessName: tier spread
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Number of distinct ship tiers represented in played battle rows, or null when battle data is unavailable.
+        classification: public
+      - id: ranked_seasons_participated_prop
+        name: ranked_seasons_participated
+        businessName: ranked seasons participated
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Count of normalized ranked seasons in the player's ranked history.
+        classification: public
+      - id: latest_ranked_battles_prop
+        name: latest_ranked_battles
+        businessName: latest ranked battles
+        logicalType: integer
+        physicalType: integer
+        required: false
+        description: Total ranked battles in the most recent ranked row, or null when there is no ranked history.
+        classification: public
+      - id: highest_ranked_league_recent_prop
+        name: highest_ranked_league_recent
+        businessName: highest ranked league recent
+        logicalType: string
+        physicalType: string
+        required: false
+        description: Highest recent ranked league name from the latest ranked row, or null when ranked history is absent.
+        classification: public
+
+quality:
+  - description: player_id and name should always be present in every payload.
+  - description: Hidden players should still emit the base identity fields, with derived recent-activity fields allowed to be null.
+  - description: recent_win_rate should be null when battles_last_29_days is null or zero.
+  - description: ranked_seasons_participated should equal the count of normalized ranked rows used to build the payload.
+
+slaProperties:
+  - property: freshness
+    value: on-demand
+    description: Player summary payloads are recomputed on fetch or from fresh explorer-summary cache state.

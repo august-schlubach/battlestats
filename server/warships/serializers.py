@@ -1,12 +1,14 @@
 from rest_framework import serializers
 from .models import Player, Clan, Ship
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, build_player_summary
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, build_player_summary, get_highest_ranked_league_name
 
 
 class PlayerSerializer(serializers.ModelSerializer):
     clan_name = serializers.SerializerMethodField()
     clan_id = serializers.SerializerMethodField()
     clan_tag = serializers.SerializerMethodField()
+    is_clan_leader = serializers.SerializerMethodField()
+    highest_ranked_league = serializers.SerializerMethodField()
     kill_ratio = serializers.SerializerMethodField()
     player_score = serializers.SerializerMethodField()
 
@@ -22,6 +24,12 @@ class PlayerSerializer(serializers.ModelSerializer):
 
     def get_clan_tag(self, obj):
         return obj.clan.tag if obj.clan else None
+
+    def get_is_clan_leader(self, obj):
+        return bool(obj.clan and obj.clan.leader_id is not None and obj.player_id == obj.clan.leader_id)
+
+    def get_highest_ranked_league(self, obj):
+        return get_highest_ranked_league_name(obj.ranked_json)
 
     def get_kill_ratio(self, obj):
         explorer_summary = getattr(obj, 'explorer_summary', None)
@@ -133,9 +141,16 @@ class ClanMemberSerializer(serializers.Serializer):
     is_hidden = serializers.BooleanField()
     pvp_ratio = serializers.FloatField(allow_null=True)
     days_since_last_battle = serializers.IntegerField(allow_null=True)
+    is_leader = serializers.BooleanField()
+    is_pve_player = serializers.BooleanField()
+    is_ranked_player = serializers.BooleanField()
+    highest_ranked_league = serializers.CharField(allow_null=True)
     activity_bucket = serializers.SerializerMethodField()
 
     def get_activity_bucket(self, obj):
+        if isinstance(obj, dict):
+            return _classify_clan_member_activity(obj.get('days_since_last_battle'))
+
         return _classify_clan_member_activity(obj.days_since_last_battle)
 
 

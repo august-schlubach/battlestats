@@ -91,6 +91,7 @@ repo_usage:
 
 evidence_refs:
   knowledge_notes:
+    - agents/knowledge/wows-account-hydration-notes.md
     - agents/knowledge/wows-api-contract-strategy.md
   reproduced_with:
     - docs reference at https://developers.wargaming.net/reference/all/wows/clans/accountinfo/

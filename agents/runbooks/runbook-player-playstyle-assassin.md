@@ -2,33 +2,39 @@
 
 ## Goal
 
-Maintain the player playstyle taxonomy so verdict labels map cleanly onto meaningful WoWS performance bands and remain consistent across API refreshes, crawler saves, and the player detail UI.
+Maintain the player playstyle taxonomy so verdict labels map cleanly onto meaningful WoWS performance bands, use survivability as the second dimension, and remain consistent across API refreshes, crawler saves, and the player detail UI.
 
 ## Threshold Rationale
 
-- WoWS player color bands in this repo already treat `> 65%` win rate as the start of the super-unicum shelf, so `Sealord` lives there as the absolute top-end label.
-- `Assassin` now covers the rest of the purple/unicum tier at `60%` to `<65%`.
-- `Warrior` now covers the stronger blue band at `56%` to `<60%` with stable survival.
-- `Stalwart` covers the merely-good but dependable band at `52%` to `<56%` with stable survival.
-- `Daredevil` remains the aggressive low-survival mirror for both the `Stalwart` and `Warrior` skill bands.
-- `Flotsam` now starts at `51%` so players hovering right around `50%` no longer read as quietly useful.
-- `Hot Potato` starts below `42%` win rate with poor survival, making it a rarer worst-of-the-worst shelf rather than swallowing too much of the ordinary low-red population.
-- `Potato` and `Survivor` now absorb the broad average-to-bad shelf from `42%` to `<51%`, while `Flotsam` and `Jetsam` stay reserved for players who are at least meaningfully above average.
+- Wargaming WR bands still drive the shelves, so the first cut is always the repo's live win-rate color bands.
+- Survivability splits every shelf except the top end, where `Sealord` intentionally covers both branches.
+- The low-survivability branch is `pvp_survival_rate < 33.0`.
+- The low-survivability names should read riskier or more self-destructive than the high-survivability names in the same WR shelf.
 
-## Current Thresholds
+## Current Matrix
 
 1. `< 100 battles` -> `Recruit`
-2. `>= 65% WR` -> `Sealord`
-3. `60% to < 65% WR` -> `Assassin`
-4. `56% to < 60% WR` -> `Warrior` or `Daredevil` depending on survival
-5. `52% to < 56% WR` -> `Stalwart` or `Daredevil` depending on survival
-6. `51% to < 52% WR` -> `Flotsam` or `Jetsam` depending on survival
-7. `42% to < 51% WR` -> `Survivor` or `Potato` depending on survival
-8. `< 42% WR` -> `Survivor` or `Hot Potato` depending on survival
+2. `> 65% WR` -> `Sealord` regardless of survivability
+3. `60% to 65% WR` -> `Assassin` on the high-survivability branch, `Kraken` on the low-survivability branch
+4. `56% to < 60% WR` -> `Stalwart` on the high-survivability branch, `Daredevil` on the low-survivability branch
+5. `54% to < 56% WR` -> `Warrior` on the high-survivability branch, `Raider` on the low-survivability branch
+6. `52% to < 54% WR` -> `Survivor` on the high-survivability branch, `Jetsam` on the low-survivability branch
+7. `50% to < 52% WR` -> `Flotsam` on the high-survivability branch, `Drifter` on the low-survivability branch
+8. `45% to < 50% WR` -> `Pirate` on the high-survivability branch, `Potato` on the low-survivability branch
+9. `< 45% WR` -> `Hot Potato` on the high-survivability branch, `Leroy Jenkins` on the low-survivability branch
 
-Low-survival split:
+Canonical table:
 
-- `pvp_survival_rate < 33.0` is treated as the aggressive/fragile branch.
+| Wargaming WR band | WR range       | High survivability | Low survivability |
+| ----------------- | -------------- | ------------------ | ----------------- |
+| Super Unicum      | `> 65%`        | `Sealord`          | `Sealord`         |
+| Unicum            | `60% to 65%`   | `Assassin`         | `Kraken`          |
+| Great             | `56% to < 60%` | `Stalwart`         | `Daredevil`       |
+| Good              | `54% to < 56%` | `Warrior`          | `Raider`          |
+| Above Average     | `52% to < 54%` | `Survivor`         | `Jetsam`          |
+| Average           | `50% to < 52%` | `Flotsam`          | `Drifter`         |
+| Below Average     | `45% to < 50%` | `Pirate`           | `Potato`          |
+| Needs Improvement | `< 45%`        | `Hot Potato`       | `Leroy Jenkins`   |
 
 ## Code Changes
 
@@ -38,8 +44,9 @@ Low-survival split:
    - `warships.clan_crawl.save_player()`
 3. Recalculate stored verdict rows with the management command:
    - `python manage.py backfill_player_verdicts --changed-only --batch-size 2000`
-4. Keep the UI label as `Playstyle` while preserving the `verdict` field name in the API/model.
-5. Keep helper text in sync in `client/app/components/PlayerDetail.tsx`.
+4. Keep the survivability split threshold centralized in `warships.data` so the matrix can be tuned without rewriting the branches.
+5. Keep the UI label as `Playstyle` while preserving the `verdict` field name in the API/model.
+6. Keep helper text in sync in `client/app/components/PlayerDetail.tsx`.
 
 ## Execution Steps
 
@@ -49,10 +56,46 @@ Low-survival split:
 4. Spot-check grouped verdict counts after backfill.
 5. Commit and push.
 
+## Execution Status
+
+- Updated the classifier to use the WR-plus-survivability matrix.
+- Updated helper copy for the restored and new playstyles.
+- Updated verdict tests to cover both survivability branches and lookup recomputation.
+- Executed targeted validation on `2026-03-14`:
+  - `python manage.py test warships.tests.test_data.PlayerDataHardeningTests warships.tests.test_views.PlayerViewSetTests --keepdb`
+  - result: `19` tests passed
+- Executed verdict backfill on `2026-03-14`:
+  - `python manage.py backfill_player_verdicts --changed-only --batch-size 2000`
+  - result: processed `273828` players, updated `125523`
+- Updated the high-survivability placement so `Survivor` now occupies the `52% to <54%` shelf and `Flotsam` now occupies the `50% to <52%` shelf.
+- Re-validated the swap on `2026-03-14`:
+  - `python manage.py test warships.tests.test_data.PlayerDataHardeningTests warships.tests.test_views.PlayerViewSetTests --keepdb`
+  - result: `19` tests passed
+- Re-ran verdict backfill after the swap on `2026-03-14`:
+  - `python manage.py backfill_player_verdicts --changed-only --batch-size 2000`
+  - result: processed `273831` players, updated `21564`
+- Spot-checked grouped verdict counts after backfill:
+  - `Recruit: 72908`
+  - `Potato: 54601`
+  - `Leroy Jenkins: 41541`
+  - `Pirate: 19836`
+  - `Drifter: 14480`
+  - `Survivor: 11255`
+  - `Flotsam: 10236`
+  - `Stalwart: 8681`
+  - `Warrior: 8007`
+  - `Jetsam: 7581`
+  - `Hot Potato: 6312`
+  - `Assassin: 3620`
+  - `Raider: 3151`
+  - `Daredevil: 1404`
+  - `Sealord: 1398`
+  - `Kraken: 131`
+
 ## Validation
 
 - Targeted tests:
-  - `python manage.py test warships.tests.test_data.PlayerDataHardeningTests warships.tests.test_data.PlayerExplorerSummaryTests`
+  - `python manage.py test warships.tests.test_data.PlayerDataHardeningTests warships.tests.test_views.PlayerViewSetTests --keepdb`
 - Optional UI sanity:
   - open representative players and confirm the player detail section renders the expected verdict and helper copy.
 - Data sanity:

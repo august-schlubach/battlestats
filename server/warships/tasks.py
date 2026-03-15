@@ -4,6 +4,7 @@ import os
 import time
 
 from django.core.cache import cache
+from django.core.management import call_command
 
 from battlestats.celery import app
 
@@ -24,6 +25,8 @@ CLAN_CRAWL_LOCK_TIMEOUT = 8 * 60 * 60
 CLAN_CRAWL_HEARTBEAT_KEY = "warships:tasks:crawl_all_clans:heartbeat"
 CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
+RANKED_INCREMENTAL_LOCK_KEY = "warships:tasks:incremental_ranked_data:lock"
+RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -237,3 +240,43 @@ def ensure_crawl_all_clans_running_task():
     logger.info("Crawl watchdog found no active crawl; scheduling resume crawl")
     crawl_all_clans_task.delay(resume=True)
     return {"status": "scheduled", "reason": "not-running"}
+
+
+@app.task(bind=True, **CRAWL_TASK_OPTS)
+def incremental_ranked_data_task(self):
+    if cache.get(CLAN_CRAWL_LOCK_KEY) is not None:
+        logger.info(
+            "Skipping incremental_ranked_data_task because clan crawl is currently running"
+        )
+        return {"status": "skipped", "reason": "crawl-running"}
+
+    if not cache.add(RANKED_INCREMENTAL_LOCK_KEY, self.request.id, timeout=RANKED_INCREMENTAL_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping incremental_ranked_data_task because another incremental ranked refresh is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        call_command(
+            'incremental_ranked_data',
+            state_file=os.getenv(
+                'RANKED_INCREMENTAL_STATE_FILE', 'logs/incremental_ranked_data_state.json'),
+            limit=int(os.getenv('RANKED_INCREMENTAL_LIMIT', '150')),
+            batch_size=int(os.getenv('RANKED_INCREMENTAL_BATCH_SIZE', '50')),
+            skip_fresh_hours=int(
+                os.getenv('RANKED_INCREMENTAL_SKIP_FRESH_HOURS', '24')),
+            known_limit=int(
+                os.getenv('RANKED_INCREMENTAL_KNOWN_LIMIT', '300')),
+            discovery_limit=int(
+                os.getenv('RANKED_INCREMENTAL_DISCOVERY_LIMIT', '75')),
+            recent_lookup_days=int(
+                os.getenv('RANKED_INCREMENTAL_RECENT_LOOKUP_DAYS', '14')),
+            recent_battle_days=int(
+                os.getenv('RANKED_INCREMENTAL_RECENT_BATTLE_DAYS', '30')),
+            min_discovery_pvp_battles=int(
+                os.getenv('RANKED_INCREMENTAL_MIN_DISCOVERY_PVP_BATTLES', '1000')),
+            max_errors=int(os.getenv('RANKED_INCREMENTAL_MAX_ERRORS', '25')),
+        )
+        return {"status": "completed"}
+    finally:
+        cache.delete(RANKED_INCREMENTAL_LOCK_KEY)

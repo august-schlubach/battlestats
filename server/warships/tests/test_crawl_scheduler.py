@@ -11,7 +11,7 @@ from django.test import TestCase, override_settings
 from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
 from warships.signals import ensure_daily_clan_crawl_schedule
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, warm_clan_battle_summaries_task
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, warm_clan_battle_summaries_task
 
 
 @override_settings(
@@ -61,6 +61,18 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(schedule.hour, "3")
         self.assertEqual(schedule.minute, "0")
         self.assertEqual(str(schedule.timezone), "UTC")
+
+        ranked_task = PeriodicTask.objects.get(
+            name="daily-ranked-incrementals")
+        self.assertEqual(ranked_task.task,
+                         "warships.tasks.incremental_ranked_data_task")
+        self.assertTrue(ranked_task.enabled)
+
+        ranked_schedule = CrontabSchedule.objects.get(
+            id=ranked_task.crontab_id)
+        self.assertEqual(ranked_schedule.hour, "10")
+        self.assertEqual(ranked_schedule.minute, "30")
+        self.assertEqual(str(ranked_schedule.timezone), "UTC")
 
         watchdog_task = PeriodicTask.objects.get(name="clan-crawl-watchdog")
         self.assertEqual(watchdog_task.task,
@@ -121,6 +133,24 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(mock_refresh.call_count, 2)
         mock_refresh.assert_any_call("1000055908")
         mock_refresh.assert_any_call("555")
+
+    def test_incremental_ranked_task_skips_when_crawl_lock_exists(self):
+        cache.add(CLAN_CRAWL_LOCK_KEY, "crawl-run", timeout=60)
+
+        with patch("warships.tasks.call_command") as mock_call_command:
+            result = incremental_ranked_data_task.run()
+
+        self.assertEqual(
+            result, {"status": "skipped", "reason": "crawl-running"})
+        mock_call_command.assert_not_called()
+
+    def test_incremental_ranked_task_invokes_command_and_releases_lock(self):
+        with patch("warships.tasks.call_command") as mock_call_command:
+            result = incremental_ranked_data_task.run()
+
+        self.assertEqual(result, {"status": "completed"})
+        mock_call_command.assert_called_once()
+        self.assertIsNone(cache.get(RANKED_INCREMENTAL_LOCK_KEY))
 
     def test_post_migrate_disables_warmer_when_no_clans_are_configured(self):
         app_config = apps.get_app_config("warships")

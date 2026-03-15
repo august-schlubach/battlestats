@@ -6,6 +6,7 @@ interface RankedWRBattlesHeatmapSVGProps {
     isLoading?: boolean;
     svgWidth?: number;
     svgHeight?: number;
+    onVisibilityChange?: (isVisible: boolean) => void;
 }
 
 interface CorrelationTile {
@@ -237,6 +238,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
     isLoading = false,
     svgWidth = 600,
     svgHeight = 276,
+    onVisibilityChange,
 }) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -259,11 +261,20 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
                     return;
                 }
 
+                const hasRankedHistory = Boolean(payload.player_point);
+                onVisibilityChange?.(hasRankedHistory);
+                if (!hasRankedHistory) {
+                    containerRef.current.innerHTML = '';
+                    return;
+                }
+
                 drawChart(containerRef.current, payload, svgWidth, svgHeight);
             } catch {
                 if (!isMounted || !containerRef.current) {
                     return;
                 }
+
+                onVisibilityChange?.(true);
 
                 drawMessage(containerRef.current, 'Unable to load ranked heatmap.', svgWidth, 120);
             }
@@ -274,7 +285,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
         return () => {
             isMounted = false;
         };
-    }, [isLoading, playerId, svgHeight, svgWidth]);
+    }, [isLoading, onVisibilityChange, playerId, svgHeight, svgWidth]);
 
     return <div ref={containerRef} className="w-full overflow-hidden rounded-md border border-[#dbe9f6] bg-white" />;
 };

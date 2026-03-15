@@ -1,6 +1,6 @@
 # WoWS API Contract Strategy
 
-Last verified: 2026-03-09
+Last verified: 2026-03-14
 
 ## Why This Matters
 
@@ -123,6 +123,17 @@ Do not try to model the entire WoWS upstream API as ODCS first.
 
 For machine-readable coverage of WG endpoints, use the upstream YAML profile area instead of ODCS.
 
+## Progress Since Initial Decision
+
+The strategy is now partially implemented in repo artifacts instead of only being proposed.
+
+- ODCS contracts now exist for `player_daily_snapshots`, `player_summary`, and `player_explorer_rows`.
+- Upstream endpoint profiles now exist for `account/info`, `account/list`, `account/statsbydate`, and `clans/accountinfo`.
+- The backend test suite includes contract-alignment checks for upstream endpoint field usage and serializer-backed payload behavior for player summary, explorer, clan membership, and ranked-history surfaces.
+- Recent development expanded stable internal semantics around ranked-history retention and roster markers, which reinforces the need to keep derived contracts tied to current serializer/API output rather than upstream schemas alone.
+
+The practical outcome is that the repo now has a real layered contract baseline: endpoint-focused YAML for unstable upstream behavior, ODCS for stable derived data products, and knowledge notes for investigative evidence.
+
 ## Good First Contracts
 
 If we start small, the best first ODCS candidates are:
@@ -141,6 +152,7 @@ These are the places where the repo most needs consistent semantics across backe
 
 ## Next Checks
 
-- Add ODCS contracts for `player_summary` and `player_explorer_rows` if those surfaces keep expanding.
-- Add upstream YAML profiles for additional relied-on endpoints such as `account/info` and `account/list`.
-- Consider validating derived payloads in tests against contract expectations once the first few contracts stabilize.
+- Keep the ODCS contracts in sync with serializer fields when player-summary or explorer payloads change.
+- Add upstream YAML profiles for additional relied-on endpoints such as ranked and clan-battle endpoints as their product importance increases.
+- Validate derived payloads in tests against contract expectations so contract drift fails in CI rather than in documentation review.
+- Add knowledge notes when live endpoint behavior changes or when repo logic adopts a new upstream fallback strategy.

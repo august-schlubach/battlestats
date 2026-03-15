@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faCrown, faRobot, faStar } from '@fortawesome/free-solid-svg-icons';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
+import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColor, type RankedLeagueName } from './rankedLeague';
 
 interface PlayerDetailProps {
     player: {
@@ -29,7 +32,16 @@ interface PlayerDetailProps {
         clan_name: string;
         clan_tag: string | null;
         clan_id: number;
+        is_clan_leader?: boolean;
+        highest_ranked_league?: RankedLeagueName | null;
         verdict: string | null;
+        ranked_json?: Array<{
+            total_battles?: number | null;
+            total_wins?: number | null;
+            win_rate?: number | null;
+            highest_league?: number | null;
+            highest_league_name?: RankedLeagueName | null;
+        }> | null;
     };
     onBack: () => void;
     onSelectMember: (memberName: string) => void;
@@ -118,16 +130,64 @@ const formatKillRatio = (killRatio: number | null): string => {
 const PLAYSTYLE_HELPER_TEXT: Record<string, string> = {
     Sealord: 'Owns the map, dictates the pace, dominates, turns tables and wins.',
     Assassin: 'Wins relentlessly, wastes little, and closes games with intent.',
-    Warrior: 'Performs well, stays alive, and keeps steady pressure on the fight.',
+    Kraken: 'Wins violently, cashes in every opening, and stacks kills before the enemy can recover.',
     Stalwart: 'Steady under pressure, useful in every phase, and good for more than raw damage.',
     Daredevil: 'Pushes recklessly, burns brightly, and still finds ways to win.',
+    Warrior: 'Performs well, stays alive, and keeps steady pressure on the fight.',
+    Raider: 'Strikes where the line is thin, trades fast, and lives off opportunism more than control.',
     Flotsam: 'Stays afloat, contributes enough, and remains useful in most fights.',
     Jetsam: 'Gets chewed up early, loses impact fast, and rarely turns the match.',
     Survivor: 'Stays alive, avoids disaster, but mostly delays the loss.',
+    Drifter: 'Floats through the match, avoids some danger, but rarely shapes the outcome.',
+    Pirate: 'Hangs around longer than expected, steals value where it can, and survives on nuisance more than strength.',
     Potato: 'Sinks early, lands little, and leaves the team short-handed.',
-    'Hot Potato': 'Explodes early, blames loudly, and gets dumped on the team like a problem nobody wanted.',
+    'Hot Potato': 'Stays alive longer than it should, sheds pressure onto everyone else, and leaves the real work unfinished.',
+    'Leroy Jenkins': 'Charges in blind, detonates early, and turns bad fights into worse ones for the whole team.',
     Recruit: 'Has too few battles to read; the story is just beginning.',
 };
+
+const HeaderLeaderCrown = () => (
+    <span
+        title="Clan leader"
+        aria-label="Clan leader"
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faCrown}
+            className="text-sm text-amber-500"
+            aria-hidden="true"
+        />
+    </span>
+);
+
+const HeaderPveRobot = () => (
+    <span
+        title="pve enjoyer"
+        aria-label="pve enjoyer"
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faRobot}
+            className="text-sm text-slate-500"
+            aria-hidden="true"
+        />
+    </span>
+);
+
+const HeaderRankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) => (
+    <span
+        title={getRankedLeagueTooltip(league)}
+        aria-label={getRankedLeagueTooltip(league)}
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faStar}
+            className="text-sm"
+            style={{ color: getRankedLeagueColor(league) }}
+            aria-hidden="true"
+        />
+    </span>
+);
 
 const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
@@ -136,6 +196,22 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     onSelectClan,
     isLoading = false,
 }) => {
+    const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
+    const isPveEnjoyer = player.total_battles > 500 && pveBattles > player.pvp_battles;
+    const rankedBattleCount = Array.isArray(player.ranked_json)
+        ? player.ranked_json.reduce((total, row) => total + Math.max(row?.total_battles || 0, 0), 0)
+        : 0;
+    const isRankedEnjoyer = rankedBattleCount > 100;
+    const highestRankedLeague = player.highest_ranked_league ?? getHighestRankedLeagueName(player.ranked_json);
+    const hasKnownRankedGames = Array.isArray(player.ranked_json)
+        ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
+        : true;
+    const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
+
+    useEffect(() => {
+        setShowRankedHeatmap(hasKnownRankedGames);
+    }, [hasKnownRankedGames, player.player_id]);
+
     return (
         <div className="relative overflow-hidden bg-white p-6">
             {isLoading ? (
@@ -145,7 +221,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     </div>
                 </div>
             ) : null}
-            <div className="grid grid-cols-[340px_1fr] gap-4">
+            <div className="grid grid-cols-[350px_1fr] gap-4">
                 {/* First Column */}
                 <div>
                     <div className="mb-4 pb-1">
@@ -171,7 +247,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     highlightedPlayerName={player.name}
                                     svgHeight={280}
                                 />
-                                <p className="mt-2 text-xs text-[#6baed6]">Pulsing ring marks {player.name} on the clan chart.</p>
+
                             </div>
                             <DeferredSection
                                 className="pt-5"
@@ -191,9 +267,14 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                 {/* Second Column */}
                 <div className="min-w-0 text-left border-l border-[#c6dbef] pl-4">
                     <div className="mb-3 border-b border-[#c6dbef] pb-3">
-                        <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
-                            {player.name}
-                        </h1>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <h1 className="text-3xl font-semibold tracking-tight text-[#084594]">
+                                {player.name}
+                            </h1>
+                            {player.is_clan_leader ? <HeaderLeaderCrown /> : null}
+                            {isPveEnjoyer ? <HeaderPveRobot /> : null}
+                            {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
+                        </div>
                         <p className="mt-1 text-sm text-[#4292c6]">
                             Last played {player.days_since_last_battle} days ago
                         </p>
@@ -244,7 +325,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p>Total Battles: <span className="font-medium text-[#2171b5]">{player.total_battles.toLocaleString()}</span></p>
                                 <p>PvP Wins: <span className="font-medium text-[#2171b5]">{player.pvp_wins.toLocaleString()}</span></p>
                                 <p>Last Battle Date: <span className="font-medium text-[#2171b5]">{player.last_battle_date}</span></p>
-                                <p>PvP Losses: <span className="font-medium text-[#2171b5]">{player.pvp_losses.toLocaleString()}</span></p>
+                                <p>PvE Battles: <span className="font-medium text-[#2171b5]">{pveBattles.toLocaleString()}</span></p>
                             </div>
 
                             {player.verdict && (
@@ -287,11 +368,17 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <p className="mb-2 text-xs text-[#6baed6]">Returns to the wins-versus-battles bar design, but with cleaner axis treatment, inline summary text, and styling aligned with the other player-page charts.</p>
                                 <RandomsSVG playerId={player.player_id} isLoading={isLoading} />
                             </div>
-                            <div className="mt-4">
-                                <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Games vs Win Rate</h3>
-                                <p className="mb-3 text-xs text-[#6baed6]">Each tile shows how many ranked players fall into a total-games and win-rate pocket. The outlined marker places this captain against that field.</p>
-                                <RankedWRBattlesHeatmapSVG playerId={player.player_id} isLoading={isLoading} />
-                            </div>
+                            {showRankedHeatmap ? (
+                                <div className="mt-4">
+                                    <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Games vs Win Rate</h3>
+                                    <p className="mb-3 text-xs text-[#6baed6]">Each tile shows how many ranked players fall into a total-games and win-rate pocket. The outlined marker places this captain against that field.</p>
+                                    <RankedWRBattlesHeatmapSVG
+                                        playerId={player.player_id}
+                                        isLoading={isLoading}
+                                        onVisibilityChange={setShowRankedHeatmap}
+                                    />
+                                </div>
+                            ) : null}
                             <div className="mt-4">
                                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Ranked Seasons</h3>
                                 <p className="mb-3 text-xs text-[#6baed6]">Historical ranked season performance, including league finish.</p>

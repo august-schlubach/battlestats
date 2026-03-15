@@ -191,7 +191,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
                                 </th>
                                 <th className="sticky top-0 bg-white py-2 pr-4 text-right font-semibold" aria-sort={ariaSortFor('active_rate')}>
                                     <button type="button" onClick={() => handleSort('active_rate')} className="text-right font-semibold text-inherit hover:text-gray-700">
-                                        Active{sortIndicator('active_rate')}
+                                        Clan Activity % {sortIndicator('active_rate')}
                                     </button>
                                 </th>
                                 <th className="sticky top-0 bg-white py-2 pr-3 text-right font-semibold" aria-sort={ariaSortFor('roster_win_rate')}>

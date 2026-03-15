@@ -97,3 +97,33 @@ class BackfillRankedCommandTests(TestCase):
             self.assertEqual(
                 processed_ids, [missing.player_id, stale.player_id])
             self.assertNotIn(fresh.player_id, processed_ids)
+
+    def test_backfill_ranked_command_repairs_rows_missing_top_ship_enrichment(self):
+        player = Player.objects.create(
+            name='MissingTopShip',
+            player_id=93010,
+            is_hidden=False,
+            ranked_json=[
+                {
+                    'season_id': 1100,
+                    'total_battles': 42,
+                    'total_wins': 24,
+                    'win_rate': 0.5714,
+                    'highest_league': 2,
+                    'highest_league_name': 'Silver',
+                }
+            ],
+            ranked_updated_at=timezone.now(),
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / 'ranked-state.json'
+
+            with patch('warships.management.commands.backfill_ranked_data.update_ranked_data') as mock_update:
+                call_command(
+                    'backfill_ranked_data',
+                    '--state-file', str(state_path),
+                )
+
+            self.assertEqual([call.args[0] for call in mock_update.call_args_list], [
+                             player.player_id])
