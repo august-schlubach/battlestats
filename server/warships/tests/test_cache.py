@@ -338,6 +338,42 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
         self.assertEqual(result2[0]["battles"], 12)
         mock_fetch.assert_not_called()
 
+    @patch("warships.data._get_player_clan_battle_season_stats")
+    @patch("warships.data._get_clan_battle_seasons_metadata")
+    def test_fetch_player_clan_battle_seasons_enriches_and_sorts_rows(self, mock_meta, mock_player_stats):
+        from warships.data import fetch_player_clan_battle_seasons
+
+        mock_meta.return_value = {
+            31: {
+                "name": "Earlier Season",
+                "label": "S31",
+                "start_date": "2025-08-01",
+                "end_date": "2025-09-01",
+                "ship_tier_min": 8,
+                "ship_tier_max": 8,
+            },
+            209: {
+                "name": "Later Legacy Season",
+                "label": "S209",
+                "start_date": "2025-10-01",
+                "end_date": "2025-11-01",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+            },
+        }
+        mock_player_stats.return_value = [
+            {"season_id": 31, "battles": 20, "wins": 11, "losses": 9},
+            {"season_id": 209, "battles": 12, "wins": 8, "losses": 4},
+            {"season_id": 999, "battles": 0, "wins": 0, "losses": 0},
+        ]
+
+        result = fetch_player_clan_battle_seasons(12345)
+
+        self.assertEqual([row["season_id"] for row in result], [209, 31])
+        self.assertEqual(result[0]["season_name"], "Later Legacy Season")
+        self.assertEqual(result[0]["win_rate"], 66.7)
+        self.assertEqual(result[1]["ship_tier_min"], 8)
+
 
 @override_settings(CACHES=LOCMEM_CACHES)
 class ClanBattleSummaryCacheTests(TestCase):

@@ -2,6 +2,7 @@ import React from 'react';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
+import { useClanMembers } from './useClanMembers';
 
 interface ClanDetailProps {
     clan: {
@@ -39,6 +40,8 @@ const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMem
 });
 
 const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember }) => {
+    const { members, loading: membersLoading, error: membersError } = useClanMembers(clan.clan_id);
+
     return (
         <div className="bg-white p-6">
             <div className="mb-3 pb-3">
@@ -51,7 +54,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             </div>
 
             <div className="mt-4">
-                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} />
+                <ClanSVG clanId={clan.clan_id} onSelectMember={onSelectMember} svgWidth={900} svgHeight={440} membersData={members} />
             </div>
 
             <DeferredSection
@@ -70,7 +73,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
             >
                 <div>
-                    <ClanMembers clanId={clan.clan_id} onSelectMember={onSelectMember} />
+                    <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} />
                 </div>
             </DeferredSection>
 

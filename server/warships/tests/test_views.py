@@ -7,6 +7,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key, warm_landing_page_content
 from warships.models import Player, Clan, PlayerExplorerSummary
 from warships.views import PUBLIC_API_THROTTLES, landing_players
 
@@ -202,13 +203,13 @@ class PlayerViewSetTests(TestCase):
             last_fetch=now,
             last_lookup=None,
         )
-        cache.set('landing:recent_players:last_lookup',
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
                   [{'name': 'stale'}], 60)
 
         response = self.client.get("/api/player/CacheLookupPlayer/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(cache.get('landing:recent_players:last_lookup'))
+        self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
     def test_clan_members_lookup_updates_clan_last_lookup_timestamp(self):
         cache.clear()
@@ -530,8 +531,20 @@ class ClanMembersEndpointTests(TestCase):
             },
         )
         self.mock_queue_clan_ranked_hydration = self.queue_clan_ranked_hydration_patcher.start()
+        self.queue_clan_battle_hydration_patcher = patch(
+            "warships.data.queue_clan_battle_hydration",
+            return_value={
+                "pending_player_ids": set(),
+                "queued_player_ids": set(),
+                "deferred_player_ids": set(),
+                "eligible_player_ids": set(),
+                "max_in_flight": 8,
+            },
+        )
+        self.mock_queue_clan_battle_hydration = self.queue_clan_battle_hydration_patcher.start()
 
     def tearDown(self):
+        self.queue_clan_battle_hydration_patcher.stop()
         self.queue_clan_ranked_hydration_patcher.stop()
         super().tearDown()
 
@@ -569,7 +582,11 @@ class ClanMembersEndpointTests(TestCase):
                              "days_since_last_battle": 6,
                              "is_leader": True,
                              "is_pve_player": False,
+                             "is_sleepy_player": False,
                              "is_ranked_player": False,
+                             "is_clan_battle_player": False,
+                             "clan_battle_win_rate": None,
+                             "clan_battle_hydration_pending": False,
                              "highest_ranked_league": None,
                              "ranked_hydration_pending": False,
                              "ranked_updated_at": None,
@@ -579,6 +596,11 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(response["X-Ranked-Hydration-Deferred"], "0")
         self.assertEqual(response["X-Ranked-Hydration-Pending"], "0")
         self.assertEqual(response["X-Ranked-Hydration-Max-In-Flight"], "8")
+        self.assertEqual(response["X-Clan-Battle-Hydration-Queued"], "0")
+        self.assertEqual(response["X-Clan-Battle-Hydration-Deferred"], "0")
+        self.assertEqual(response["X-Clan-Battle-Hydration-Pending"], "0")
+        self.assertEqual(
+            response["X-Clan-Battle-Hydration-Max-In-Flight"], "8")
         mock_update_clan_data.assert_not_called()
         mock_update_clan_members.assert_not_called()
 
@@ -630,6 +652,51 @@ class ClanMembersEndpointTests(TestCase):
             ranked_updated_at.isoformat().replace(
                 "+00:00", "Z") if ranked_updated_at.tzinfo else ranked_updated_at.isoformat(),
         )
+
+    def test_clan_members_exposes_clan_battle_hydration_metadata(self):
+        self.mock_queue_clan_battle_hydration.return_value = {
+            "pending_player_ids": {7931},
+            "queued_player_ids": {7931},
+            "deferred_player_ids": set(),
+            "eligible_player_ids": {7931, 7932},
+            "max_in_flight": 8,
+        }
+        clan = Clan.objects.create(
+            clan_id=793,
+            name="Clan Battle Hydration Clan",
+            members_count=2,
+        )
+        Player.objects.create(
+            name="PendingClanBattleHydration",
+            player_id=7931,
+            clan=clan,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="FreshClanBattleHydration",
+            player_id=7932,
+            clan=clan,
+            last_battle_date=timezone.now().date(),
+        )
+        cache.set(
+            "clan_battles:player:7932",
+            [{"season_id": 34, "battles": 12, "wins": 7, "losses": 5}],
+            300,
+        )
+
+        response = self.client.get("/api/fetch/clan_members/793/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = {row["name"]: row for row in response.json()}
+        self.assertTrue(payload["PendingClanBattleHydration"]
+                        ["clan_battle_hydration_pending"])
+        self.assertFalse(payload["FreshClanBattleHydration"]
+                         ["clan_battle_hydration_pending"])
+        self.assertEqual(response["X-Clan-Battle-Hydration-Queued"], "1")
+        self.assertEqual(response["X-Clan-Battle-Hydration-Deferred"], "0")
+        self.assertEqual(response["X-Clan-Battle-Hydration-Pending"], "1")
+        self.assertEqual(
+            response["X-Clan-Battle-Hydration-Max-In-Flight"], "8")
 
     def test_clan_members_exposes_deferred_ranked_hydration_count_in_headers(self):
         self.mock_queue_clan_ranked_hydration.return_value = {
@@ -815,6 +882,83 @@ class ClanMembersEndpointTests(TestCase):
                 "NoRanked": None,
             },
         )
+
+    def test_clan_members_marks_clan_battle_players_from_cached_seasons(self):
+        cache.clear()
+        clan = Clan.objects.create(
+            clan_id=82,
+            name="Clan Battle Clan",
+            members_count=2,
+        )
+        Player.objects.create(
+            name="ClanBattleMain",
+            player_id=8201,
+            clan=clan,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="ClanBattleDabbler",
+            player_id=8202,
+            clan=clan,
+            last_battle_date=timezone.now().date(),
+        )
+        cache.set(
+            "clan_battles:player:8201",
+            [
+                {"season_id": 31, "battles": 24, "wins": 14, "losses": 10},
+                {"season_id": 32, "battles": 20, "wins": 11, "losses": 9},
+            ],
+            300,
+        )
+        cache.set(
+            "clan_battles:player:8202",
+            [
+                {"season_id": 33, "battles": 18, "wins": 9, "losses": 9},
+            ],
+            300,
+        )
+
+        response = self.client.get("/api/fetch/clan_members/82/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = {row["name"]: row for row in response.json()}
+        self.assertTrue(payload["ClanBattleMain"]["is_clan_battle_player"])
+        self.assertEqual(payload["ClanBattleMain"]
+                         ["clan_battle_win_rate"], 56.8)
+        self.assertFalse(payload["ClanBattleDabbler"]["is_clan_battle_player"])
+        self.assertEqual(payload["ClanBattleDabbler"]
+                         ["clan_battle_win_rate"], 50.0)
+
+    def test_clan_members_marks_sleepy_players_after_one_year(self):
+        clan = Clan.objects.create(
+            clan_id=83,
+            name="Sleepy Clan",
+            members_count=2,
+        )
+        Player.objects.create(
+            name="FreshSleeper",
+            player_id=8301,
+            clan=clan,
+            days_since_last_battle=365,
+            last_battle_date=timezone.now().date() - timedelta(days=365),
+        )
+        Player.objects.create(
+            name="LongSleeper",
+            player_id=8302,
+            clan=clan,
+            days_since_last_battle=430,
+            last_battle_date=timezone.now().date() - timedelta(days=430),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/83/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = {row["name"]: row["is_sleepy_player"]
+                   for row in response.json()}
+        self.assertEqual(payload, {
+            "FreshSleeper": False,
+            "LongSleeper": True,
+        })
 
     def test_clan_members_exposes_activity_buckets_for_histogram(self):
         clan = Clan.objects.create(
@@ -1112,7 +1256,7 @@ class ApiContractTests(TestCase):
         self.assertEqual(latest_row["dormant_players"], 1)
         self.assertAlmostEqual(latest_row["active_share"], 33.3)
 
-    def test_landing_players_orders_by_player_score_desc(self):
+    def test_landing_players_best_mode_orders_by_high_tier_wr_desc(self):
         cache.clear()
         today = timezone.now().date()
         high = Player.objects.create(
@@ -1151,12 +1295,12 @@ class ApiContractTests(TestCase):
         PlayerExplorerSummary.objects.create(player=high, player_score=9.1)
         PlayerExplorerSummary.objects.create(player=low, player_score=4.2)
 
-        response = self.client.get("/api/landing/players/")
+        response = self.client.get("/api/landing/players/?mode=best&limit=40")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             [row["name"] for row in response.json()[:3]],
-            ["LandingHighScore", "LandingLowScore", "LandingNoScore"],
+            ["LandingNoScore", "LandingHighScore", "LandingLowScore"],
         )
 
     def test_landing_players_exposes_high_tier_record_excluding_low_tiers(self):
@@ -1177,7 +1321,7 @@ class ApiContractTests(TestCase):
             ],
         )
 
-        response = self.client.get("/api/landing/players/")
+        response = self.client.get("/api/landing/players/?mode=best&limit=40")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -1185,6 +1329,42 @@ class ApiContractTests(TestCase):
             item for item in payload if item["name"] == "LandingTierFilter")
         self.assertEqual(row["high_tier_pvp_battles"], 1800)
         self.assertEqual(row["high_tier_pvp_ratio"], 53.33)
+
+    def test_landing_players_only_include_recently_active_players(self):
+        cache.clear()
+        today = timezone.now().date()
+        Player.objects.create(
+            name="LandingActivePlayer",
+            player_id=4312,
+            is_hidden=False,
+            pvp_ratio=54.0,
+            pvp_battles=3200,
+            days_since_last_battle=90,
+            last_battle_date=today - timedelta(days=90),
+            battles_json=[
+                {"ship_tier": 8, "pvp_battles": 3200, "wins": 1664},
+            ],
+        )
+        Player.objects.create(
+            name="LandingInactivePlayer",
+            player_id=4313,
+            is_hidden=False,
+            pvp_ratio=61.0,
+            pvp_battles=6400,
+            days_since_last_battle=220,
+            last_battle_date=today - timedelta(days=220),
+            battles_json=[
+                {"ship_tier": 10, "pvp_battles": 6400, "wins": 3904},
+            ],
+        )
+
+        response = self.client.get(
+            "/api/landing/players/?mode=random&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.json()]
+        self.assertIn("LandingActivePlayer", names)
+        self.assertNotIn("LandingInactivePlayer", names)
 
     def test_landing_recent_players_orders_by_last_lookup_desc(self):
         cache.clear()
@@ -1219,6 +1399,85 @@ class ApiContractTests(TestCase):
             [row["name"] for row in response.json()[:3]],
             ["RecentNoScore", "RecentLowScore", "RecentHighScore"],
         )
+
+    def test_landing_players_and_recent_players_expose_clan_battle_enjoyer_from_cache(self):
+        cache.clear()
+        today = timezone.now().date()
+        looked_up_at = timezone.now() - timedelta(minutes=1)
+        player = Player.objects.create(
+            name="LandingClanBattleMain",
+            player_id=4410,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            total_battles=4200,
+            pvp_battles=3800,
+            last_battle_date=today,
+            last_lookup=looked_up_at,
+        )
+        PlayerExplorerSummary.objects.create(player=player, player_score=7.4)
+        cache.set(
+            "clan_battles:player:4410",
+            [
+                {"season_id": 40, "battles": 26, "wins": 16, "losses": 10},
+                {"season_id": 41, "battles": 18, "wins": 9, "losses": 9},
+            ],
+            300,
+        )
+
+        landing_response = self.client.get(
+            "/api/landing/players/?mode=random&limit=40")
+        recent_response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(landing_response.status_code, 200)
+        self.assertEqual(recent_response.status_code, 200)
+
+        landing_row = next(
+            row for row in landing_response.json() if row["name"] == "LandingClanBattleMain"
+        )
+        recent_row = next(
+            row for row in recent_response.json() if row["name"] == "LandingClanBattleMain"
+        )
+
+        self.assertTrue(landing_row["is_clan_battle_player"])
+        self.assertEqual(landing_row["clan_battle_win_rate"], 56.8)
+        self.assertTrue(recent_row["is_clan_battle_player"])
+        self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
+
+    def test_landing_players_reject_invalid_mode(self):
+        response = self.client.get("/api/landing/players/?mode=invalid")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("detail", response.json())
+
+    def test_landing_recent_players_expose_sleepy_player_flag(self):
+        cache.clear()
+        now = timezone.now()
+        Player.objects.create(
+            name="RecentSleeper",
+            player_id=4411,
+            pvp_ratio=49.0,
+            days_since_last_battle=500,
+            last_lookup=now - timedelta(minutes=2),
+        )
+
+        response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(item for item in response.json()
+                   if item["name"] == "RecentSleeper")
+        self.assertTrue(row["is_sleepy_player"])
+
+    def test_warm_landing_page_content_populates_current_landing_cache_keys(self):
+        cache.clear()
+
+        result = warm_landing_page_content()
+
+        self.assertEqual(result['status'], 'completed')
+        self.assertIsNotNone(cache.get(LANDING_CLANS_CACHE_KEY))
+        self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_CACHE_KEY))
+        self.assertIsNotNone(cache.get(landing_player_cache_key('random', 40)))
+        self.assertIsNotNone(cache.get(landing_player_cache_key('best', 40)))
+        self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
     def test_landing_recent_clans_orders_by_last_lookup_desc(self):
         cache.clear()
@@ -1879,7 +2138,7 @@ class ApiThrottleTests(TestCase):
                          PUBLIC_API_THROTTLES)
 
     def test_landing_recent_players_orders_by_last_lookup_desc_and_limits_to_40(self):
-        cache.delete('landing:recent_players:last_lookup')
+        cache.delete(LANDING_RECENT_PLAYERS_CACHE_KEY)
         now = timezone.now()
 
         for index in range(45):
@@ -1898,7 +2157,7 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(payload[39]["name"], "RecentPlayer39")
 
     def test_landing_recent_clans_orders_by_last_lookup_desc_and_limits_to_40(self):
-        cache.delete('landing:recent_clans:last_lookup')
+        cache.delete(LANDING_RECENT_CLANS_CACHE_KEY)
         now = timezone.now()
 
         for index in range(45):
@@ -1966,8 +2225,10 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["project_name"], "trace-lab")
         self.assertEqual(response.json()["diagnostics"]["total_runs"], 1)
-        self.assertEqual(response.json()["diagnostics"]["runs_with_guidance"], 1)
-        self.assertTrue(response.json()["recent_runs"][0]["design_review_passed"])
+        self.assertEqual(
+            response.json()["diagnostics"]["runs_with_guidance"], 1)
+        self.assertTrue(
+            response.json()["recent_runs"][0]["design_review_passed"])
         self.assertEqual(response.json()[
                          "learning"]["chart_tuning_notes"][0]["slug"], "ranked_wr_battles_heatmap")
         mock_get_agentic_trace_dashboard.assert_called_once_with(limit=12)
@@ -2044,6 +2305,34 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(response.json(), [])
         self.assertEqual(response["X-Clan-Battles-Pending"], "true")
         mock_delay.assert_called_once_with(clan_id="42")
+
+    @patch("warships.views.fetch_player_clan_battle_seasons")
+    def test_player_clan_battle_seasons_returns_serialized_rows(self, mock_fetch):
+        mock_fetch.return_value = [
+            {
+                "season_id": 32,
+                "season_name": "Northern Waters",
+                "season_label": "S32",
+                "start_date": "2025-11-01",
+                "end_date": "2025-12-15",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+                "battles": 48,
+                "wins": 27,
+                "losses": 21,
+                "win_rate": 56.3,
+            }
+        ]
+
+        response = self.client.get(
+            "/api/fetch/player_clan_battle_seasons/777/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["season_label"], "S32")
+        self.assertEqual(payload[0]["battles"], 48)
+        self.assertEqual(payload[0]["win_rate"], 56.3)
 
     @patch("warships.views.fetch_ranked_data")
     def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+import type { ClanMemberData, ActivityBucketKey } from './clanMembersShared';
 
 interface ClanProps {
     clanId: number;
@@ -7,6 +8,7 @@ interface ClanProps {
     highlightedPlayerName?: string;
     svgWidth?: number;
     svgHeight?: number;
+    membersData?: ClanMemberData[];
 }
 
 interface ClanData {
@@ -15,15 +17,21 @@ interface ClanData {
     pvp_ratio: number;
 }
 
-type ActivityBucketKey = 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
+const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
+    const contentType = response.headers.get('content-type') || '';
 
-interface ClanMemberData {
-    name: string;
-    is_hidden: boolean;
-    pvp_ratio: number | null;
-    days_since_last_battle: number | null;
-    activity_bucket: ActivityBucketKey;
-}
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
+    }
+
+    if (!contentType.toLowerCase().includes('application/json')) {
+        const body = await response.text();
+        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
+    }
+
+    return response.json() as Promise<T>;
+};
 
 interface ClanPlotPoint extends ClanData {
     activity_bucket: ActivityBucketKey;
@@ -98,6 +106,7 @@ const drawClanPlot = (
     highlightedPlayerName: ClanProps['highlightedPlayerName'],
     svgWidth: number,
     svgHeight: number,
+    membersData: ClanMemberData[],
 ) => {
     const margin = { top: 64, right: 16, bottom: 32, left: 38 };
     const width = svgWidth - margin.left - margin.right;
@@ -121,8 +130,6 @@ const drawClanPlot = (
 
     const filterType = 'active';
     const plotPath = `http://localhost:8888/api/fetch/clan_data/${clanId}:${filterType}`;
-    const membersPath = `http://localhost:8888/api/fetch/clan_members/${clanId}/`;
-
     const hideDetails = () => {
         activityGroup.select('.player-details').remove();
     };
@@ -166,27 +173,9 @@ const drawClanPlot = (
             .attr('rx', 6)
             .attr('fill', 'rgba(255, 255, 255, 0.94)');
     };
-
-    Promise.all([
-        fetch(plotPath),
-        fetch(membersPath),
-    ])
-        .then(async ([plotResponse, membersResponse]) => {
-            if (!plotResponse.ok) {
-                throw new Error(`Failed to fetch clan data: ${plotResponse.status}`);
-            }
-
-            if (!membersResponse.ok) {
-                throw new Error(`Failed to fetch clan members: ${membersResponse.status}`);
-            }
-
-            const [plotData, membersData] = await Promise.all([plotResponse.json(), membersResponse.json()]);
-            return {
-                plotData: Array.isArray(plotData) ? plotData as ClanData[] : [],
-                membersData: Array.isArray(membersData) ? membersData as ClanMemberData[] : [],
-            };
-        })
-        .then(({ plotData, membersData }) => {
+    fetch(plotPath)
+        .then((plotResponse) => readJsonOrThrow<ClanData[]>(plotResponse, 'Clan plot data'))
+        .then((plotData) => {
             if (!plotData.length) {
                 svg.append('text')
                     .attr('x', 0)
@@ -447,14 +436,14 @@ const drawClanPlot = (
         });
 };
 
-const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280 }) => {
+const ClanSVG: React.FC<ClanProps> = ({ clanId, onSelectMember, highlightedPlayerName, svgWidth = 320, svgHeight = 280, membersData = [] }) => {
     const containerRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (containerRef.current) {
-            drawClanPlot(containerRef.current, clanId, onSelectMember, highlightedPlayerName, svgWidth, svgHeight);
+            drawClanPlot(containerRef.current, clanId, onSelectMember, highlightedPlayerName, svgWidth, svgHeight, membersData);
         }
-    }, [clanId, onSelectMember, highlightedPlayerName, svgWidth, svgHeight]);
+    }, [clanId, membersData, onSelectMember, highlightedPlayerName, svgWidth, svgHeight]);
 
     return <div ref={containerRef}></div>;
 };

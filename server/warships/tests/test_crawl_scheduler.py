@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from unittest.mock import patch
 import time
+from unittest.mock import ANY
 
 from django.apps import apps
 from django.core.cache import cache
@@ -11,7 +12,7 @@ from django.test import TestCase, override_settings
 from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
 from warships.signals import ensure_daily_clan_crawl_schedule
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_ranked_data_refresh_pending, queue_ranked_data_refresh, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_ranked_data_task, warm_clan_battle_summaries_task
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_clan_battle_data_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_ranked_data_refresh, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_ranked_data_task, warm_clan_battle_summaries_task
 
 
 @override_settings(
@@ -33,8 +34,27 @@ class ClanCrawlSchedulerTests(TestCase):
 
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["clans_found"], 12)
-        mock_run.assert_called_once_with(resume=True, dry_run=False, limit=5)
+        mock_run.assert_called_once_with(
+            resume=True,
+            dry_run=False,
+            limit=5,
+            heartbeat_callback=ANY,
+        )
         self.assertIsNone(cache.get(CLAN_CRAWL_LOCK_KEY))
+        self.assertIsNone(cache.get(CLAN_CRAWL_HEARTBEAT_KEY))
+
+    def test_crawl_task_heartbeat_callback_refreshes_cache(self):
+        def fake_run(*, resume, dry_run, limit, heartbeat_callback):
+            cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time() - 3600, timeout=60)
+            heartbeat_callback()
+            return {"clans_found": 12}
+
+        with patch("warships.clan_crawl.run_clan_crawl", side_effect=fake_run):
+            result = crawl_all_clans_task.run(
+                resume=True, dry_run=False, limit=5)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertIsNone(cache.get(CLAN_CRAWL_HEARTBEAT_KEY))
 
     def test_crawl_task_skips_when_lock_exists(self):
         cache.add(CLAN_CRAWL_LOCK_KEY, "existing-run", timeout=60)
@@ -246,6 +266,17 @@ class RefreshTaskLockTests(TestCase):
             result, {"status": "skipped", "reason": "already-queued"})
         mock_delay.assert_not_called()
 
+    def test_queue_ranked_data_refresh_skips_during_broker_cooldown(self):
+        cache.add("warships:tasks:update_ranked_data_dispatch:cooldown",
+                  True, timeout=60)
+
+        with patch("warships.tasks.update_ranked_data_task.delay") as mock_delay:
+            result = queue_ranked_data_refresh(1234)
+
+        self.assertEqual(
+            result, {"status": "skipped", "reason": "broker-unavailable"})
+        mock_delay.assert_not_called()
+
     def test_ranked_refresh_task_clears_pending_marker(self):
         cache.add("warships:tasks:update_ranked_data_dispatch:4567",
                   "queued", timeout=60)
@@ -256,6 +287,25 @@ class RefreshTaskLockTests(TestCase):
         self.assertEqual(result, {"status": "completed"})
         mock_update_ranked_data.assert_called_once_with(player_id=4567)
         self.assertFalse(is_ranked_data_refresh_pending(4567))
+
+    def test_queue_clan_battle_data_refresh_sets_pending_marker_until_task_finishes(self):
+        with patch("warships.tasks.update_player_clan_battle_data_task.delay") as mock_delay:
+            result = queue_clan_battle_data_refresh(2234)
+
+        self.assertEqual(result, {"status": "queued"})
+        self.assertTrue(is_clan_battle_data_refresh_pending(2234))
+        mock_delay.assert_called_once_with(player_id=2234)
+
+    def test_queue_clan_battle_data_refresh_skips_during_broker_cooldown(self):
+        cache.add("warships:tasks:update_player_clan_battle_data_dispatch:cooldown",
+                  True, timeout=60)
+
+        with patch("warships.tasks.update_player_clan_battle_data_task.delay") as mock_delay:
+            result = queue_clan_battle_data_refresh(2234)
+
+        self.assertEqual(
+            result, {"status": "skipped", "reason": "broker-unavailable"})
+        mock_delay.assert_not_called()
 
     def test_post_migrate_updates_existing_periodic_task(self):
         schedule = CrontabSchedule.objects.create(

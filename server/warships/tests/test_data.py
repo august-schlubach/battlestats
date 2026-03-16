@@ -6,7 +6,8 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from warships.clan_crawl import save_player
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_ranked_hydration
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_ranked_hydration
+from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 
 
@@ -556,6 +557,69 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(hydration_state["max_in_flight"], 1)
         mock_queue_ranked_data_refresh.assert_not_called()
 
+    @patch("warships.tasks.queue_clan_battle_data_refresh")
+    @patch("warships.tasks.is_clan_battle_data_refresh_pending")
+    def test_queue_clan_battle_hydration_only_enqueues_cache_misses(
+        self,
+        mock_is_clan_battle_data_refresh_pending,
+        mock_queue_clan_battle_data_refresh,
+    ):
+        cached_player = Player.objects.create(
+            name="CachedClanBattleMember",
+            player_id=7111,
+        )
+        missing_player = Player.objects.create(
+            name="MissingClanBattleMember",
+            player_id=7112,
+        )
+        queued_player = Player.objects.create(
+            name="AlreadyQueuedClanBattleMember",
+            player_id=7113,
+        )
+        cache.set("clan_battles:player:7111", [
+                  {"season_id": 1, "battles": 5, "wins": 3}], 300)
+
+        mock_is_clan_battle_data_refresh_pending.side_effect = lambda player_id: player_id == queued_player.player_id
+        mock_queue_clan_battle_data_refresh.return_value = {"status": "queued"}
+
+        hydration_state = queue_clan_battle_hydration(
+            [cached_player, missing_player, queued_player]
+        )
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7112, 7113})
+        self.assertEqual(hydration_state["queued_player_ids"], {7112})
+        self.assertEqual(hydration_state["deferred_player_ids"], set())
+        mock_queue_clan_battle_data_refresh.assert_called_once_with(7112)
+
+    @patch("warships.tasks.queue_clan_battle_data_refresh")
+    @patch("warships.tasks.is_clan_battle_data_refresh_pending")
+    @patch("warships.data.CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT", 1)
+    def test_queue_clan_battle_hydration_defers_when_in_flight_budget_is_full(
+        self,
+        mock_is_clan_battle_data_refresh_pending,
+        mock_queue_clan_battle_data_refresh,
+    ):
+        already_pending_player = Player.objects.create(
+            name="AlreadyPendingClanBattleMember",
+            player_id=7114,
+        )
+        deferred_player = Player.objects.create(
+            name="DeferredClanBattleMember",
+            player_id=7115,
+        )
+
+        mock_is_clan_battle_data_refresh_pending.side_effect = lambda player_id: player_id == already_pending_player.player_id
+
+        hydration_state = queue_clan_battle_hydration(
+            [already_pending_player, deferred_player]
+        )
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7114, 7115})
+        self.assertEqual(hydration_state["queued_player_ids"], set())
+        self.assertEqual(hydration_state["deferred_player_ids"], {7115})
+        self.assertEqual(hydration_state["max_in_flight"], 1)
+        mock_queue_clan_battle_data_refresh.assert_not_called()
+
 
 class PlayerDataHardeningTests(TestCase):
     def test_compute_player_verdict_uses_new_playstyle_bands(self):
@@ -703,7 +767,10 @@ class PlayerDataHardeningTests(TestCase):
             player_id=9191,
             last_fetch=timezone.now() - timedelta(days=2),
         )
-        cache.set("landing:players", [{"name": "stale"}], 60)
+        stale_player_key = landing_player_cache_key("random", 40)
+        cache.set(stale_player_key, [{"name": "stale"}], 60)
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
+                  [{"name": "recent-stale"}], 60)
         mock_fetch_player_personal_data.return_value = {
             "account_id": 9191,
             "nickname": "CachedCaptain",
@@ -714,7 +781,8 @@ class PlayerDataHardeningTests(TestCase):
 
         update_player_data(player, force_refresh=True)
 
-        self.assertIsNone(cache.get("landing:players"))
+        self.assertIsNone(cache.get(landing_player_cache_key("random", 40)))
+        self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
     @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
     @patch("warships.data._fetch_clan_membership_for_player")
@@ -1329,7 +1397,9 @@ class PlayerExplorerSummaryTests(TestCase):
             tag="CC",
             members_count=12,
         )
-        cache.set("landing:clans", [{"name": "stale"}], 60)
+        cache.set(LANDING_CLANS_CACHE_KEY, [{"name": "stale"}], 60)
+        cache.set(LANDING_RECENT_CLANS_CACHE_KEY,
+                  [{"name": "recent-stale"}], 60)
         mock_fetch_clan_data.return_value = {
             "name": "CacheClan",
             "tag": "CC",
@@ -1341,4 +1411,5 @@ class PlayerExplorerSummaryTests(TestCase):
 
         update_clan_data(clan.clan_id)
 
-        self.assertIsNone(cache.get("landing:clans"))
+        self.assertIsNone(cache.get(LANDING_CLANS_CACHE_KEY))
+        self.assertIsNone(cache.get(LANDING_RECENT_CLANS_CACHE_KEY))

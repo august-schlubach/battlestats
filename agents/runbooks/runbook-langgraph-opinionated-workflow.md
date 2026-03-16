@@ -87,9 +87,7 @@ python scripts/run_agent_graph.py \
     "preferred_patterns": [
       "Prefer feature-flagged rollout for user-visible cache changes."
     ],
-    "decision_rules": [
-      "Prefer reversible cache invalidation changes."
-    ]
+    "decision_rules": ["Prefer reversible cache invalidation changes."]
   },
   "team_style_snippets": [
     "Bias toward additive diagnostics when touching agent workflows."

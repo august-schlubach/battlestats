@@ -113,6 +113,14 @@ from the repository root:
 docker compose up -d
 ```
 
+the server now warms the landing-page caches automatically a few seconds after startup, so the first browser hit after a `bounce` or fresh `docker compose up` does not have to build the landing payloads cold.
+
+to trigger the same warm-up manually:
+
+```bash
+docker compose exec -T server python manage.py warm_landing_page_content
+```
+
 this starts:
 
 - next.js client
@@ -144,6 +152,16 @@ notes:
 - `DB_PORT` should be `5432`.
 - `DB_NAME`/`DB_USER` should match compose defaults (`battlestats` / `django`).
 - `DB_PASSWORD` must match the password used by the Postgres container.
+
+optional startup warm-up knobs for the landing page:
+
+```env
+WARM_LANDING_PAGE_ON_STARTUP=1
+LANDING_WARMUP_START_DELAY_SECONDS=5
+```
+
+- set `WARM_LANDING_PAGE_ON_STARTUP=0` if you want to disable the automatic landing-cache warm-up.
+- `LANDING_WARMUP_START_DELAY_SECONDS` controls how long the server waits after migrations before launching the background warm command.
 
 ### local access
 

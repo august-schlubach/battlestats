@@ -171,7 +171,8 @@ def _load_team_doctrine(state: AgentState) -> dict:
     ]
     if overrides:
         notes.append(
-            "Applied doctrine overrides for: " + ", ".join(sorted(overrides.keys()))
+            "Applied doctrine overrides for: " +
+            ", ".join(sorted(overrides.keys()))
         )
     if style_snippets:
         notes.append(
@@ -192,10 +193,12 @@ def _retrieve_guidance(state: AgentState) -> dict:
     notes = list(state.get("guidance_notes", []))
     if guidance:
         notes.append(
-            "Retrieved battlestats guidance from: " + ", ".join(item["path"] for item in guidance)
+            "Retrieved battlestats guidance from: " +
+            ", ".join(item["path"] for item in guidance)
         )
     else:
-        notes.append("No closely matched battlestats guidance documents were retrieved for this task.")
+        notes.append(
+            "No closely matched battlestats guidance documents were retrieved for this task.")
 
     return {
         "retrieved_guidance": guidance,
@@ -297,14 +300,16 @@ def _plan_has_api_contract_step(plan: list[str]) -> bool:
         and not step.lower().startswith("review the approach against battlestats doctrine:")
         and not step.lower().startswith("review relevant battlestats guidance artifacts before implementation:")
         and
-        any(token in step.lower() for token in ("contract", "payload", "serializer", "schema", "response", "endpoint", "backward", "compat"))
+        any(token in step.lower() for token in ("contract", "payload",
+            "serializer", "schema", "response", "endpoint", "backward", "compat"))
         for step in plan
     )
 
 
 def _plan_has_docs_and_api_test_step(plan: list[str]) -> bool:
     has_docs = any(
-        not step.lower().startswith("review relevant battlestats guidance artifacts before implementation:")
+        not step.lower().startswith(
+            "review relevant battlestats guidance artifacts before implementation:")
         and any(token in step.lower() for token in ("documentation", "docs", "runbook", "readme"))
         for step in plan
     )
@@ -323,7 +328,8 @@ def _design_pattern_review(state: AgentState) -> dict:
     review_notes: list[str] = []
 
     if not plan:
-        review_notes.append("Design review: plan is empty and needs concrete implementation steps.")
+        review_notes.append(
+            "Design review: plan is empty and needs concrete implementation steps.")
 
     if not _plan_has_validation_step(plan):
         review_notes.append(
@@ -366,7 +372,8 @@ def _revise_plan(state: AgentState) -> dict:
             plan.append(remediation)
 
     if any(
-        any(token in note.lower() for token in ("rollback", "guardrail", "load-control", "load control"))
+        any(token in note.lower()
+            for token in ("rollback", "guardrail", "load-control", "load control"))
         for note in notes
     ):
         remediation = "Add rollback, guardrail, and bounded-load checks before implementation."
@@ -412,13 +419,15 @@ def _api_contract_review(state: AgentState) -> dict:
     doctrine_notes = list(state.get("doctrine_notes", []))
     if review_required:
         if api_review_passed:
-            doctrine_notes.append("API contract review passed against battlestats doctrine.")
+            doctrine_notes.append(
+                "API contract review passed against battlestats doctrine.")
         else:
             doctrine_notes.append(
                 f"API contract review found {len(review_notes)} issue(s) that require plan revision."
             )
     else:
-        doctrine_notes.append("API contract review skipped because the task does not appear API-facing.")
+        doctrine_notes.append(
+            "API contract review skipped because the task does not appear API-facing.")
 
     return {
         "api_review_notes": review_notes,
@@ -613,7 +622,8 @@ def _retry_verification(state: AgentState) -> dict:
 
 def _summarize(state: AgentState) -> dict:
     api_review_required = state.get("api_review_required", False)
-    api_review_label = "n/a" if not api_review_required else ("pass" if state.get("api_review_passed", False) else "fail")
+    api_review_label = "n/a" if not api_review_required else (
+        "pass" if state.get("api_review_passed", False) else "fail")
     summary = [
         f"Task: {state.get('task', '')}",
         f"Plan steps: {len(state.get('plan', []))}",
@@ -719,7 +729,8 @@ def build_graph(checkpointer: Any | None = None):
     graph_builder.add_node("design_pattern_review", _design_pattern_review)
     graph_builder.add_node("revise_plan", _revise_plan)
     graph_builder.add_node("api_contract_review", _api_contract_review)
-    graph_builder.add_node("revise_plan_after_api_review", _revise_plan_after_api_review)
+    graph_builder.add_node("revise_plan_after_api_review",
+                           _revise_plan_after_api_review)
     graph_builder.add_node("implement_task", _implement_task)
     graph_builder.add_node("enforce_tool_boundaries", _enforce_tool_boundaries)
     graph_builder.add_node("run_verification_commands",
@@ -741,7 +752,8 @@ def build_graph(checkpointer: Any | None = None):
         "api_contract_review",
         _route_after_api_review,
     )
-    graph_builder.add_edge("revise_plan_after_api_review", "api_contract_review")
+    graph_builder.add_edge(
+        "revise_plan_after_api_review", "api_contract_review")
     graph_builder.add_edge("implement_task", "enforce_tool_boundaries")
     graph_builder.add_conditional_edges(
         "enforce_tool_boundaries",

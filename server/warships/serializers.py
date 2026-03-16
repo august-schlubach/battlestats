@@ -143,7 +143,11 @@ class ClanMemberSerializer(serializers.Serializer):
     days_since_last_battle = serializers.IntegerField(allow_null=True)
     is_leader = serializers.BooleanField()
     is_pve_player = serializers.BooleanField()
+    is_sleepy_player = serializers.BooleanField()
     is_ranked_player = serializers.BooleanField()
+    is_clan_battle_player = serializers.BooleanField()
+    clan_battle_win_rate = serializers.FloatField(allow_null=True)
+    clan_battle_hydration_pending = serializers.BooleanField()
     highest_ranked_league = serializers.CharField(allow_null=True)
     ranked_hydration_pending = serializers.BooleanField()
     ranked_updated_at = serializers.DateTimeField(allow_null=True)
@@ -169,6 +173,20 @@ class ClanBattleSeasonSummarySerializer(serializers.Serializer):
     roster_wins = serializers.IntegerField()
     roster_losses = serializers.IntegerField()
     roster_win_rate = serializers.FloatField()
+
+
+class PlayerClanBattleSeasonSerializer(serializers.Serializer):
+    season_id = serializers.IntegerField()
+    season_name = serializers.CharField()
+    season_label = serializers.CharField()
+    start_date = serializers.CharField(allow_null=True)
+    end_date = serializers.CharField(allow_null=True)
+    ship_tier_min = serializers.IntegerField(allow_null=True)
+    ship_tier_max = serializers.IntegerField(allow_null=True)
+    battles = serializers.IntegerField()
+    wins = serializers.IntegerField()
+    losses = serializers.IntegerField()
+    win_rate = serializers.FloatField()
 
 
 class PlayerSummarySerializer(serializers.Serializer):

@@ -45,9 +45,12 @@ class AgenticDoctrineTests(TestCase):
             team_style_snippets=["Bias toward explicit validation evidence."],
         )
 
-        self.assertIn("Prefer additive API changes.", doctrine["preferred_patterns"])
-        self.assertIn("Prefer reversible migrations.", doctrine["preferred_patterns"])
-        self.assertIn("Bias toward explicit validation evidence.", doctrine["review_priorities"])
+        self.assertIn("Prefer additive API changes.",
+                      doctrine["preferred_patterns"])
+        self.assertIn("Prefer reversible migrations.",
+                      doctrine["preferred_patterns"])
+        self.assertIn("Bias toward explicit validation evidence.",
+                      doctrine["review_priorities"])
 
 
 class AgenticRetrievalTests(TestCase):

@@ -1,34 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCrown, faRobot, faStar } from '@fortawesome/free-solid-svg-icons';
-import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
+import { faBed, faCrown, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
+import { getRankedLeagueColor, getRankedLeagueTooltip } from './rankedLeague';
+import type { ClanMemberData } from './clanMembersShared';
 
 interface ClanMembersProps {
-    clanId: number;
+    members: ClanMemberData[];
     onSelectMember: (memberName: string) => void;
     layout?: 'inline' | 'stacked';
+    loading?: boolean;
+    error?: string;
 }
-
-interface ClanMemberData {
-    name: string;
-    is_hidden: boolean;
-    pvp_ratio: number | null;
-    days_since_last_battle: number | null;
-    is_leader: boolean;
-    is_pve_player: boolean;
-    is_ranked_player: boolean;
-    highest_ranked_league: RankedLeagueName | null;
-    ranked_hydration_pending: boolean;
-    ranked_updated_at: string | null;
-    activity_bucket: 'active_7d' | 'active_30d' | 'cooling_90d' | 'dormant_180d' | 'inactive_180d_plus' | 'unknown';
-}
-
-const RANKED_HYDRATION_POLL_LIMIT = 6;
-const RANKED_HYDRATION_POLL_INTERVAL_MS = 2500;
-
-const isAbortError = (error: unknown): boolean => {
-    return error instanceof DOMException && error.name === 'AbortError';
-};
 
 const wrColor = (r: number | null): string => {
     if (r == null) return '#c6dbef';
@@ -67,6 +49,15 @@ const PveRobot = () => (
     />
 );
 
+const SleepyBed = () => (
+    <FontAwesomeIcon
+        icon={faBed}
+        className="text-[11px] text-slate-400"
+        title="inactive for over a year"
+        aria-label="inactive for over a year"
+    />
+);
+
 const RankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) => (
     <FontAwesomeIcon
         icon={faStar}
@@ -77,78 +68,26 @@ const RankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) =
     />
 );
 
-const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layout = 'inline' }) => {
-    const [members, setMembers] = useState<ClanMemberData[]>([]);
-    const [loading, setLoading] = useState(true);
-    const rankedHydrationAttemptsRef = useRef(0);
+const ClanBattleShield: React.FC<{ winRate: number | null }> = ({ winRate }) => (
+    <FontAwesomeIcon
+        icon={faShieldHalved}
+        className="text-[11px]"
+        style={{ color: wrColor(winRate) }}
+        title={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
+        aria-label={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
+    />
+);
 
-    useEffect(() => {
-        let timeoutId: ReturnType<typeof setTimeout> | null = null;
-        let activeController: AbortController | null = null;
-        rankedHydrationAttemptsRef.current = 0;
-
-        const fetchMembers = async (showLoading: boolean, attempt: number) => {
-            if (showLoading) {
-                setLoading(true);
-            }
-
-            activeController?.abort();
-            const controller = new AbortController();
-            activeController = controller;
-
-            try {
-                const response = await fetch(`http://localhost:8888/api/fetch/clan_members/${clanId}/`, {
-                    signal: controller.signal,
-                });
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch clan members for clan ${clanId}`);
-                }
-
-                const data: ClanMemberData[] = await response.json();
-                if (controller.signal.aborted) {
-                    return;
-                }
-
-                setMembers(data);
-
-                const hasPendingRankedHydration = data.some((member) => member.ranked_hydration_pending);
-                if (hasPendingRankedHydration && attempt < RANKED_HYDRATION_POLL_LIMIT) {
-                    rankedHydrationAttemptsRef.current = attempt + 1;
-                    timeoutId = setTimeout(() => {
-                        void fetchMembers(false, attempt + 1);
-                    }, RANKED_HYDRATION_POLL_INTERVAL_MS);
-                }
-            } catch (error) {
-                if (isAbortError(error)) {
-                    return;
-                }
-
-                console.error('Error fetching clan members:', error);
-            } finally {
-                if (showLoading && !controller.signal.aborted) {
-                    setLoading(false);
-                }
-            }
-        };
-
-        void fetchMembers(true, 0);
-
-        return () => {
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-            }
-            activeController?.abort();
-        };
-    }, [clanId]);
-
+const ClanMembers: React.FC<ClanMembersProps> = ({ members, onSelectMember, layout = 'inline', loading = false, error = '' }) => {
     return (
         <div>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-600">Clan Members</h3>
             {loading && <p className="text-sm text-gray-500">Syncing clan members...</p>}
+            {!loading && error ? <p className="text-sm text-gray-500">{error}</p> : null}
             {!loading && members.length === 0 && <p className="text-sm text-gray-500">No clan members found.</p>}
             {!loading && members.length > 0 && (
                 <div className={layout === 'stacked' ? 'mt-2 space-y-1 text-sm text-[#4292c6]' : 'mt-2 text-sm leading-7 text-[#4292c6]'}>
-                    {members.map((member, index) => (
+                    {members.map((member) => (
                         <React.Fragment key={member.name}>
                             {member.is_hidden ? (
                                 <span
@@ -161,7 +100,9 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layou
                                     {member.name}
                                     {member.is_leader && <LeaderCrown />}
                                     {member.is_pve_player && <PveRobot />}
+                                    {member.is_sleepy_player && <SleepyBed />}
                                     {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
+                                    {member.is_clan_battle_player && <ClanBattleShield winRate={member.clan_battle_win_rate} />}
                                     <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
                                 </span>
                             ) : (
@@ -177,7 +118,9 @@ const ClanMembers: React.FC<ClanMembersProps> = ({ clanId, onSelectMember, layou
                                     {member.name}
                                     {member.is_leader && <LeaderCrown />}
                                     {member.is_pve_player && <PveRobot />}
+                                    {member.is_sleepy_player && <SleepyBed />}
                                     {member.is_ranked_player && <RankedStar league={member.highest_ranked_league} />}
+                                    {member.is_clan_battle_player && <ClanBattleShield winRate={member.clan_battle_win_rate} />}
                                     <span className="text-xs font-normal text-gray-400">{formatRecency(member.days_since_last_battle)}</span>
                                 </button>
                             )}

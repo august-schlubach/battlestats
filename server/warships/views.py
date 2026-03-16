@@ -17,14 +17,15 @@ from warships.models import Player, Clan, Ship
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
-    RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
+    RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
-    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, is_pve_player, is_ranked_player, \
-    get_highest_ranked_league_name
+    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, get_player_clan_battle_summaries, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
+    is_sleepy_player, get_highest_ranked_league_name
+from warships.landing import get_landing_clans_payload, get_landing_players_payload, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.agentic.dashboard import get_agentic_trace_dashboard
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
@@ -46,14 +47,17 @@ def _delay_task_safely(task, **kwargs) -> None:
 def _record_clan_lookup(clan: Clan) -> None:
     clan.last_lookup = timezone.now()
     clan.save(update_fields=["last_lookup"])
-    cache.delete('landing:clans')
-    cache.delete('landing:recent_clans:last_lookup')
+    invalidate_landing_clan_caches()
 
 
 PUBLIC_API_THROTTLES = [AnonRateThrottle, UserRateThrottle]
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_RECENT_PLAYER_SCORE_WINDOW = 120
+LANDING_PLAYER_LIMIT = 40
+LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
+LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
+LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
 
 
 def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
@@ -144,7 +148,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
                 update_fields.append("verdict")
 
         obj.save(update_fields=update_fields)
-        cache.delete('landing:recent_players:last_lookup')
+        invalidate_landing_recent_player_cache()
 
         if not obj.is_hidden and _explorer_summary_needs_refresh(obj):
             refresh_player_explorer_summary(obj)
@@ -448,7 +452,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan)
 
-    from warships.data import update_clan_data, update_clan_members, queue_clan_ranked_hydration
+    from warships.data import update_clan_data, update_clan_members, queue_clan_battle_hydration, queue_clan_ranked_hydration
     if not clan.members_count or (clan.leader_id is None and not clan.leader_name):
         update_clan_data(clan_id=clan_id)
         clan.refresh_from_db()
@@ -463,6 +467,8 @@ def clan_members(request, clan_id: str) -> Response:
     members = list(members)
     hydration_state = queue_clan_ranked_hydration(members)
     pending_player_ids = hydration_state['pending_player_ids']
+    clan_battle_hydration_state = queue_clan_battle_hydration(members)
+    pending_clan_battle_player_ids = clan_battle_hydration_state['pending_player_ids']
 
     leader_name = (clan.leader_name or '').strip().lower()
     member_rows = [
@@ -476,12 +482,18 @@ def clan_members(request, clan_id: str) -> Response:
                 or (leader_name and member.name.strip().lower() == leader_name)
             ),
             'is_pve_player': is_pve_player(member.total_battles, member.pvp_battles),
+            'is_sleepy_player': is_sleepy_player(member.days_since_last_battle),
             'is_ranked_player': is_ranked_player(member.ranked_json),
+            'is_clan_battle_player': is_clan_battle_enjoyer(
+                clan_battle_summary['total_battles'], clan_battle_summary['seasons_participated']),
+            'clan_battle_win_rate': clan_battle_summary['win_rate'],
+            'clan_battle_hydration_pending': member.player_id in pending_clan_battle_player_ids,
             'highest_ranked_league': get_highest_ranked_league_name(member.ranked_json),
             'ranked_hydration_pending': member.player_id in pending_player_ids,
             'ranked_updated_at': member.ranked_updated_at,
         }
         for member in members
+        for clan_battle_summary in [get_player_clan_battle_summary(member.player_id, allow_fetch=False)]
     ]
 
     serializer = ClanMemberSerializer(member_rows, many=True)
@@ -494,6 +506,14 @@ def clan_members(request, clan_id: str) -> Response:
         len(hydration_state['pending_player_ids']))
     response['X-Ranked-Hydration-Max-In-Flight'] = str(
         hydration_state['max_in_flight'])
+    response['X-Clan-Battle-Hydration-Queued'] = str(
+        len(clan_battle_hydration_state['queued_player_ids']))
+    response['X-Clan-Battle-Hydration-Deferred'] = str(
+        len(clan_battle_hydration_state['deferred_player_ids']))
+    response['X-Clan-Battle-Hydration-Pending'] = str(
+        len(clan_battle_hydration_state['pending_player_ids']))
+    response['X-Clan-Battle-Hydration-Max-In-Flight'] = str(
+        clan_battle_hydration_state['max_in_flight'])
     return response
 
 
@@ -538,6 +558,13 @@ def clan_battle_seasons(request, clan_id: str) -> Response:
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def player_clan_battle_seasons(request, player_id: str) -> Response:
+    data = fetch_player_clan_battle_seasons(player_id)
+    return _validated_list_response(data, PlayerClanBattleSeasonSerializer)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def landing_activity_attrition(request) -> Response:
     data = fetch_landing_activity_attrition()
     return _validated_single_response(data, LandingActivityAttritionSerializer)
@@ -546,100 +573,30 @@ def landing_activity_attrition(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_clans(request) -> Response:
-    def _fetch_landing_clans():
-        qs = Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
-            total_wins=Sum('player__pvp_wins'),
-            total_battles=Sum('player__pvp_battles'),
-            active_members=Count('player', filter=Q(
-                player__days_since_last_battle__lte=30)),
-        ).annotate(
-            clan_wr=Case(
-                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                default=None,
-                output_field=FloatField(),
-            ),
-        ).values(
-            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
-        ).order_by(F('last_lookup').desc(nulls_last=True))
-        return _prioritize_landing_clans(list(qs))
-
-    data = cache.get_or_set('landing:clans:v2', _fetch_landing_clans, 60)
-    return Response(data)
+    return Response(get_landing_clans_payload())
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_clans(request) -> Response:
-    def _fetch_recent_clans():
-        return list(
-            Clan.objects.exclude(name__isnull=True).exclude(name='').exclude(
-                last_lookup__isnull=True
-            ).annotate(
-                total_wins=Sum('player__pvp_wins'),
-                total_battles=Sum('player__pvp_battles'),
-            ).annotate(
-                clan_wr=Case(
-                    When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
-                    )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
-                    default=None,
-                    output_field=FloatField(),
-                ),
-            ).values(
-                'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles'
-            ).order_by(
-                F('last_lookup').desc(nulls_last=True),
-                'name',
-            )[:40]
-        )
-
-    data = cache.get_or_set(
-        'landing:recent_clans:last_lookup', _fetch_recent_clans, 60)
-    return Response(data)
+    return Response(get_landing_recent_clans_payload())
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_players(request) -> Response:
-    def _fetch_landing_players():
-        rows = list(
-            Player.objects.exclude(name='').filter(
-                is_hidden=False,
-            ).exclude(
-                last_battle_date__isnull=True
-            ).values('name', 'pvp_ratio', 'is_hidden', 'pvp_battles', 'battles_json').order_by(*_player_score_ordering('last_battle_date'))
-        )
-
-        for row in rows:
-            high_tier_battles, high_tier_ratio = _calculate_tier_filtered_pvp_record(
-                row.pop('battles_json', None),
-                minimum_tier=5,
-            )
-            row['high_tier_pvp_battles'] = high_tier_battles
-            row['high_tier_pvp_ratio'] = high_tier_ratio
-
-        return rows
-
-    data = cache.get_or_set('landing:players:v4', _fetch_landing_players, 60)
-    return Response(data)
+    try:
+        mode = normalize_landing_player_mode(request.query_params.get('mode'))
+    except ValueError:
+        return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
+    limit = normalize_landing_player_limit(request.query_params.get('limit'))
+    return Response(get_landing_players_payload(mode=mode, limit=limit))
 
 
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_recent_players(request) -> Response:
-    def _fetch_recent_players():
-        return list(
-            Player.objects.exclude(name='').exclude(
-                last_lookup__isnull=True
-            ).values('name', 'pvp_ratio').order_by(
-                F('last_lookup').desc(nulls_last=True),
-                'name',
-            )[:40]
-        )
-
-    data = cache.get_or_set('landing:recent_players:last_lookup',
-                            _fetch_recent_players, 60)
-    return Response(data)
+    return Response(get_landing_recent_players_payload())
 
 
 @api_view(["GET"])

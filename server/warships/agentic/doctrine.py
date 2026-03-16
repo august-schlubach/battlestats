@@ -98,7 +98,8 @@ def merge_team_doctrine(
     resolved_overrides = overrides or {}
 
     for key in DEFAULT_TEAM_DOCTRINE.keys():
-        merged[key] = _merge_list_field(merged.get(key, []), resolved_overrides.get(key))
+        merged[key] = _merge_list_field(
+            merged.get(key, []), resolved_overrides.get(key))
 
     style_snippets = _dedupe_list(team_style_snippets or [])
     if style_snippets:

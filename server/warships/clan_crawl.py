@@ -4,14 +4,12 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import requests
 from django.conf import settings as django_settings
-from django.core.cache import cache
 
 from warships.models import Clan, Player
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_TIMEOUT
 
 
 BASE_URL = "https://api.worldofwarships.com/wows/"
@@ -24,9 +22,9 @@ BATCH_SIZE = 100
 log = logging.getLogger("crawl")
 
 
-def _touch_crawl_heartbeat() -> None:
-    cache.set(CLAN_CRAWL_HEARTBEAT_KEY, time.time(),
-              timeout=CLAN_CRAWL_LOCK_TIMEOUT)
+def _touch_crawl_heartbeat(heartbeat_callback: Optional[Callable[[], None]]) -> None:
+    if heartbeat_callback is not None:
+        heartbeat_callback()
 
 
 def _now():
@@ -200,10 +198,10 @@ def save_player(player_data: Dict, clan: Clan) -> None:
     refresh_player_explorer_summary(player)
 
 
-def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
+def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Callable[[], None]] = None) -> List[Dict]:
     all_clans: List[Dict] = []
     page = 1
-    _touch_crawl_heartbeat()
+    _touch_crawl_heartbeat(heartbeat_callback)
 
     first_batch, total_pages = fetch_clan_list_page(page)
     if not first_batch:
@@ -215,7 +213,7 @@ def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
              total_pages, len(first_batch), total_pages)
 
     for page in range(2, total_pages + 1):
-        _touch_crawl_heartbeat()
+        _touch_crawl_heartbeat(heartbeat_callback)
         if limit and len(all_clans) >= limit:
             break
         batch, _ = fetch_clan_list_page(page)
@@ -234,14 +232,14 @@ def crawl_clan_ids(limit: Optional[int] = None) -> List[Dict]:
     return all_clans
 
 
-def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False) -> dict[str, int]:
+def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None) -> dict[str, int]:
     total = len(clan_stubs)
     clans_processed = 0
     players_saved = 0
     skipped = 0
 
     for i, stub in enumerate(clan_stubs, 1):
-        _touch_crawl_heartbeat()
+        _touch_crawl_heartbeat(heartbeat_callback)
         clan_id = stub["clan_id"]
 
         if resume and Clan.objects.filter(clan_id=clan_id, last_fetch__isnull=False).exists():
@@ -296,14 +294,22 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False) -> dict[str
     }
 
 
-def run_clan_crawl(resume: bool = False, dry_run: bool = False, limit: Optional[int] = None) -> dict[str, int | bool]:
+def run_clan_crawl(
+    resume: bool = False,
+    dry_run: bool = False,
+    limit: Optional[int] = None,
+    heartbeat_callback: Optional[Callable[[], None]] = None,
+) -> dict[str, int | bool]:
     if not APP_ID:
         raise RuntimeError("WG_APP_ID environment variable is not set")
 
     log.info("Starting crawl (resume=%s, dry_run=%s, limit=%s)",
              resume, dry_run, limit)
 
-    clan_stubs = crawl_clan_ids(limit=limit)
+    clan_stubs = crawl_clan_ids(
+        limit=limit,
+        heartbeat_callback=heartbeat_callback,
+    )
     if not clan_stubs:
         raise RuntimeError("Failed to fetch clan list")
 
@@ -316,7 +322,11 @@ def run_clan_crawl(resume: bool = False, dry_run: bool = False, limit: Optional[
             "clans_found": len(clan_stubs),
         }
 
-    summary = crawl_clan_members(clan_stubs, resume=resume)
+    summary = crawl_clan_members(
+        clan_stubs,
+        resume=resume,
+        heartbeat_callback=heartbeat_callback,
+    )
     summary.update({
         "resume": resume,
         "dry_run": False,

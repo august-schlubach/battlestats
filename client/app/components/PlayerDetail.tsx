@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faCrown, faRobot, faStar } from '@fortawesome/free-solid-svg-icons';
+import { faBed, faCrown, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
 import dynamic from 'next/dynamic';
 import DeferredSection from './DeferredSection';
 import PlayerEfficiencyBadges from './PlayerEfficiencyBadges';
 import SectionHeadingWithTooltip from './SectionHeadingWithTooltip';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColor, type RankedLeagueName } from './rankedLeague';
+import { useClanMembers } from './useClanMembers';
 
 interface PlayerDetailProps {
     player: {
@@ -88,6 +89,11 @@ const ClanSVG = dynamic(() => resilientDynamicImport(() => import('./ClanSVG'), 
 const ClanMembers = dynamic(() => resilientDynamicImport(() => import('./ClanMembers'), 'PlayerDetail-ClanMembers'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading clan members..." minHeight={96} />,
+});
+
+const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => import('./PlayerClanBattleSeasons'), 'PlayerDetail-PlayerClanBattleSeasons'), {
+    ssr: false,
+    loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={180} />,
 });
 
 const RandomsSVG = dynamic(() => resilientDynamicImport(() => import('./RandomsSVG'), 'PlayerDetail-RandomsSVG'), {
@@ -196,6 +202,20 @@ const HeaderPveRobot = () => (
     </span>
 );
 
+const HeaderSleepyBed = () => (
+    <span
+        title="inactive for over a year"
+        aria-label="inactive for over a year"
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faBed}
+            className="text-sm text-slate-400"
+            aria-hidden="true"
+        />
+    </span>
+);
+
 const HeaderRankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ league }) => (
     <span
         title={getRankedLeagueTooltip(league)}
@@ -211,6 +231,21 @@ const HeaderRankedStar: React.FC<{ league: RankedLeagueName | null }> = ({ leagu
     </span>
 );
 
+const HeaderClanBattleShield: React.FC<{ winRate: number }> = ({ winRate }) => (
+    <span
+        title={`clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
+        aria-label={`clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faShieldHalved}
+            className="text-sm"
+            style={{ color: selectColorByWR(winRate) }}
+            aria-hidden="true"
+        />
+    </span>
+);
+
 const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
     onBack,
@@ -220,6 +255,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 }) => {
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
     const isPveEnjoyer = player.total_battles > 500 && pveBattles > player.pvp_battles;
+    const isSleepyPlayer = player.days_since_last_battle > 365;
     const rankedBattleCount = Array.isArray(player.ranked_json)
         ? player.ranked_json.reduce((total, row) => total + Math.max(row?.total_battles || 0, 0), 0)
         : 0;
@@ -229,10 +265,17 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
+    const [clanBattleSummary, setClanBattleSummary] = useState<{ seasonsPlayed: number; totalBattles: number; overallWinRate: number; } | null>(null);
+    const isClanBattleEnjoyer = (clanBattleSummary?.totalBattles ?? 0) >= 40 && (clanBattleSummary?.seasonsPlayed ?? 0) >= 2;
+    const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null);
 
     useEffect(() => {
         setShowRankedHeatmap(hasKnownRankedGames);
     }, [hasKnownRankedGames, player.player_id]);
+
+    useEffect(() => {
+        setClanBattleSummary(null);
+    }, [player.player_id]);
 
     return (
         <div className="relative overflow-hidden bg-white p-6">
@@ -268,6 +311,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     onSelectMember={onSelectMember}
                                     highlightedPlayerName={player.name}
                                     svgHeight={280}
+                                    membersData={clanMembers}
                                 />
 
                             </div>
@@ -277,9 +321,20 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
                             >
                                 <div id="clan_members_container">
-                                    <ClanMembers clanId={player.clan_id} onSelectMember={onSelectMember} layout="stacked" />
+                                    <ClanMembers members={clanMembers} loading={clanMembersLoading} error={clanMembersError} onSelectMember={onSelectMember} layout="stacked" />
                                 </div>
                             </DeferredSection>
+                            {!player.is_hidden ? (
+                                <DeferredSection
+                                    className="mt-5 border-t border-[#dbe9f6] pt-5"
+                                    minHeight={180}
+                                    placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={180} />}
+                                >
+                                    <div id="player_clan_battle_seasons_container">
+                                        <PlayerClanBattleSeasons playerId={player.player_id} onSummaryChange={setClanBattleSummary} />
+                                    </div>
+                                </DeferredSection>
+                            ) : null}
                         </>
                     ) : (
                         <p className="text-sm text-gray-500">No clan data available</p>
@@ -295,7 +350,9 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                             </h1>
                             {player.is_clan_leader ? <HeaderLeaderCrown /> : null}
                             {isPveEnjoyer ? <HeaderPveRobot /> : null}
+                            {isSleepyPlayer ? <HeaderSleepyBed /> : null}
                             {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
+                            {isClanBattleEnjoyer && clanBattleSummary ? <HeaderClanBattleShield winRate={clanBattleSummary.overallWinRate} /> : null}
                         </div>
                         <p className="mt-1 text-sm text-[#4292c6]">
                             Last played {player.days_since_last_battle} days ago

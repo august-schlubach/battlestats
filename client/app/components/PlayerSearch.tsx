@@ -1,8 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faBed, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
+import { useSearchParams } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import PlayerDetail from './PlayerDetail';
 import { resilientDynamicImport } from './resilientDynamicImport';
+import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
 
 interface LandingClan {
     clan_id: number;
@@ -21,36 +25,12 @@ interface LandingPlayer {
     pvp_battles?: number | null;
     high_tier_pvp_ratio?: number | null;
     high_tier_pvp_battles?: number | null;
-}
-
-interface LandingActivityAttritionMonth {
-    month: string;
-    total_players: number;
-    active_players: number;
-    cooling_players: number;
-    dormant_players: number;
-    active_share: number;
-}
-
-interface LandingActivityAttritionSummary {
-    latest_month: string;
-    population_signal: 'growing' | 'stable' | 'shrinking';
-    signal_delta_pct: number | null;
-    recent_active_avg: number;
-    prior_active_avg: number;
-    recent_new_avg: number;
-    prior_new_avg: number;
-    months_compared: number;
-}
-
-interface LandingActivityAttritionData {
-    metric: 'landing_activity_attrition';
-    label: string;
-    x_label: string;
-    y_label: string;
-    tracked_population: number;
-    months: LandingActivityAttritionMonth[];
-    summary: LandingActivityAttritionSummary;
+    is_pve_player?: boolean;
+    is_sleepy_player?: boolean;
+    is_ranked_player?: boolean;
+    is_clan_battle_player?: boolean;
+    clan_battle_win_rate?: number | null;
+    highest_ranked_league?: RankedLeagueName | null;
 }
 
 const wrColor = (r: number | null): string => {
@@ -122,6 +102,64 @@ const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, 
     </div>
 );
 
+const LandingPveRobot = () => (
+    <span
+        title="pve enjoyer"
+        aria-label="pve enjoyer"
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faRobot}
+            className="text-xs text-slate-500"
+            aria-hidden="true"
+        />
+    </span>
+);
+
+const LandingSleepyBed = () => (
+    <span
+        title="inactive for over a year"
+        aria-label="inactive for over a year"
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faBed}
+            className="text-xs text-slate-400"
+            aria-hidden="true"
+        />
+    </span>
+);
+
+const LandingRankedStar: React.FC<{ league: RankedLeagueName | null | undefined }> = ({ league }) => (
+    <span
+        title={getRankedLeagueTooltip(league)}
+        aria-label={getRankedLeagueTooltip(league)}
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faStar}
+            className="text-xs"
+            style={{ color: getRankedLeagueColor(league) }}
+            aria-hidden="true"
+        />
+    </span>
+);
+
+const LandingClanBattleShield: React.FC<{ winRate: number | null | undefined }> = ({ winRate }) => (
+    <span
+        title={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer · ${winRate.toFixed(1)}% WR`}
+        aria-label={winRate == null ? 'clan battle enjoyer' : `clan battle enjoyer ${winRate.toFixed(1)} percent WR`}
+        className="inline-flex items-center cursor-help"
+    >
+        <FontAwesomeIcon
+            icon={faShieldHalved}
+            className="text-xs"
+            style={{ color: wrColor(winRate ?? null) }}
+            aria-hidden="true"
+        />
+    </span>
+);
+
 const ClanTagGrid: React.FC<{
     clans: LandingClan[];
     onSelectClan: (clan: LandingClan) => void;
@@ -159,27 +197,38 @@ const PlayerNameGrid: React.FC<{
     ariaLabelPrefix: string;
 }> = ({ players, onSelectMember, ariaLabelPrefix }) => (
     <div
-        className="mt-4 grid max-w-[910px] gap-x-4 gap-y-2 rounded-md px-2 py-1 text-sm"
-        style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(9rem, 1fr))',
-            backgroundImage: 'repeating-linear-gradient(to bottom, transparent 0, transparent 2.25rem, rgba(239, 243, 255, 0.9) 2.25rem, rgba(239, 243, 255, 0.9) 4.5rem)',
-        }}
+        className="mt-4 flex max-w-[910px] flex-wrap items-center gap-x-4 gap-y-2 rounded-md py-1 text-sm"
+        style={{ paddingInline: '0.3rem' }}
     >
         {players.map((player) => {
             const label = player.name;
             const color = wrColor(player.pvp_ratio);
+            const iconRow = (
+                <>
+                    {player.is_ranked_player ? <LandingRankedStar league={player.highest_ranked_league} /> : null}
+                    {player.is_pve_player ? <LandingPveRobot /> : null}
+                    {player.is_sleepy_player ? <LandingSleepyBed /> : null}
+                    {player.is_clan_battle_player ? <LandingClanBattleShield winRate={player.clan_battle_win_rate} /> : null}
+                </>
+            );
 
             if (player.is_hidden) {
                 return (
                     <span
                         key={`${ariaLabelPrefix}-${label}`}
-                        className="inline-flex min-w-0 items-center gap-1 rounded-sm px-2 py-1 font-medium"
-                        style={{ color }}
+                        className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 font-medium text-[#334155]"
+                        style={{ paddingInline: '0.3rem' }}
                         aria-label={`${label} has hidden stats`}
                         title={label}
                     >
-                        <span style={{ color }} aria-hidden="true">{"\u25C6"}</span>
-                        <span className="truncate">{label}</span>
+                        <span style={{ color }} aria-hidden="true">{"\u{1F79C}"}</span>
+                        <span
+                            className="truncate underline decoration-2 underline-offset-4"
+                            style={{ textDecorationColor: color }}
+                        >
+                            {label}
+                        </span>
+                        {iconRow}
                     </span>
                 );
             }
@@ -189,13 +238,19 @@ const PlayerNameGrid: React.FC<{
                     key={`${ariaLabelPrefix}-${label}`}
                     type="button"
                     onClick={() => onSelectMember(label)}
-                    className="inline-flex min-w-0 items-center gap-1 rounded-sm px-2 py-1 font-medium underline-offset-2 hover:underline"
-                    style={{ color }}
+                    className="inline-flex min-w-0 items-center gap-1 rounded-sm py-1 font-medium text-[#334155]"
+                    style={{ paddingInline: '0.3rem' }}
                     aria-label={`${ariaLabelPrefix} player ${label}`}
                     title={label}
                 >
-                    <span style={{ color }} aria-hidden="true">{"\u25C6"}</span>
-                    <span className="truncate">{label}</span>
+                    <span style={{ color }} aria-hidden="true">{"\u{1F79C}"}</span>
+                    <span
+                        className="truncate underline decoration-2 underline-offset-4"
+                        style={{ textDecorationColor: color }}
+                    >
+                        {label}
+                    </span>
+                    {iconRow}
                 </button>
             );
         })}
@@ -210,14 +265,6 @@ const LandingClanSVG = dynamic(
     },
 );
 
-const LandingActivityAttritionSVG = dynamic(
-    () => resilientDynamicImport(() => import('./LandingActivityAttritionSVG'), 'LandingActivityAttritionSVG'),
-    {
-        ssr: false,
-        loading: () => <LoadingPanel label="Loading activity and attrition..." minHeight={360} />,
-    },
-);
-
 const PlayerExplorer = dynamic(() => resilientDynamicImport(() => import('./PlayerExplorer'), 'PlayerExplorer'), {
     ssr: false,
     loading: () => <LoadingPanel label="Loading player explorer..." minHeight={360} />,
@@ -228,25 +275,31 @@ const BEST_CLAN_MIN_TOTAL_BATTLES = 100000;
 const BEST_CLAN_MIN_ACTIVE_SHARE = 0.3;
 const RANDOM_PLAYER_MIN_PVP_BATTLES = 500;
 const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
-const SEARCH_SUGGESTION_LIMIT = 8;
-const SEARCH_DEBOUNCE_MS = 180;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
-const SEARCH_SUGGESTIONS_ID = 'player-search-suggestions';
 const SHOW_PLAYER_EXPLORER = false;
 
 type LandingClanMode = 'random' | 'best';
 type LandingPlayerMode = 'random' | 'best';
 
-const isAbortError = (error: unknown): boolean => {
-    return error instanceof DOMException && error.name === 'AbortError';
+const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
+    const contentType = response.headers.get('content-type') || '';
+
+    if (!response.ok) {
+        const body = await response.text();
+        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
+    }
+
+    if (!contentType.toLowerCase().includes('application/json')) {
+        const body = await response.text();
+        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
+    }
+
+    return response.json() as Promise<T>;
 };
 
 const PlayerSearch: React.FC = () => {
-    const [searchTerm, setSearchTerm] = useState('');
-    const [searchSuggestions, setSearchSuggestions] = useState<LandingPlayer[]>([]);
-    const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState(-1);
-    const [isSuggestionListOpen, setIsSuggestionListOpen] = useState(false);
+    const searchParams = useSearchParams();
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [selectedClan, setSelectedClan] = useState<LandingClan | null>(null);
     const [error, setError] = useState('');
@@ -257,33 +310,43 @@ const PlayerSearch: React.FC = () => {
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
-    const [landingActivity, setLandingActivity] = useState<LandingActivityAttritionData | null>(null);
     const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
-    const suggestionHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastSubmittedSearchRef = useRef<string>('');
 
     const fetchLandingData = useCallback(async () => {
         try {
-            const [activityRes, clansRes, recentClansRes, playersRes, recentRes] = await Promise.all([
-                fetch('http://localhost:8888/api/landing/activity-attrition/'),
+            const [clansRes, recentClansRes, recentRes] = await Promise.all([
                 fetch('http://localhost:8888/api/landing/clans/'),
                 fetch('http://localhost:8888/api/landing/recent-clans/'),
-                fetch('http://localhost:8888/api/landing/players/'),
                 fetch('http://localhost:8888/api/landing/recent/'),
             ]);
-            setLandingActivity(await activityRes.json());
-            setClans(await clansRes.json());
-            setRecentClans(await recentClansRes.json());
-            setPlayers(await playersRes.json());
-            setRecentPlayers(await recentRes.json());
+            const [clansPayload, recentClansPayload, recentPlayersPayload] = await Promise.all([
+                readJsonOrThrow<LandingClan[]>(clansRes, 'Landing clans'),
+                readJsonOrThrow<LandingClan[]>(recentClansRes, 'Recent clans'),
+                readJsonOrThrow<LandingPlayer[]>(recentRes, 'Recent players'),
+            ]);
+            setClans(Array.isArray(clansPayload) ? clansPayload : []);
+            setRecentClans(Array.isArray(recentClansPayload) ? recentClansPayload : []);
+            setRecentPlayers(Array.isArray(recentPlayersPayload) ? recentPlayersPayload : []);
         } catch (err) {
             console.error('Error fetching landing data:', err);
+        }
+    }, []);
+
+    const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
+        try {
+            const response = await fetch(`http://localhost:8888/api/landing/players/?mode=${mode}&limit=${LANDING_LIMIT}`);
+            const payload = await readJsonOrThrow<LandingPlayer[]>(response, `Landing players (${mode})`);
+            setPlayers(Array.isArray(payload) ? payload : []);
+        } catch (err) {
+            console.error('Error fetching landing players:', err);
+            setPlayers([]);
         }
     }, []);
 
     const handleBack = useCallback(() => {
         setPlayerData(null);
         setSelectedClan(null);
-        setSearchTerm('');
         setError('');
         setIsLoadingPlayer(false);
         clanHydrationAttemptsRef.current = {};
@@ -301,84 +364,34 @@ const PlayerSearch: React.FC = () => {
     }, [fetchLandingData]);
 
     useEffect(() => {
-        if (suggestionHideTimeoutRef.current) {
-            return () => {
-                if (suggestionHideTimeoutRef.current) {
-                    clearTimeout(suggestionHideTimeoutRef.current);
-                }
-            };
-        }
-    }, []);
-
-    useEffect(() => {
-        const trimmedSearch = searchTerm.trim();
-        if (trimmedSearch.length < 2) {
-            setSearchSuggestions([]);
-            setHighlightedSuggestionIndex(-1);
-            return;
-        }
-
-        const controller = new AbortController();
-
-        const timeoutId = setTimeout(async () => {
-            try {
-                const response = await fetch(`http://localhost:8888/api/landing/player-suggestions/?q=${encodeURIComponent(trimmedSearch)}`, {
-                    signal: controller.signal,
-                });
-                if (!response.ok) {
-                    setSearchSuggestions([]);
-                    setHighlightedSuggestionIndex(-1);
-                    return;
-                }
-
-                const suggestions: LandingPlayer[] = await response.json();
-                setSearchSuggestions(suggestions.slice(0, SEARCH_SUGGESTION_LIMIT));
-                setHighlightedSuggestionIndex(suggestions.length > 0 ? 0 : -1);
-            } catch (err) {
-                if (isAbortError(err)) {
-                    return;
-                }
-
-                setSearchSuggestions([]);
-                setHighlightedSuggestionIndex(-1);
-            }
-        }, SEARCH_DEBOUNCE_MS);
-
-        return () => {
-            clearTimeout(timeoutId);
-            controller.abort();
-        };
-    }, [searchTerm]);
+        void fetchLandingPlayers(playerMode);
+    }, [fetchLandingPlayers, playerMode]);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
         const response = await fetch(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}/`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch player ${playerName}`);
-        }
-
-        return response.json();
+        return readJsonOrThrow<PlayerData>(response, `Player ${playerName}`);
     };
 
-    const handleSearch = async () => {
+    const executePlayerSearch = useCallback(async (playerName: string) => {
+        const trimmedPlayerName = playerName.trim();
+        if (!trimmedPlayerName) {
+            return;
+        }
+
+        lastSubmittedSearchRef.current = trimmedPlayerName;
         setIsLoadingPlayer(true);
+        setError('');
         try {
-            const data = await fetchPlayerByName(searchTerm);
+            const data = await fetchPlayerByName(trimmedPlayerName);
             setPlayerData(data);
-            setError('');
             setSelectedClan(null);
-            setIsSuggestionListOpen(false);
         } catch (err) {
             setError('Player not found');
             setPlayerData(null);
         } finally {
             setIsLoadingPlayer(false);
         }
-    };
-
-    const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        handleSearch();
-    };
+    }, []);
 
     const handleSelectClan = useCallback((clan: LandingClan) => {
         setSelectedClan(clan);
@@ -395,18 +408,14 @@ const PlayerSearch: React.FC = () => {
 
         try {
             const response = await fetch(`http://localhost:8888/api/clans/${clanId}/`);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch clan ${clanId}`);
-            }
-
-            const data = await response.json();
+            const data = await readJsonOrThrow<Record<string, unknown>>(response, `Clan ${clanId}`);
             const hydratedClan: LandingClan = {
-                clan_id: data.clan_id,
-                name: data.name || clanName,
-                tag: data.tag || '',
-                members_count: data.members_count || 0,
-                clan_wr: data.clan_wr ?? null,
-                total_battles: data.total_battles ?? null,
+                clan_id: Number(data.clan_id || clanId),
+                name: String(data.name || clanName),
+                tag: String(data.tag || ''),
+                members_count: Number(data.members_count || 0),
+                clan_wr: typeof data.clan_wr === 'number' ? data.clan_wr : null,
+                total_battles: typeof data.total_battles === 'number' ? data.total_battles : null,
             };
             handleSelectClan(hydratedClan);
         } catch (_err) {
@@ -454,108 +463,33 @@ const PlayerSearch: React.FC = () => {
         return clans.slice(0, LANDING_LIMIT);
     }, [clanMode, clans]);
 
-    const visibleLandingPlayers = useMemo(() => {
-        const randomEligiblePlayers = players.filter((player) => (player.pvp_battles ?? 0) > RANDOM_PLAYER_MIN_PVP_BATTLES);
+    const handleSelectMember = useCallback(async (memberName: string) => {
+        await executePlayerSearch(memberName);
+    }, [executePlayerSearch]);
 
-        if (playerMode === 'best') {
-            return randomEligiblePlayers
-                .filter((player) => (player.high_tier_pvp_battles ?? 0) > BEST_PLAYER_MIN_PVP_BATTLES)
-                .slice()
-                .sort((left, right) => {
-                    const leftWr = left.high_tier_pvp_ratio ?? Number.NEGATIVE_INFINITY;
-                    const rightWr = right.high_tier_pvp_ratio ?? Number.NEGATIVE_INFINITY;
-                    if (rightWr !== leftWr) {
-                        return rightWr - leftWr;
-                    }
-
-                    return left.name.localeCompare(right.name);
-                })
-                .map((player) => ({
-                    ...player,
-                    pvp_ratio: player.high_tier_pvp_ratio ?? player.pvp_ratio,
-                }))
-                .slice(0, LANDING_LIMIT);
-        }
-
-        const shuffled = [...randomEligiblePlayers];
-        for (let index = shuffled.length - 1; index > 0; index -= 1) {
-            const swapIndex = Math.floor(Math.random() * (index + 1));
-            [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
-        }
-
-        return shuffled.slice(0, LANDING_LIMIT);
-    }, [playerMode, players]);
-
-    const handleSelectMember = async (memberName: string) => {
-        setSearchTerm(memberName);
-        setIsSuggestionListOpen(false);
-        setSearchSuggestions([]);
-        setHighlightedSuggestionIndex(-1);
-        setIsLoadingPlayer(true);
-        try {
-            const data = await fetchPlayerByName(memberName);
-            setPlayerData(data);
-            setError('');
-            setSelectedClan(null);
-        } catch (err) {
-            setError('Player not found');
-        } finally {
-            setIsLoadingPlayer(false);
-        }
-    };
-
-    const handleSearchInputFocus = () => {
-        if (searchSuggestions.length > 0) {
-            setIsSuggestionListOpen(true);
-        }
-    };
-
-    const handleSearchInputBlur = () => {
-        suggestionHideTimeoutRef.current = setTimeout(() => {
-            setIsSuggestionListOpen(false);
-        }, 120);
-    };
-
-    const handleSuggestionMouseDown = (playerName: string) => {
-        if (suggestionHideTimeoutRef.current) {
-            clearTimeout(suggestionHideTimeoutRef.current);
-            suggestionHideTimeoutRef.current = null;
-        }
-        void handleSelectMember(playerName);
-    };
-
-    const handleSearchInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-        if (!isSuggestionListOpen || searchSuggestions.length === 0) {
+    useEffect(() => {
+        const query = (searchParams.get('q') || '').trim();
+        if (!query || query === lastSubmittedSearchRef.current) {
             return;
         }
 
-        if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            setHighlightedSuggestionIndex((currentIndex) => (
-                currentIndex < searchSuggestions.length - 1 ? currentIndex + 1 : 0
-            ));
-            return;
-        }
+        void executePlayerSearch(query);
+    }, [executePlayerSearch, searchParams]);
 
-        if (event.key === 'ArrowUp') {
-            event.preventDefault();
-            setHighlightedSuggestionIndex((currentIndex) => (
-                currentIndex > 0 ? currentIndex - 1 : searchSuggestions.length - 1
-            ));
-            return;
-        }
+    useEffect(() => {
+        const onNavSearch = (event: Event) => {
+            const customEvent = event as CustomEvent<{ query?: string }>;
+            const query = customEvent.detail?.query?.trim() || '';
+            if (!query) {
+                return;
+            }
 
-        if (event.key === 'Enter' && highlightedSuggestionIndex >= 0) {
-            event.preventDefault();
-            void handleSelectMember(searchSuggestions[highlightedSuggestionIndex].name);
-            return;
-        }
+            void executePlayerSearch(query);
+        };
 
-        if (event.key === 'Escape') {
-            setIsSuggestionListOpen(false);
-            setHighlightedSuggestionIndex(-1);
-        }
-    };
+        window.addEventListener('navSearch', onNavSearch as EventListener);
+        return () => window.removeEventListener('navSearch', onNavSearch as EventListener);
+    }, [executePlayerSearch]);
 
     useEffect(() => {
         if (!playerData?.name) {
@@ -619,79 +553,10 @@ const PlayerSearch: React.FC = () => {
                 <ClanDetail clan={selectedClan} onBack={handleBack} onSelectMember={handleSelectMember} />
             ) : (
                 <div>
-                    <form onSubmit={handleSubmit} className="space-y-2">
-                        <label htmlFor="search" className="block text-sm font-medium text-[#2171b5]">Search:</label>
-                        <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                            <div
-                                className="relative w-full sm:w-1/3"
-                                role="combobox"
-                                aria-expanded={isSuggestionListOpen && searchSuggestions.length > 0}
-                                aria-controls={SEARCH_SUGGESTIONS_ID}
-                                aria-haspopup="listbox"
-                            >
-                                <input
-                                    type="text"
-                                    id="search"
-                                    value={searchTerm}
-                                    onChange={(e) => {
-                                        setSearchTerm(e.target.value);
-                                        setIsSuggestionListOpen(true);
-                                    }}
-                                    onFocus={handleSearchInputFocus}
-                                    onBlur={handleSearchInputBlur}
-                                    onKeyDown={handleSearchInputKeyDown}
-                                    autoComplete="off"
-                                    aria-autocomplete="list"
-                                    aria-controls={SEARCH_SUGGESTIONS_ID}
-                                    aria-activedescendant={highlightedSuggestionIndex >= 0 ? `player-search-suggestion-${highlightedSuggestionIndex}` : undefined}
-                                    className="block w-full px-3 py-2 border border-[#c6dbef] rounded-md shadow-sm focus:outline-none focus:ring-[#4292c6] focus:border-[#4292c6] sm:text-sm"
-                                />
-                                {isSuggestionListOpen && searchSuggestions.length > 0 && (
-                                    <ul
-                                        id={SEARCH_SUGGESTIONS_ID}
-                                        className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-[#c6dbef] bg-white py-1 shadow-lg"
-                                        role="listbox"
-                                    >
-                                        {searchSuggestions.map((player, index) => {
-                                            const isHighlighted = index === highlightedSuggestionIndex;
-                                            return (
-                                                <li id={`player-search-suggestion-${index}`} key={`suggestion-${player.name}`} role="option" aria-selected={isHighlighted}>
-                                                    <button
-                                                        type="button"
-                                                        onMouseDown={() => handleSuggestionMouseDown(player.name)}
-                                                        onMouseEnter={() => setHighlightedSuggestionIndex(index)}
-                                                        className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm ${isHighlighted ? 'bg-[#deebf7] text-[#084594]' : 'text-[#2171b5] hover:bg-[#eff3ff]'}`}
-                                                    >
-                                                        <span className="inline-flex items-center gap-2">
-                                                            <span style={{ color: wrColor(player.pvp_ratio) }} aria-hidden="true">{"\u25C6"}</span>
-                                                            <span>{player.name}</span>
-                                                        </span>
-                                                        {player.is_hidden && (
-                                                            <span className="text-xs uppercase tracking-wide text-[#6baed6]">Hidden</span>
-                                                        )}
-                                                    </button>
-                                                </li>
-                                            );
-                                        })}
-                                    </ul>
-                                )}
-                            </div>
-                            <button type="submit" className="px-4 py-2 bg-[#2171b5] hover:bg-[#084594] text-white rounded transition-colors">Go</button>
-                        </div>
-                    </form>
-                    {error && <p className="mt-2 text-red-600">{error}</p>}
-
-                    {landingActivity ? (
-                        <div className="mt-8 pt-6">
-                            <h3 className="text-sm font-semibold uppercase tracking-wide text-[#2171b5]">Player Activity and Attrition</h3>
-                            <div className="mt-3">
-                                <LandingActivityAttritionSVG data={landingActivity} />
-                            </div>
-                        </div>
-                    ) : null}
+                    {error && <p className="text-red-600">{error}</p>}
 
                     {clans.length > 0 && (
-                        <div className={`${landingActivity ? 'mt-8 border-t border-[#c6dbef] pt-6' : 'mt-8 pt-6'}`}>
+                        <div className={`${error ? 'mt-6' : 'mt-2'} pt-6`}>
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
@@ -758,7 +623,7 @@ const PlayerSearch: React.FC = () => {
                                 </button>
                             </div>
                             <PlayerNameGrid
-                                players={visibleLandingPlayers}
+                                players={players}
                                 onSelectMember={handleSelectMember}
                                 ariaLabelPrefix="Show"
                             />

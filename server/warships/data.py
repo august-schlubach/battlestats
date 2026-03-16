@@ -48,7 +48,12 @@ PLAYER_SCORE_LOW_TIER_WEIGHT = 0.02
 PLAYER_SCORE_MID_TIER_WEIGHT = 0.60
 PLAYER_SCORE_HIGH_TIER_WEIGHT = 1.0
 PLAYER_SCORE_LOW_TIER_FLOOR = 0.25
+CLAN_BATTLE_ENJOYER_MIN_BATTLES = 40
+CLAN_BATTLE_ENJOYER_MIN_SEASONS = 2
+SLEEPY_PLAYER_DAYS_THRESHOLD = 365
 CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
+CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
+    1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
 EFFICIENCY_BADGE_CLASS_LABELS = {
     1: 'Expert',
@@ -260,6 +265,16 @@ def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
             pending_player_ids.add(player.player_id)
             queued_player_ids.add(player.player_id)
             available_slots -= 1
+            continue
+
+        if enqueue_result.get("reason") == "enqueue-failed":
+            deferred_player_ids.update(
+                queued_player.player_id
+                for queued_player in eligible_players
+                if queued_player.player_id not in pending_player_ids and queued_player.player_id != player.player_id
+            )
+            deferred_player_ids.add(player.player_id)
+            break
 
     pending_player_ids.update(deferred_player_ids)
 
@@ -269,6 +284,66 @@ def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
         'deferred_player_ids': deferred_player_ids,
         'eligible_player_ids': {player.player_id for player in eligible_players},
         'max_in_flight': CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT,
+    }
+
+
+def clan_battle_player_hydration_needs_refresh(player: Player) -> bool:
+    player_id = getattr(player, 'player_id', None)
+    if not player_id:
+        return False
+
+    return cache.get(f'clan_battles:player:{player_id}') is None
+
+
+def queue_clan_battle_hydration(players: Iterable[Player]) -> dict[str, Any]:
+    from warships.tasks import is_clan_battle_data_refresh_pending, queue_clan_battle_data_refresh
+
+    eligible_players = [
+        player for player in players if clan_battle_player_hydration_needs_refresh(player)
+    ]
+    pending_player_ids: set[int] = set()
+    queued_player_ids: set[int] = set()
+    deferred_player_ids: set[int] = set()
+
+    for player in eligible_players:
+        if is_clan_battle_data_refresh_pending(player.player_id):
+            pending_player_ids.add(player.player_id)
+
+    available_slots = max(
+        0, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT - len(pending_player_ids))
+
+    for player in eligible_players:
+        if player.player_id in pending_player_ids:
+            continue
+
+        if available_slots <= 0:
+            deferred_player_ids.add(player.player_id)
+            continue
+
+        enqueue_result = queue_clan_battle_data_refresh(player.player_id)
+        if enqueue_result.get("status") == "queued":
+            pending_player_ids.add(player.player_id)
+            queued_player_ids.add(player.player_id)
+            available_slots -= 1
+            continue
+
+        if enqueue_result.get("reason") == "enqueue-failed":
+            deferred_player_ids.update(
+                queued_player.player_id
+                for queued_player in eligible_players
+                if queued_player.player_id not in pending_player_ids and queued_player.player_id != player.player_id
+            )
+            deferred_player_ids.add(player.player_id)
+            break
+
+    pending_player_ids.update(deferred_player_ids)
+
+    return {
+        'pending_player_ids': pending_player_ids,
+        'queued_player_ids': queued_player_ids,
+        'deferred_player_ids': deferred_player_ids,
+        'eligible_player_ids': {player.player_id for player in eligible_players},
+        'max_in_flight': CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT,
     }
 
 
@@ -512,9 +587,46 @@ def is_pve_player(total_battles: Optional[int], pvp_battles: Optional[int]) -> b
     return total > 500 and (pve > (0.75 * pvp) or pve >= 4000)
 
 
+def is_sleepy_player(days_since_last_battle: Optional[int], minimum_days: int = SLEEPY_PLAYER_DAYS_THRESHOLD) -> bool:
+    if days_since_last_battle is None:
+        return False
+
+    return int(days_since_last_battle) > minimum_days
+
+
 def is_ranked_player(ranked_rows: Any, minimum_ranked_battles: int = 100) -> bool:
     total_battles, _win_rate = _calculate_ranked_record(ranked_rows)
     return total_battles > minimum_ranked_battles
+
+
+def summarize_clan_battle_seasons(season_rows: Any) -> dict[str, Any]:
+    total_battles = 0
+    total_wins = 0
+    seasons_participated = 0
+
+    for row in season_rows or []:
+        battles = int(row.get('battles', 0) or 0)
+        if battles <= 0:
+            continue
+
+        total_battles += battles
+        total_wins += int(row.get('wins', 0) or 0)
+        seasons_participated += 1
+
+    return {
+        'seasons_participated': seasons_participated,
+        'total_battles': total_battles,
+        'win_rate': round((total_wins / total_battles) * 100, 1) if total_battles > 0 else None,
+    }
+
+
+def is_clan_battle_enjoyer(
+    total_battles: Optional[int],
+    seasons_participated: Optional[int],
+    minimum_battles: int = CLAN_BATTLE_ENJOYER_MIN_BATTLES,
+    minimum_seasons: int = CLAN_BATTLE_ENJOYER_MIN_SEASONS,
+) -> bool:
+    return int(total_battles or 0) >= minimum_battles and int(seasons_participated or 0) >= minimum_seasons
 
 
 def get_highest_ranked_league_name(ranked_rows: Any) -> Optional[str]:
@@ -2345,6 +2457,83 @@ def _get_player_clan_battle_season_stats(account_id: int) -> list:
     return seasons
 
 
+def get_player_clan_battle_summary(account_id: Optional[int], allow_fetch: bool = True) -> dict[str, Any]:
+    if not account_id:
+        return summarize_clan_battle_seasons([])
+
+    player_account_id = int(account_id)
+    if allow_fetch:
+        seasons = _get_player_clan_battle_season_stats(player_account_id)
+    else:
+        seasons = cache.get(f'clan_battles:player:{player_account_id}') or []
+
+    return summarize_clan_battle_seasons(seasons)
+
+
+def get_player_clan_battle_summaries(account_ids: Iterable[Optional[int]], allow_fetch: bool = True) -> dict[int, dict[str, Any]]:
+    normalized_ids = [int(account_id)
+                      for account_id in account_ids if account_id]
+    if not normalized_ids:
+        return {}
+
+    if allow_fetch:
+        return {
+            account_id: get_player_clan_battle_summary(
+                account_id, allow_fetch=True)
+            for account_id in normalized_ids
+        }
+
+    cache_keys = {
+        account_id: f'clan_battles:player:{account_id}'
+        for account_id in normalized_ids
+    }
+    cached_rows_by_key = cache.get_many(cache_keys.values())
+
+    return {
+        account_id: summarize_clan_battle_seasons(
+            cached_rows_by_key.get(cache_key) or [])
+        for account_id, cache_key in cache_keys.items()
+    }
+
+
+def fetch_player_clan_battle_seasons(account_id: int) -> list:
+    """Return a single player's clan battle seasons enriched with season metadata."""
+    if not account_id:
+        return []
+
+    season_meta = _get_clan_battle_seasons_metadata()
+    seasons = _get_player_clan_battle_season_stats(int(account_id))
+    result = []
+
+    for season in seasons:
+        battles = int(season.get('battles', 0) or 0)
+        if battles <= 0:
+            continue
+
+        sid = int(season.get('season_id', 0) or 0)
+        if sid <= 0:
+            continue
+
+        wins = int(season.get('wins', 0) or 0)
+        losses = int(season.get('losses', 0) or 0)
+        meta = season_meta.get(sid, {})
+        result.append({
+            'season_id': sid,
+            'season_name': meta.get('name', f'Season {sid}'),
+            'season_label': meta.get('label', f'S{sid}'),
+            'start_date': meta.get('start_date'),
+            'end_date': meta.get('end_date'),
+            'ship_tier_min': meta.get('ship_tier_min'),
+            'ship_tier_max': meta.get('ship_tier_max'),
+            'battles': battles,
+            'wins': wins,
+            'losses': losses,
+            'win_rate': round((wins / battles) * 100, 1) if battles > 0 else 0.0,
+        })
+
+    return sorted(result, key=_clan_battle_season_sort_key, reverse=True)
+
+
 def fetch_clan_battle_seasons(clan_id: str) -> list:
     """Return cached clan battle summary, enqueueing background refresh on misses."""
     if not clan_id:
@@ -2742,6 +2931,7 @@ def update_randoms_data(player_id: str) -> None:
 
 
 def update_clan_data(clan_id: str) -> None:
+    from warships.landing import invalidate_landing_clan_caches
 
     # return if no clan_id is provided
     if not clan_id:
@@ -2773,7 +2963,7 @@ def update_clan_data(clan_id: str) -> None:
     clan.leader_name = data.get('leader_name', '')
     clan.last_fetch = datetime.now()
     clan.save()
-    cache.delete('landing:clans')
+    invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
@@ -2793,6 +2983,8 @@ def update_clan_data(clan_id: str) -> None:
 
 
 def update_clan_members(clan_id: str) -> None:
+    from warships.landing import invalidate_landing_clan_caches
+
     clan = Clan.objects.get(clan_id=clan_id)
     member_ids = _fetch_clan_member_ids(clan_id)
 
@@ -2820,11 +3012,13 @@ def update_clan_members(clan_id: str) -> None:
 
         update_player_data(player)
 
-    cache.delete('landing:clans')
+    invalidate_landing_clan_caches()
     _invalidate_clan_battle_summary_cache(clan_id)
 
 
 def update_player_data(player: Player, force_refresh: bool = False) -> None:
+    from warships.landing import invalidate_landing_player_caches
+
     if not force_refresh and player.last_fetch and datetime.now() - player.last_fetch < timedelta(minutes=1400):
         logging.debug(
             f'Player data is fresh')
@@ -2920,7 +3114,7 @@ def update_player_data(player: Player, force_refresh: bool = False) -> None:
     if not player.is_hidden:
         update_player_efficiency_data(player, force_refresh=force_refresh)
     refresh_player_explorer_summary(player)
-    cache.delete('landing:players')
+    invalidate_landing_player_caches(include_recent=True)
     logging.info(f"Updated player personal data: {player.name}")
 
 
