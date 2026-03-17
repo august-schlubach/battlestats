@@ -109,7 +109,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(mockUseClanMembers).toHaveBeenCalledWith(4444);
     });
 
-    it('renders the icon for non-Expert tracked-player ranks on player detail', () => {
+    it('does not render the icon for non-Expert tracked-player ranks on player detail', () => {
         render(
             <PlayerDetail
                 player={{
@@ -126,11 +126,10 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/Battlestats efficiency rank Grade II: 81st percentile among eligible tracked players\. Based on stored WG badge profile for 120 tracked players\./i)).toBeInTheDocument();
-        expect(screen.getByText('Σ')).toBeInTheDocument();
+        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
     });
 
-    it('renders the icon for legacy non-Expert fallback tiers on player detail', () => {
+    it('does not render the icon for legacy non-Expert fallback tiers on player detail', () => {
         render(
             <PlayerDetail
                 player={{
@@ -146,8 +145,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/Battlestats efficiency rank Grade III: 62nd percentile among eligible tracked players\. Based on stored WG badge profile for 84 tracked players\./i)).toBeInTheDocument();
-        expect(screen.getByText('Σ')).toBeInTheDocument();
+        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
     });
 
     it('renders the sigma icon for Expert tracked-player ranks', () => {
@@ -209,7 +207,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
     });
 
-    it('renders a sigma icon from the best stored WG efficiency badge when no published rank exists', () => {
+    it('does not render a sigma icon from the best stored WG efficiency badge when no published rank exists', () => {
         render(
             <PlayerDetail
                 player={{
@@ -237,13 +235,11 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        const badge = screen.getByLabelText(/Best stored WG Efficiency Badge: Grade II across 2 ships\./i);
-        expect(badge).toBeInTheDocument();
-        expect(badge).toHaveTextContent('Σ');
-        expect(screen.queryByText('II')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
+        expect(screen.queryByText('Σ')).not.toBeInTheDocument();
     });
 
-    it('renders only a sigma icon for stored Expert badge rows without a published rank', () => {
+    it('does not render a sigma icon for stored Expert badge rows without a published rank', () => {
         render(
             <PlayerDetail
                 player={{
@@ -266,10 +262,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        const badge = screen.getByLabelText(/Best stored WG Efficiency Badge: Expert\./i);
-        expect(badge).toBeInTheDocument();
-        expect(badge).toHaveTextContent('Σ');
-        expect(screen.queryByText('Expert')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
+        expect(screen.queryByText('Σ')).not.toBeInTheDocument();
     });
 
     it('renders the PvE robot from the shared backend flag even when PvE does not exceed PvP', () => {

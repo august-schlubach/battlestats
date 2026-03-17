@@ -11,7 +11,6 @@ import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
-import type { EfficiencyRankTier } from './EfficiencyRankIcon';
 
 interface PlayerDetailProps {
     player: {
@@ -261,62 +260,6 @@ const HeaderClanBattleShield: React.FC<{ winRate: number }> = ({ winRate }) => (
     </span>
 );
 
-type EfficiencyBadgeHeaderState = {
-    tier: EfficiencyRankTier;
-    badgeTitle: string;
-    shipCount: number;
-};
-
-const HEADER_EFFICIENCY_BADGE_TITLES: Record<1 | 2 | 3 | 4, string> = {
-    1: 'Expert',
-    2: 'Grade I',
-    3: 'Grade II',
-    4: 'Grade III',
-};
-
-const HEADER_EFFICIENCY_BADGE_TIERS: Record<1 | 2 | 3 | 4, EfficiencyRankTier> = {
-    1: 'E',
-    2: 'I',
-    3: 'II',
-    4: 'III',
-};
-
-const getBestEfficiencyBadgeHeaderState = (
-    efficiencyRows: PlayerDetailProps['player']['efficiency_json'],
-): EfficiencyBadgeHeaderState | null => {
-    if (!Array.isArray(efficiencyRows) || efficiencyRows.length === 0) {
-        return null;
-    }
-
-    let bestBadgeClass: 1 | 2 | 3 | 4 | null = null;
-    let bestBadgeLabel: string | null = null;
-    let shipCount = 0;
-
-    for (const row of efficiencyRows) {
-        const badgeClass = Number(row?.top_grade_class || 0);
-        if (badgeClass < 1 || badgeClass > 4) {
-            continue;
-        }
-
-        shipCount += 1;
-
-        if (bestBadgeClass == null || badgeClass < bestBadgeClass) {
-            bestBadgeClass = badgeClass as 1 | 2 | 3 | 4;
-            bestBadgeLabel = (row?.top_grade_label || row?.badge_label || HEADER_EFFICIENCY_BADGE_LABELS[bestBadgeClass]).trim();
-        }
-    }
-
-    if (bestBadgeClass == null || shipCount === 0) {
-        return null;
-    }
-
-    return {
-        tier: HEADER_EFFICIENCY_BADGE_TIERS[bestBadgeClass],
-        badgeTitle: HEADER_EFFICIENCY_BADGE_TITLES[bestBadgeClass],
-        shipCount,
-    };
-};
-
 const buildClanBattleHeaderState = (
     summary: PlayerClanBattleSummary | null | undefined,
 ): PlayerClanBattleSummary | null => {
@@ -394,16 +337,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     const efficiencyRankTier = !player.is_hidden
         ? resolveEfficiencyRankTier(player.efficiency_rank_tier, player.has_efficiency_rank_icon)
         : null;
-    const bestEfficiencyBadge = !player.is_hidden
-        ? getBestEfficiencyBadgeHeaderState(player.efficiency_json)
-        : null;
-    const headerEfficiencyTier = efficiencyRankTier ?? bestEfficiencyBadge?.tier ?? null;
-    const headerEfficiencyDescription = efficiencyRankTier == null && bestEfficiencyBadge
-        ? (bestEfficiencyBadge.shipCount === 1
-            ? `Best stored WG Efficiency Badge: ${bestEfficiencyBadge.badgeTitle}.`
-            : `Best stored WG Efficiency Badge: ${bestEfficiencyBadge.badgeTitle} across ${bestEfficiencyBadge.shipCount} ships.`)
-        : undefined;
-    const hasEfficiencyRankIcon = !player.is_hidden && headerEfficiencyTier !== null;
+    const hasEfficiencyRankIcon = !player.is_hidden && efficiencyRankTier === 'E';
     const hasKnownRankedGames = Array.isArray(player.ranked_json)
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
@@ -604,7 +538,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isSleepyPlayer ? <HeaderSleepyBed /> : null}
                                 {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <HeaderClanBattleShield winRate={clanBattleSummary.overallWinRate} /> : null}
-                                {hasEfficiencyRankIcon && headerEfficiencyTier ? <EfficiencyRankIcon tier={headerEfficiencyTier} percentile={efficiencyRankTier ? player.efficiency_rank_percentile : null} populationSize={efficiencyRankTier ? player.efficiency_rank_population_size : null} size="header" descriptionOverride={headerEfficiencyDescription} /> : null}
+                                {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                             </div>
                             <div className="flex items-center gap-2 self-start">
                                 <button

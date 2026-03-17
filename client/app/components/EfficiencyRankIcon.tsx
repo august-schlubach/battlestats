@@ -77,7 +77,6 @@ interface EfficiencyRankIconProps {
     percentile?: number | null;
     populationSize?: number | null;
     size?: 'header' | 'inline';
-    descriptionOverride?: string;
 }
 
 const EfficiencyRankIcon: React.FC<EfficiencyRankIconProps> = ({
@@ -85,10 +84,9 @@ const EfficiencyRankIcon: React.FC<EfficiencyRankIconProps> = ({
     percentile,
     populationSize,
     size = 'header',
-    descriptionOverride,
 }) => {
     const meta = EFFICIENCY_TIER_META[tier];
-    const description = descriptionOverride || buildEfficiencyRankDescription(
+    const description = buildEfficiencyRankDescription(
         tier,
         percentile,
         populationSize,
