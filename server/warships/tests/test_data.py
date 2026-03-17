@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
@@ -1303,7 +1303,7 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.wins_last_29_days, 4)
         self.assertEqual(summary.active_days_last_29_days, 2)
         self.assertEqual(summary.kill_ratio, 0.0)
-        self.assertEqual(summary.player_score, 3.15)
+        self.assertAlmostEqual(summary.player_score, 3.13, places=2)
         self.assertEqual(summary.ships_played_total, 2)
         self.assertEqual(summary.ship_type_spread, 2)
         self.assertEqual(summary.tier_spread, 2)
@@ -1335,7 +1335,7 @@ class PlayerExplorerSummaryTests(TestCase):
 
         summary = refresh_player_explorer_summary(player)
 
-        self.assertEqual(summary.eligible_ship_count, 5)
+        self.assertEqual(summary.eligible_ship_count, 3)
         self.assertEqual(summary.efficiency_badge_rows_total, 4)
         self.assertEqual(summary.badge_rows_unmapped, 1)
         self.assertEqual(summary.expert_count, 1)
@@ -1343,9 +1343,9 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertEqual(summary.grade_ii_count, 0)
         self.assertEqual(summary.grade_iii_count, 1)
         self.assertEqual(summary.raw_badge_points, 13)
-        self.assertEqual(summary.normalized_badge_strength, 0.325)
+        self.assertEqual(summary.normalized_badge_strength, 0.541667)
 
-    def test_recompute_efficiency_rank_snapshot_uses_battles_json_denominator(self):
+    def test_recompute_efficiency_rank_snapshot_uses_mapped_efficiency_rows_denominator(self):
         top_player = Player.objects.create(
             name="ExplorerEfficiencyTop",
             player_id=9923,
@@ -1353,16 +1353,6 @@ class PlayerExplorerSummaryTests(TestCase):
             pvp_battles=900,
             battles_updated_at=timezone.now() - timedelta(hours=2),
             efficiency_updated_at=timezone.now() - timedelta(hours=2),
-            battles_json=[
-                {"ship_name": f"Top Ship {index}",
-                    "ship_tier": 10, "pvp_battles": 12}
-                for index in range(5)
-            ],
-            randoms_json=[
-                {"ship_name": f"Random Ship {index}",
-                    "ship_tier": 10, "pvp_battles": 12}
-                for index in range(20)
-            ],
             efficiency_json=[
                 {"ship_id": index, "top_grade_class": 1, "ship_tier": 10}
                 for index in range(1, 6)
@@ -1375,13 +1365,9 @@ class PlayerExplorerSummaryTests(TestCase):
             pvp_battles=700,
             battles_updated_at=timezone.now() - timedelta(hours=2),
             efficiency_updated_at=timezone.now() - timedelta(hours=2),
-            battles_json=[
-                {"ship_name": f"Middle Ship {index}",
-                    "ship_tier": 8, "pvp_battles": 9}
-                for index in range(5)
-            ],
             efficiency_json=[
-                {"ship_id": 20, "top_grade_class": 2, "ship_tier": 8},
+                {"ship_id": 20 + index, "top_grade_class": 2, "ship_tier": 8}
+                for index in range(5)
             ],
         )
         ineligible_player = Player.objects.create(
@@ -1390,16 +1376,6 @@ class PlayerExplorerSummaryTests(TestCase):
             is_hidden=False,
             battles_updated_at=timezone.now() - timedelta(hours=2),
             efficiency_updated_at=timezone.now() - timedelta(hours=2),
-            battles_json=[
-                {"ship_name": f"Limited Ship {index}",
-                    "ship_tier": 8, "pvp_battles": 9}
-                for index in range(4)
-            ],
-            randoms_json=[
-                {"ship_name": f"Random Ship {index}",
-                    "ship_tier": 10, "pvp_battles": 12}
-                for index in range(20)
-            ],
             efficiency_json=[
                 {"ship_id": 30, "top_grade_class": 1, "ship_tier": 10},
             ],
@@ -1431,6 +1407,34 @@ class PlayerExplorerSummaryTests(TestCase):
         self.assertIsNone(
             ineligible_player.explorer_summary.efficiency_rank_percentile)
 
+    def test_recompute_efficiency_rank_snapshot_does_not_require_battles_json_when_badge_rows_are_mapped(self):
+        player = Player.objects.create(
+            name="ExplorerEfficiencyBadgeRowsOnly",
+            player_id=9928,
+            is_hidden=False,
+            pvp_battles=820,
+            battles_updated_at=timezone.now() - timedelta(hours=2),
+            efficiency_updated_at=timezone.now() - timedelta(hours=2),
+            battles_json=None,
+            efficiency_json=[
+                {"ship_id": index, "top_grade_class": 1, "ship_tier": 10}
+                for index in range(1, 6)
+            ],
+        )
+
+        summary = refresh_player_explorer_summary(player)
+
+        self.assertEqual(summary.eligible_ship_count, 5)
+        self.assertEqual(summary.raw_badge_points, 40)
+        self.assertEqual(summary.normalized_badge_strength, 1.0)
+
+        report = recompute_efficiency_rank_snapshot(skip_refresh=True)
+        player.refresh_from_db()
+
+        self.assertEqual(report['population_size'], 1)
+        self.assertEqual(player.explorer_summary.efficiency_rank_tier, 'E')
+        self.assertTrue(player.explorer_summary.has_efficiency_rank_icon)
+
     def test_recompute_efficiency_rank_snapshot_suppresses_players_with_unmapped_badges(self):
         gated_player = Player.objects.create(
             name="ExplorerEfficiencyUnmapped",
@@ -1439,15 +1443,14 @@ class PlayerExplorerSummaryTests(TestCase):
             pvp_battles=640,
             battles_updated_at=timezone.now() - timedelta(hours=2),
             efficiency_updated_at=timezone.now() - timedelta(hours=2),
-            battles_json=[
-                {"ship_name": f"Mapped Ship {index}",
-                    "ship_tier": 8, "pvp_battles": 10}
-                for index in range(5)
-            ],
             efficiency_json=[
                 {"ship_id": 1, "top_grade_class": 1, "ship_tier": 8},
-                {"ship_id": 2, "top_grade_class": 2},
-                {"ship_id": 3, "top_grade_class": 4},
+                {"ship_id": 2, "top_grade_class": 1, "ship_tier": 8},
+                {"ship_id": 3, "top_grade_class": 2, "ship_tier": 9},
+                {"ship_id": 4, "top_grade_class": 3, "ship_tier": 10},
+                {"ship_id": 5, "top_grade_class": 4, "ship_tier": 7},
+                {"ship_id": 6, "top_grade_class": 2},
+                {"ship_id": 7, "top_grade_class": 4},
             ],
         )
 
@@ -1455,6 +1458,7 @@ class PlayerExplorerSummaryTests(TestCase):
         report = recompute_efficiency_rank_snapshot(skip_refresh=True)
         gated_player.refresh_from_db()
 
+        self.assertEqual(gated_player.explorer_summary.eligible_ship_count, 5)
         self.assertEqual(gated_player.explorer_summary.badge_rows_unmapped, 2)
         self.assertIsNone(
             gated_player.explorer_summary.efficiency_rank_percentile)
@@ -1855,6 +1859,95 @@ class PlayerExplorerSummaryTests(TestCase):
                 "achievement_slug").values_list("achievement_slug", flat=True)),
             ["first-blood", "kraken-unleashed"],
         )
+
+    @patch("warships.data.update_achievements_data", return_value=[])
+    @patch("warships.data._fetch_efficiency_badges_for_player", return_value=[])
+    def test_clan_crawl_save_player_collapses_duplicate_players_by_player_id(
+        self,
+        _mock_fetch_efficiency_badges,
+        _mock_update_achievements,
+    ):
+        clan = Clan.objects.create(
+            clan_id=9923, name="DuplicateCrawlerClan", tag="DCC")
+        canonical = Player.objects.create(name="Original", player_id=9923)
+        duplicate = Player.objects.create(name="Duplicate", player_id=9923)
+        Snapshot.objects.create(
+            player=duplicate,
+            date=timezone.now().date(),
+            battles=20,
+            wins=11,
+        )
+        PlayerAchievementStat.objects.create(
+            player=duplicate,
+            achievement_code="PCH016_FirstBlood",
+            achievement_slug="first-blood",
+            achievement_label="First Blood",
+            category="battle",
+            count=4,
+            refreshed_at=timezone.now(),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=duplicate,
+            player_score=7.2,
+            efficiency_rank_tier="E",
+            has_efficiency_rank_icon=True,
+        )
+
+        save_player(
+            {
+                "account_id": 9923,
+                "nickname": "DedupedCrawler",
+                "created_at": int((timezone.now() - timedelta(days=120)).timestamp()),
+                "last_battle_time": int((timezone.now() - timedelta(days=1)).timestamp()),
+                "hidden_profile": False,
+                "statistics": {
+                    "battles": 300,
+                    "pvp": {
+                        "battles": 250,
+                        "wins": 140,
+                        "losses": 110,
+                        "survived_battles": 80,
+                    },
+                },
+            },
+            clan,
+        )
+
+        self.assertEqual(Player.objects.filter(player_id=9923).count(), 1)
+        canonical.refresh_from_db()
+        self.assertEqual(canonical.name, "DedupedCrawler")
+        self.assertEqual(canonical.clan, clan)
+        self.assertEqual(Snapshot.objects.filter(player=canonical).count(), 1)
+        self.assertEqual(PlayerAchievementStat.objects.filter(
+            player=canonical).count(), 1)
+        self.assertTrue(PlayerExplorerSummary.objects.filter(
+            player=canonical).exists())
+
+    @patch("warships.data.update_player_data")
+    @patch("warships.data._fetch_clan_member_ids", return_value=[9924])
+    def test_update_clan_members_collapses_duplicate_players_by_player_id(
+        self,
+        _mock_fetch_clan_member_ids,
+        mock_update_player_data,
+    ):
+        clan = Clan.objects.create(
+            clan_id=9924, name="DedupedMembersClan", tag="DMC")
+        canonical = Player.objects.create(name="First", player_id=9924)
+        duplicate = Player.objects.create(name="Second", player_id=9924)
+        Snapshot.objects.create(
+            player=duplicate,
+            date=timezone.now().date(),
+            battles=12,
+            wins=7,
+        )
+
+        update_clan_members(str(clan.clan_id))
+
+        self.assertEqual(Player.objects.filter(player_id=9924).count(), 1)
+        canonical.refresh_from_db()
+        self.assertEqual(canonical.clan, clan)
+        self.assertEqual(Snapshot.objects.filter(player=canonical).count(), 1)
+        mock_update_player_data.assert_called_with(canonical)
 
     @patch("warships.data.update_achievements_data", return_value=[])
     def test_clan_crawl_save_player_assigns_assassin_to_top_end_players(self, _mock_update_achievements_data):

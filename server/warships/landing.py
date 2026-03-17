@@ -4,22 +4,23 @@ from django.core.cache import cache
 from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast
 
-from warships.data import _calculate_tier_filtered_pvp_record, get_highest_ranked_league_name, get_player_clan_battle_summaries, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
+from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, get_player_clan_battle_summaries, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
 from warships.models import Clan, Player
 
 
 LANDING_CACHE_TTL = 60
 LANDING_CLANS_CACHE_KEY = 'landing:clans:v3'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
-LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v4'
-LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v10:namespace'
+LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v5'
+LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v11:namespace'
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
 LANDING_PLAYER_LIMIT = 40
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
-LANDING_PLAYER_MODES = ('random', 'best')
+LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES = 500
+LANDING_PLAYER_MODES = ('random', 'best', 'sigma')
 
 
 def _player_score_ordering(secondary_field: str):
@@ -76,7 +77,7 @@ def _bump_landing_players_cache_namespace() -> int:
 
 def landing_player_cache_key(mode: str, limit: int) -> str:
     namespace = _get_landing_players_cache_namespace()
-    return f'landing:players:v10:n{namespace}:{mode}:{limit}'
+    return f'landing:players:v11:n{namespace}:{mode}:{limit}'
 
 
 def normalize_landing_player_mode(mode: str | None) -> str:
@@ -111,19 +112,26 @@ def invalidate_landing_player_caches(include_recent: bool = False) -> None:
 
 
 def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
+    player_ids = [int(row.get('player_id') or 0)
+                  for row in rows if row.get('player_id') is not None]
     clan_battle_summaries = get_player_clan_battle_summaries(
-        [row.get('player_id') for row in rows],
+        player_ids,
         allow_fetch=False,
     )
+    players_by_id = {
+        player.player_id: player
+        for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary')
+    }
 
     for row in rows:
+        player_id = int(row.get('player_id') or 0)
         high_tier_battles, high_tier_ratio = _calculate_tier_filtered_pvp_record(
             row.pop('battles_json', None),
             minimum_tier=5,
         )
         ranked_rows = row.pop('ranked_json', None)
         clan_battle_summary = clan_battle_summaries.get(
-            int(row.get('player_id') or 0),
+            player_id,
             {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
         )
         row['high_tier_pvp_battles'] = high_tier_battles
@@ -138,6 +146,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         row['clan_battle_win_rate'] = clan_battle_summary['win_rate']
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
+        row.update(_get_published_efficiency_rank_payload(
+            players_by_id.get(player_id)))
         row.pop('player_id', None)
         row.pop('days_since_last_battle', None)
 
@@ -258,11 +268,56 @@ def _build_best_landing_players(limit: int) -> list[dict]:
     return rows[:limit]
 
 
+def _build_sigma_landing_players(limit: int) -> list[dict]:
+    candidate_rows = list(
+        Player.objects.exclude(name='').filter(
+            is_hidden=False,
+            days_since_last_battle__lte=180,
+            pvp_battles__gt=LANDING_PLAYER_SIGMA_MIN_PVP_BATTLES,
+            explorer_summary__efficiency_rank_percentile__isnull=False,
+        ).exclude(
+            last_battle_date__isnull=True,
+        ).annotate(
+            player_score=F('explorer_summary__player_score'),
+        ).values(
+            'name',
+            'player_id',
+            'pvp_ratio',
+            'is_hidden',
+            'days_since_last_battle',
+            'total_battles',
+            'pvp_battles',
+            'battles_json',
+            'ranked_json',
+            'player_score',
+        )
+    )
+
+    rows = _serialize_landing_player_rows(candidate_rows)
+    rows = [row for row in rows if row.get('efficiency_rank_percentile') is not None]
+    rows.sort(key=lambda row: (
+        -(row.get('efficiency_rank_percentile') if row.get('efficiency_rank_percentile') is not None else float('-inf')),
+        -(row.get('player_score') if row.get('player_score') is not None else float('-inf')),
+        -(row.get('pvp_ratio') if row.get('pvp_ratio') is not None else float('-inf')),
+        row.get('name') or '',
+    ))
+
+    for row in rows:
+        row.pop('player_score', None)
+
+    return rows[:limit]
+
+
 def get_landing_players_payload(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT) -> list[dict]:
     normalized_mode = normalize_landing_player_mode(mode)
     normalized_limit = normalize_landing_player_limit(limit)
     cache_key = landing_player_cache_key(normalized_mode, normalized_limit)
-    builder = _build_best_landing_players if normalized_mode == 'best' else _build_random_landing_players
+    if normalized_mode == 'best':
+        builder = _build_best_landing_players
+    elif normalized_mode == 'sigma':
+        builder = _build_sigma_landing_players
+    else:
+        builder = _build_random_landing_players
     return cache.get_or_set(cache_key, lambda: builder(normalized_limit), LANDING_CACHE_TTL)
 
 
@@ -275,15 +330,22 @@ def _build_recent_players() -> list[dict]:
             'name',
         )[:40]
     )
+    player_ids = [int(row.get('player_id') or 0)
+                  for row in rows if row.get('player_id') is not None]
     clan_battle_summaries = get_player_clan_battle_summaries(
-        [row.get('player_id') for row in rows],
+        player_ids,
         allow_fetch=False,
     )
+    players_by_id = {
+        player.player_id: player
+        for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary')
+    }
 
     for row in rows:
+        player_id = int(row.get('player_id') or 0)
         ranked_rows = row.pop('ranked_json', None)
         clan_battle_summary = clan_battle_summaries.get(
-            int(row.get('player_id') or 0),
+            player_id,
             {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
         )
         row['is_pve_player'] = is_pve_player(
@@ -296,6 +358,8 @@ def _build_recent_players() -> list[dict]:
         row['clan_battle_win_rate'] = clan_battle_summary['win_rate']
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
+        row.update(_get_published_efficiency_rank_payload(
+            players_by_id.get(player_id)))
         row.pop('player_id', None)
         row.pop('days_since_last_battle', None)
 
@@ -312,6 +376,7 @@ def warm_landing_page_content() -> dict:
         'recent_clans': len(get_landing_recent_clans_payload()),
         'players_random': len(get_landing_players_payload('random', LANDING_PLAYER_LIMIT)),
         'players_best': len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT)),
+        'players_sigma': len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT)),
         'recent_players': len(get_landing_recent_players_payload()),
     }
     return {'status': 'completed', 'warmed': warmed}

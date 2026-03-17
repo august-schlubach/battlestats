@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faBed, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ClanDetail from './ClanDetail';
+import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
 import PlayerDetail from './PlayerDetail';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
@@ -24,6 +25,11 @@ interface LandingPlayer {
     is_clan_battle_player?: boolean;
     clan_battle_win_rate?: number | null;
     highest_ranked_league?: RankedLeagueName | null;
+    efficiency_rank_percentile?: number | null;
+    efficiency_rank_tier?: EfficiencyRankTier | null;
+    has_efficiency_rank_icon?: boolean;
+    efficiency_rank_population_size?: number | null;
+    efficiency_rank_updated_at?: string | null;
 }
 
 const wrColor = (r: number | null): string => {
@@ -148,12 +154,24 @@ const PlayerNameGrid: React.FC<{
         {players.map((player) => {
             const label = player.name;
             const color = wrColor(player.pvp_ratio);
+            const efficiencyTier = resolveEfficiencyRankTier(
+                player.efficiency_rank_tier,
+                player.has_efficiency_rank_icon,
+            );
             const iconRow = (
                 <>
                     {player.is_ranked_player ? <LandingRankedStar league={player.highest_ranked_league} /> : null}
                     {player.is_pve_player ? <LandingPveRobot /> : null}
                     {player.is_sleepy_player ? <LandingSleepyBed /> : null}
                     {player.is_clan_battle_player ? <LandingClanBattleShield winRate={player.clan_battle_win_rate} /> : null}
+                    {efficiencyTier === 'E' ? (
+                        <EfficiencyRankIcon
+                            tier={efficiencyTier}
+                            percentile={player.efficiency_rank_percentile}
+                            populationSize={player.efficiency_rank_population_size}
+                            size="inline"
+                        />
+                    ) : null}
                 </>
             );
 
@@ -226,7 +244,7 @@ const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
 
 type LandingClanMode = 'random' | 'best';
-type LandingPlayerMode = 'random' | 'best';
+type LandingPlayerMode = 'random' | 'best' | 'sigma';
 
 const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
     const contentType = response.headers.get('content-type') || '';
@@ -532,6 +550,14 @@ const PlayerSearch: React.FC = () => {
                                     aria-pressed={playerMode === 'best'}
                                 >
                                     Best
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPlayerMode('sigma')}
+                                    className={`inline-flex items-center rounded-md border px-3 py-1.5 text-sm font-semibold uppercase tracking-wide transition-colors ${playerMode === 'sigma' ? 'border-[#2171b5] bg-[#2171b5] text-white' : 'border-[#c6dbef] bg-white text-[#2171b5] hover:bg-[#eff3ff]'}`}
+                                    aria-pressed={playerMode === 'sigma'}
+                                >
+                                    Sigma
                                 </button>
                             </div>
                             <PlayerNameGrid

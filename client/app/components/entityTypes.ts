@@ -40,11 +40,17 @@ export interface PlayerData {
     verdict: string | null;
     highest_ranked_league?: RankedLeagueName | null;
     is_clan_leader?: boolean;
+    is_pve_player?: boolean;
     efficiency_rank_percentile?: number | null;
     efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
     has_efficiency_rank_icon?: boolean;
     efficiency_rank_population_size?: number | null;
     efficiency_rank_updated_at?: string | null;
+    clan_battle_header_eligible?: boolean;
+    clan_battle_header_total_battles?: number | null;
+    clan_battle_header_seasons_played?: number | null;
+    clan_battle_header_overall_win_rate?: number | null;
+    clan_battle_header_updated_at?: string | null;
     randoms_json?: Array<{
         ship_name?: string | null;
         ship_chart_name?: string | null;

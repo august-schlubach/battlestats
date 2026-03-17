@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Player, Clan, Ship
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player
 
 
 class PlayerSerializer(serializers.ModelSerializer):
@@ -16,6 +16,12 @@ class PlayerSerializer(serializers.ModelSerializer):
     has_efficiency_rank_icon = serializers.SerializerMethodField()
     efficiency_rank_population_size = serializers.SerializerMethodField()
     efficiency_rank_updated_at = serializers.SerializerMethodField()
+    clan_battle_header_eligible = serializers.SerializerMethodField()
+    clan_battle_header_total_battles = serializers.SerializerMethodField()
+    clan_battle_header_seasons_played = serializers.SerializerMethodField()
+    clan_battle_header_overall_win_rate = serializers.SerializerMethodField()
+    clan_battle_header_updated_at = serializers.SerializerMethodField()
+    is_pve_player = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -77,6 +83,61 @@ class PlayerSerializer(serializers.ModelSerializer):
 
     def get_efficiency_rank_updated_at(self, obj):
         return self._get_efficiency_rank_payload(obj)['efficiency_rank_updated_at']
+
+    def _get_clan_battle_header_payload(self, obj):
+        payload_cache = getattr(self, '_clan_battle_header_payload_cache', None)
+        if payload_cache is None:
+            payload_cache = {}
+            self._clan_battle_header_payload_cache = payload_cache
+
+        cache_key = getattr(obj, 'pk', id(obj))
+        if cache_key not in payload_cache:
+            if obj.is_hidden:
+                payload_cache[cache_key] = {
+                    'clan_battle_header_eligible': False,
+                    'clan_battle_header_total_battles': 0,
+                    'clan_battle_header_seasons_played': 0,
+                    'clan_battle_header_overall_win_rate': None,
+                    'clan_battle_header_updated_at': None,
+                }
+            else:
+                summary = get_player_clan_battle_summary(
+                    obj.player_id,
+                    allow_fetch=False,
+                )
+                payload_cache[cache_key] = {
+                    'clan_battle_header_eligible': is_clan_battle_enjoyer(
+                        summary.get('total_battles'),
+                        summary.get('seasons_participated'),
+                    ),
+                    'clan_battle_header_total_battles': int(summary.get('total_battles') or 0),
+                    'clan_battle_header_seasons_played': int(summary.get('seasons_participated') or 0),
+                    'clan_battle_header_overall_win_rate': summary.get('win_rate'),
+                    'clan_battle_header_updated_at': None,
+                }
+
+        return payload_cache[cache_key]
+
+    def get_clan_battle_header_eligible(self, obj):
+        return self._get_clan_battle_header_payload(obj)['clan_battle_header_eligible']
+
+    def get_clan_battle_header_total_battles(self, obj):
+        return self._get_clan_battle_header_payload(obj)['clan_battle_header_total_battles']
+
+    def get_clan_battle_header_seasons_played(self, obj):
+        return self._get_clan_battle_header_payload(obj)['clan_battle_header_seasons_played']
+
+    def get_clan_battle_header_overall_win_rate(self, obj):
+        return self._get_clan_battle_header_payload(obj)['clan_battle_header_overall_win_rate']
+
+    def get_clan_battle_header_updated_at(self, obj):
+        return self._get_clan_battle_header_payload(obj)['clan_battle_header_updated_at']
+
+    def get_is_pve_player(self, obj):
+        if obj.is_hidden:
+            return False
+
+        return is_pve_player(obj.total_battles, obj.pvp_battles)
 
 
 class ClanSerializer(serializers.ModelSerializer):

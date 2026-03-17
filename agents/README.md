@@ -71,6 +71,17 @@ Instead of only role markdown files, add these lightweight controls:
 - Keep a single source of truth for status and decisions.
 - Escalate blockers quickly; do not silently workaround requirement gaps.
 
+## Commit Gate
+
+Before each and every commit, the active agent workflow must complete all of the following:
+
+- Review changed project documentation and update or synthesize the durable docs that now describe the shipped behavior, contract, or workflow.
+- Check documentation against code and tests wherever there is uncertainty, instead of committing doc guesses.
+- Ensure the changed behavior has appropriate test coverage and update the focused or broader test suite when existing coverage no longer proves the new behavior.
+- Move old, superseded, or now-historical runbooks from `agents/runbooks/` into `agents/runbooks/archive/` so the active runbook directory stays current.
+
+No commit is considered ready until that documentation, verification, and runbook-hygiene pass is complete.
+
 ## Knowledge Base
 
 - Store reusable findings under `agents/knowledge/` when they would save future investigation time.
@@ -81,3 +92,4 @@ Instead of only role markdown files, add these lightweight controls:
 
 - Store reusable execution guides under `agents/runbooks/`.
 - Keep runbooks task-oriented: include context, exact commands, validation steps, and rollback notes when applicable.
+- Before committing, archive runbooks whose planning state or feature status no longer matches the live code.

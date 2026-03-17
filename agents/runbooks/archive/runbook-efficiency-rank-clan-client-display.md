@@ -19,9 +19,9 @@ Shipped results:
 Execution evidence:
 
 1. shared roster status: [client/app/components/ClanMembers.tsx](client/app/components/ClanMembers.tsx)
-2. clan route hook wiring: [client/app/components/__tests__/ClanDetail.test.tsx](client/app/components/__tests__/ClanDetail.test.tsx)
-3. player-detail hook wiring: [client/app/components/__tests__/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
-4. shared roster icon + status coverage: [client/app/components/__tests__/ClanMembers.test.tsx](client/app/components/__tests__/ClanMembers.test.tsx)
+2. clan route hook wiring: [client/app/components/**tests**/ClanDetail.test.tsx](client/app/components/__tests__/ClanDetail.test.tsx)
+3. player-detail hook wiring: [client/app/components/**tests**/PlayerDetail.test.tsx](client/app/components/__tests__/PlayerDetail.test.tsx)
+4. shared roster icon + status coverage: [client/app/components/**tests**/ClanMembers.test.tsx](client/app/components/__tests__/ClanMembers.test.tsx)
 5. QA review: [agents/reviews/qa-efficiency-rank-clan-client-display-review.md](agents/reviews/qa-efficiency-rank-clan-client-display-review.md)
 
 Focused client validation command:

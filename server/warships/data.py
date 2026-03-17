@@ -12,6 +12,7 @@ from django.db.models.functions import TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
 from warships.models import PlayerAchievementStat
+from warships.player_records import get_or_create_canonical_player
 from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
 from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
@@ -729,24 +730,6 @@ def _coerce_efficiency_rows(efficiency_rows: Any) -> list[dict]:
     return [row for row in efficiency_rows if isinstance(row, dict)]
 
 
-def _eligible_efficiency_ship_count(battle_rows: Any) -> int:
-    eligible_ship_count = 0
-
-    for row in _coerce_battle_rows(battle_rows):
-        try:
-            ship_tier = int(row.get('ship_tier') or 0)
-            pvp_battles = int(row.get('pvp_battles', 0) or 0)
-        except (TypeError, ValueError):
-            continue
-
-        if ship_tier < 5 or pvp_battles < EFFICIENCY_RANK_MIN_SHIP_BATTLES:
-            continue
-
-        eligible_ship_count += 1
-
-    return eligible_ship_count
-
-
 def _build_efficiency_rank_inputs(
     player: Player,
     battle_rows: Any = None,
@@ -765,13 +748,8 @@ def _build_efficiency_rank_inputs(
             'normalized_badge_strength': None,
         }
 
-    normalized_battle_rows = _coerce_battle_rows(
-        player.battles_json if battle_rows is None else battle_rows)
     normalized_efficiency_rows = _coerce_efficiency_rows(
         player.efficiency_json if efficiency_rows is None else efficiency_rows)
-
-    eligible_ship_count = _eligible_efficiency_ship_count(
-        normalized_battle_rows)
     badge_counts: Counter[int] = Counter()
     badge_rows_total = 0
     badge_rows_unmapped = 0
@@ -797,6 +775,8 @@ def _build_efficiency_rank_inputs(
             continue
 
         badge_counts[badge_class] += 1
+
+    eligible_ship_count = sum(badge_counts.values())
 
     raw_badge_points = sum(
         EFFICIENCY_BADGE_CLASS_POINTS[badge_class] * count
@@ -1131,6 +1111,12 @@ def recompute_efficiency_rank_snapshot(
         'population_size': population_size,
         'qualifying_count': qualifying_count,
         'qualifying_share': round(qualifying_count / population_size, 6) if population_size else 0.0,
+        'eligibility_basis': {
+            'denominator_source': 'mapped_tier_v_plus_efficiency_badge_rows',
+            'min_pvp_battles': EFFICIENCY_RANK_MIN_PVP_BATTLES,
+            'min_mapped_badge_rows': EFFICIENCY_RANK_MIN_ELIGIBLE_SHIPS,
+            'unmapped_share_limit': EFFICIENCY_RANK_UNMAPPED_SHARE_LIMIT,
+        },
         'field_mean_strength': field_mean_strength,
         'tier_thresholds': {
             'III': EFFICIENCY_RANK_MIN_VISIBLE_PERCENTILE,
@@ -1260,11 +1246,19 @@ def calculate_pve_battle_count(total_battles: Optional[int], pvp_battles: Option
     return max(total - pvp, 0)
 
 
+def calculate_pve_share_total(total_battles: Optional[int], pvp_battles: Optional[int]) -> float:
+    total = max(int(total_battles or 0), 0)
+    if total <= 0:
+        return 0.0
+
+    return calculate_pve_battle_count(total, pvp_battles) / total
+
+
 def is_pve_player(total_battles: Optional[int], pvp_battles: Optional[int]) -> bool:
     total = max(int(total_battles or 0), 0)
-    pvp = max(int(pvp_battles or 0), 0)
-    pve = calculate_pve_battle_count(total, pvp)
-    return total > 500 and (pve > (0.75 * pvp) or pve >= 4000)
+    pve = calculate_pve_battle_count(total, pvp_battles)
+    pve_share_total = calculate_pve_share_total(total, pvp_battles)
+    return total > 500 and pve >= 1500 and pve_share_total >= 0.30
 
 
 def is_sleepy_player(days_since_last_battle: Optional[int], minimum_days: int = SLEEPY_PLAYER_DAYS_THRESHOLD) -> bool:
@@ -3708,10 +3702,8 @@ def update_clan_data(clan_id: str) -> None:
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
 
     for member_id in _fetch_clan_member_ids(clan_id):
-        player, created = Player.objects.get_or_create(player_id=member_id)
+        player, created = get_or_create_canonical_player(member_id)
         if created:
-            player.player_id = member_id
-            player.save()
             logging.info(
                 f"Created new player: {player.player_id}\nPopulating data...")
             update_player_data(player)
@@ -3735,10 +3727,8 @@ def update_clan_members(clan_id: str) -> None:
         return
 
     for member_id in member_ids:
-        player, created = Player.objects.get_or_create(player_id=member_id)
+        player, created = get_or_create_canonical_player(member_id)
         if created:
-            player.player_id = member_id
-            player.save()
             logging.info(
                 f"Created new player: {player.player_id}")
             update_player_data(player)

@@ -233,6 +233,120 @@ class PlayerViewSetTests(TestCase):
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_exposes_shared_pve_player_flag(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        Player.objects.create(
+            name="SharedPvePlayer",
+            player_id=9060,
+            last_fetch=now,
+            is_hidden=False,
+            total_battles=14344,
+            pvp_battles=9549,
+        )
+        Player.objects.create(
+            name="NotSharedPvePlayer",
+            player_id=9061,
+            last_fetch=now,
+            is_hidden=False,
+            total_battles=23851,
+            pvp_battles=19629,
+        )
+
+        pve_response = self.client.get("/api/player/SharedPvePlayer/")
+        non_pve_response = self.client.get("/api/player/NotSharedPvePlayer/")
+
+        self.assertEqual(pve_response.status_code, 200)
+        self.assertEqual(non_pve_response.status_code, 200)
+        self.assertTrue(pve_response.json()["is_pve_player"])
+        self.assertFalse(non_pve_response.json()["is_pve_player"])
+        self.assertEqual(mock_update_player_task.call_count, 2)
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.data._fetch_clan_battle_season_stats")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_exposes_cached_clan_battle_header_fields(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+        mock_fetch_clan_battle_season_stats,
+    ):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="ClanBattleHeaderPlayer",
+            player_id=9058,
+            last_fetch=now,
+            is_hidden=False,
+            pvp_battles=500,
+        )
+        cache.set(
+            "clan_battles:player:9058",
+            [
+                {"season_id": 1, "battles": 25, "wins": 14},
+                {"season_id": 2, "battles": 18, "wins": 10},
+            ],
+            3600,
+        )
+
+        response = self.client.get("/api/player/ClanBattleHeaderPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["clan_battle_header_eligible"])
+        self.assertEqual(payload["clan_battle_header_total_battles"], 43)
+        self.assertEqual(payload["clan_battle_header_seasons_played"], 2)
+        self.assertEqual(payload["clan_battle_header_overall_win_rate"], 55.8)
+        self.assertIsNone(payload["clan_battle_header_updated_at"])
+        mock_fetch_clan_battle_season_stats.assert_not_called()
+        mock_update_player_task.assert_called_once()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.data._fetch_clan_battle_season_stats")
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_defaults_clan_battle_header_fields_when_cache_missing(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+        mock_fetch_clan_battle_season_stats,
+    ):
+        now = timezone.now()
+        Player.objects.create(
+            name="ClanBattleHeaderCacheMiss",
+            player_id=9059,
+            last_fetch=now,
+            is_hidden=False,
+            pvp_battles=500,
+        )
+
+        response = self.client.get("/api/player/ClanBattleHeaderCacheMiss/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["clan_battle_header_eligible"])
+        self.assertEqual(payload["clan_battle_header_total_battles"], 0)
+        self.assertEqual(payload["clan_battle_header_seasons_played"], 0)
+        self.assertIsNone(payload["clan_battle_header_overall_win_rate"])
+        self.assertIsNone(payload["clan_battle_header_updated_at"])
+        mock_fetch_clan_battle_season_stats.assert_not_called()
+        mock_update_player_task.assert_called_once()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
     def test_player_lookup_updates_last_lookup_timestamp(
         self,
         _mock_update_player_task,
@@ -913,30 +1027,30 @@ class ClanMembersEndpointTests(TestCase):
             },
         )
 
-    def test_clan_members_marks_pve_players_from_updated_thresholds(self):
+    def test_clan_members_marks_pve_players_from_streamlined_thresholds(self):
         clan = Clan.objects.create(
             clan_id=80,
             name="PvE Clan",
             members_count=5,
         )
         Player.objects.create(
-            name="AboveSeventyFivePercent",
+            name="HighShareHighVolume",
             player_id=8001,
             clan=clan,
-            total_battles=1200,
-            pvp_battles=600,
+            total_battles=7000,
+            pvp_battles=4000,
             last_battle_date=timezone.now().date(),
         )
         Player.objects.create(
-            name="BelowSeventyFivePercent",
+            name="LowShareHighVolume",
             player_id=8002,
             clan=clan,
-            total_battles=1200,
-            pvp_battles=800,
+            total_battles=10000,
+            pvp_battles=8300,
             last_battle_date=timezone.now().date(),
         )
         Player.objects.create(
-            name="TooSmallSample",
+            name="TooSmallTotal",
             player_id=8003,
             clan=clan,
             total_battles=500,
@@ -944,19 +1058,27 @@ class ClanMembersEndpointTests(TestCase):
             last_battle_date=timezone.now().date(),
         )
         Player.objects.create(
-            name="HighAbsolutePvE",
+            name="HighAbsoluteButLowShare",
             player_id=8004,
             clan=clan,
-            total_battles=10000,
-            pvp_battles=5500,
+            total_battles=23851,
+            pvp_battles=19629,
             last_battle_date=timezone.now().date(),
         )
         Player.objects.create(
-            name="ExactlySeventyFivePercent",
+            name="ExactlyThreshold",
             player_id=8005,
             clan=clan,
-            total_battles=1750,
-            pvp_battles=1000,
+            total_battles=5000,
+            pvp_battles=3500,
+            last_battle_date=timezone.now().date(),
+        )
+        Player.objects.create(
+            name="HighShareLowVolume",
+            player_id=8006,
+            clan=clan,
+            total_battles=1400,
+            pvp_battles=200,
             last_battle_date=timezone.now().date(),
         )
 
@@ -966,11 +1088,12 @@ class ClanMembersEndpointTests(TestCase):
         self.assertEqual(
             {row["name"]: row["is_pve_player"] for row in response.json()},
             {
-                "AboveSeventyFivePercent": True,
-                "BelowSeventyFivePercent": False,
-                "TooSmallSample": False,
-                "HighAbsolutePvE": True,
-                "ExactlySeventyFivePercent": False,
+                "HighShareHighVolume": True,
+                "LowShareHighVolume": False,
+                "TooSmallTotal": False,
+                "HighAbsoluteButLowShare": False,
+                "ExactlyThreshold": True,
+                "HighShareLowVolume": False,
             },
         )
 
@@ -1650,6 +1773,199 @@ class ApiContractTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), 40)
 
+    def test_landing_players_sigma_mode_orders_by_efficiency_percentile(self):
+        cache.clear()
+        now = timezone.now()
+        today = now.date()
+        lower_tiebreak = Player.objects.create(
+            name="LandingSigmaTieLow",
+            player_id=4360,
+            is_hidden=False,
+            pvp_ratio=58.0,
+            pvp_battles=3200,
+            days_since_last_battle=5,
+            last_battle_date=today - timedelta(days=5),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        leader = Player.objects.create(
+            name="LandingSigmaLeader",
+            player_id=4361,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            pvp_battles=3300,
+            days_since_last_battle=2,
+            last_battle_date=today - timedelta(days=2),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        higher_tiebreak = Player.objects.create(
+            name="LandingSigmaTieHigh",
+            player_id=4362,
+            is_hidden=False,
+            pvp_ratio=60.0,
+            pvp_battles=3400,
+            days_since_last_battle=3,
+            last_battle_date=today - timedelta(days=3),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=lower_tiebreak,
+            player_score=6.1,
+            efficiency_rank_percentile=0.91,
+            efficiency_rank_tier='I',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=leader,
+            player_score=4.2,
+            efficiency_rank_percentile=0.97,
+            efficiency_rank_tier='E',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=higher_tiebreak,
+            player_score=8.9,
+            efficiency_rank_percentile=0.91,
+            efficiency_rank_tier='I',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+
+        response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["name"] for row in response.json()[:3]],
+            ["LandingSigmaLeader", "LandingSigmaTieHigh", "LandingSigmaTieLow"],
+        )
+
+    def test_landing_players_sigma_mode_excludes_hidden_and_unpublished_players(self):
+        cache.clear()
+        now = timezone.now()
+        today = now.date()
+        visible = Player.objects.create(
+            name="LandingSigmaVisible",
+            player_id=4363,
+            is_hidden=False,
+            pvp_ratio=59.0,
+            pvp_battles=3200,
+            days_since_last_battle=3,
+            last_battle_date=today - timedelta(days=3),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        hidden = Player.objects.create(
+            name="LandingSigmaHidden",
+            player_id=4364,
+            is_hidden=True,
+            pvp_ratio=61.0,
+            pvp_battles=3300,
+            days_since_last_battle=2,
+            last_battle_date=today - timedelta(days=2),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        stale = Player.objects.create(
+            name="LandingSigmaStale",
+            player_id=4365,
+            is_hidden=False,
+            pvp_ratio=58.0,
+            pvp_battles=3400,
+            days_since_last_battle=4,
+            last_battle_date=today - timedelta(days=4),
+            efficiency_updated_at=now,
+            battles_updated_at=now,
+        )
+        unpublished = Player.objects.create(
+            name="LandingSigmaUnpublished",
+            player_id=4366,
+            is_hidden=False,
+            pvp_ratio=57.0,
+            pvp_battles=3500,
+            days_since_last_battle=1,
+            last_battle_date=today - timedelta(days=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=visible,
+            player_score=7.7,
+            efficiency_rank_percentile=0.95,
+            efficiency_rank_tier='I',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=hidden,
+            player_score=9.1,
+            efficiency_rank_percentile=0.98,
+            efficiency_rank_tier='E',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=stale,
+            player_score=8.4,
+            efficiency_rank_percentile=0.96,
+            efficiency_rank_tier='E',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=3),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=unpublished,
+            player_score=8.0,
+            efficiency_rank_percentile=None,
+            efficiency_rank_tier=None,
+            has_efficiency_rank_icon=False,
+            efficiency_rank_population_size=None,
+            efficiency_rank_updated_at=None,
+        )
+
+        response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["name"] for row in response.json()], ["LandingSigmaVisible"])
+
+    def test_landing_players_sigma_mode_caps_results_to_requested_limit(self):
+        cache.clear()
+        now = timezone.now()
+        today = now.date()
+
+        for index in range(45):
+            player = Player.objects.create(
+                name=f"LandingSigmaLimit{index:02d}",
+                player_id=4370 + index,
+                is_hidden=False,
+                pvp_ratio=60.0 - (index * 0.1),
+                pvp_battles=3200 + index,
+                days_since_last_battle=5,
+                last_battle_date=today - timedelta(days=(index % 7)),
+                efficiency_updated_at=now - timedelta(hours=3),
+                battles_updated_at=now - timedelta(hours=3),
+            )
+            PlayerExplorerSummary.objects.create(
+                player=player,
+                player_score=9.0 - (index * 0.05),
+                efficiency_rank_percentile=0.99 - (index * 0.001),
+                efficiency_rank_tier='E' if index < 11 else 'I',
+                has_efficiency_rank_icon=True,
+                efficiency_rank_population_size=367,
+                efficiency_rank_updated_at=now - timedelta(hours=1),
+            )
+
+        response = self.client.get("/api/landing/players/?mode=sigma&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 40)
+
     def test_landing_players_only_include_recently_active_players(self):
         cache.clear()
         today = timezone.now().date()
@@ -1762,6 +2078,154 @@ class ApiContractTests(TestCase):
         self.assertEqual(landing_row["clan_battle_win_rate"], 56.8)
         self.assertTrue(recent_row["is_clan_battle_player"])
         self.assertEqual(recent_row["clan_battle_win_rate"], 56.8)
+
+    def test_landing_players_and_recent_players_use_streamlined_pve_rule(self):
+        cache.clear()
+        today = timezone.now().date()
+        looked_up_at = timezone.now() - timedelta(minutes=1)
+        Player.objects.create(
+            name="LandingPveYes",
+            player_id=4412,
+            is_hidden=False,
+            pvp_ratio=56.0,
+            total_battles=9576,
+            pvp_battles=3111,
+            days_since_last_battle=7,
+            last_battle_date=today,
+            last_lookup=looked_up_at,
+        )
+        Player.objects.create(
+            name="LandingPveNoHighAbsolute",
+            player_id=4413,
+            is_hidden=False,
+            pvp_ratio=67.0,
+            total_battles=23851,
+            pvp_battles=19629,
+            days_since_last_battle=3,
+            last_battle_date=today,
+            last_lookup=looked_up_at - timedelta(minutes=1),
+        )
+
+        landing_response = self.client.get("/api/landing/players/?mode=random&limit=40")
+        recent_response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(landing_response.status_code, 200)
+        self.assertEqual(recent_response.status_code, 200)
+
+        landing_rows = {row["name"]: row["is_pve_player"] for row in landing_response.json() if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
+        recent_rows = {row["name"]: row["is_pve_player"] for row in recent_response.json() if row["name"] in {"LandingPveYes", "LandingPveNoHighAbsolute"}}
+
+        self.assertEqual(landing_rows, {
+            "LandingPveYes": True,
+            "LandingPveNoHighAbsolute": False,
+        })
+        self.assertEqual(recent_rows, {
+            "LandingPveYes": True,
+            "LandingPveNoHighAbsolute": False,
+        })
+
+    def test_landing_players_and_recent_players_expose_published_efficiency_fields(self):
+        cache.clear()
+        now = timezone.now()
+        today = now.date()
+        expert = Player.objects.create(
+            name="LandingEfficiencyExpert",
+            player_id=4414,
+            is_hidden=False,
+            pvp_ratio=59.0,
+            total_battles=6200,
+            pvp_battles=5400,
+            days_since_last_battle=4,
+            last_battle_date=today,
+            last_lookup=now - timedelta(minutes=2),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        grade_two = Player.objects.create(
+            name="LandingEfficiencyGradeTwo",
+            player_id=4415,
+            is_hidden=False,
+            pvp_ratio=56.0,
+            total_battles=5400,
+            pvp_battles=4700,
+            days_since_last_battle=2,
+            last_battle_date=today,
+            last_lookup=now - timedelta(minutes=1),
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        hidden_recent = Player.objects.create(
+            name="LandingEfficiencyHidden",
+            player_id=4416,
+            is_hidden=True,
+            pvp_ratio=55.0,
+            total_battles=5100,
+            pvp_battles=4300,
+            days_since_last_battle=1,
+            last_battle_date=today,
+            last_lookup=now,
+            efficiency_updated_at=now - timedelta(hours=3),
+            battles_updated_at=now - timedelta(hours=3),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=expert,
+            efficiency_rank_percentile=0.97,
+            efficiency_rank_tier='E',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=367,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=grade_two,
+            efficiency_rank_percentile=0.81,
+            efficiency_rank_tier='II',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=124,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=hidden_recent,
+            efficiency_rank_percentile=0.99,
+            efficiency_rank_tier='E',
+            has_efficiency_rank_icon=True,
+            efficiency_rank_population_size=500,
+            efficiency_rank_updated_at=now - timedelta(hours=1),
+        )
+
+        landing_response = self.client.get("/api/landing/players/?mode=random&limit=40")
+        recent_response = self.client.get("/api/landing/recent/")
+
+        self.assertEqual(landing_response.status_code, 200)
+        self.assertEqual(recent_response.status_code, 200)
+
+        landing_rows = {
+            row["name"]: row
+            for row in landing_response.json()
+            if row["name"] in {"LandingEfficiencyExpert", "LandingEfficiencyGradeTwo"}
+        }
+        recent_rows = {
+            row["name"]: row
+            for row in recent_response.json()
+            if row["name"] in {"LandingEfficiencyExpert", "LandingEfficiencyGradeTwo", "LandingEfficiencyHidden"}
+        }
+
+        self.assertEqual(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
+        self.assertEqual(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_percentile"], 0.97)
+        self.assertTrue(landing_rows["LandingEfficiencyExpert"]["has_efficiency_rank_icon"])
+        self.assertEqual(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_population_size"], 367)
+        self.assertIsNotNone(landing_rows["LandingEfficiencyExpert"]["efficiency_rank_updated_at"])
+
+        self.assertEqual(landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
+        self.assertEqual(landing_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_percentile"], 0.81)
+        self.assertTrue(landing_rows["LandingEfficiencyGradeTwo"]["has_efficiency_rank_icon"])
+
+        self.assertEqual(recent_rows["LandingEfficiencyExpert"]["efficiency_rank_tier"], "E")
+        self.assertEqual(recent_rows["LandingEfficiencyGradeTwo"]["efficiency_rank_tier"], "II")
+        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_percentile"])
+        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_tier"])
+        self.assertFalse(recent_rows["LandingEfficiencyHidden"]["has_efficiency_rank_icon"])
+        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_population_size"])
+        self.assertIsNone(recent_rows["LandingEfficiencyHidden"]["efficiency_rank_updated_at"])
 
     def test_landing_players_reject_invalid_mode(self):
         response = self.client.get("/api/landing/players/?mode=invalid")

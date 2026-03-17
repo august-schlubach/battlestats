@@ -99,22 +99,22 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onBack, onSelectMember })
             </div>
 
             <DeferredSection
-                className="mt-8"
-                minHeight={240}
-                placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={240} />}
-            >
-                <div>
-                    <ClanBattleSeasons clanId={clan.clan_id} memberCount={clan.members_count} />
-                </div>
-            </DeferredSection>
-
-            <DeferredSection
                 className="mt-6 border-t border-gray-100 pt-4"
                 minHeight={96}
                 placeholder={<LoadingPanel label="Preparing clan members..." minHeight={96} />}
             >
                 <div>
                     <ClanMembers members={members} loading={membersLoading} error={membersError} onSelectMember={onSelectMember} />
+                </div>
+            </DeferredSection>
+
+            <DeferredSection
+                className="mt-8"
+                minHeight={240}
+                placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={240} />}
+            >
+                <div>
+                    <ClanBattleSeasons clanId={clan.clan_id} memberCount={clan.members_count} />
                 </div>
             </DeferredSection>
 

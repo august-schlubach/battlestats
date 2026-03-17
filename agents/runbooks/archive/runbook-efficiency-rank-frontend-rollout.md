@@ -19,7 +19,7 @@ Shipped results:
 Execution evidence:
 
 1. implementation: [client/app/components/PlayerDetail.tsx](/home/august/code/archive/battlestats/client/app/components/PlayerDetail.tsx)
-2. tests: [client/app/components/__tests__/PlayerDetail.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerDetail.test.tsx)
+2. tests: [client/app/components/**tests**/PlayerDetail.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerDetail.test.tsx)
 3. QA review: [agents/reviews/qa-efficiency-rank-frontend-rollout-review.md](/home/august/code/archive/battlestats/agents/reviews/qa-efficiency-rank-frontend-rollout-review.md)
 
 Focused validation command:

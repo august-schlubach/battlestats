@@ -51,7 +51,7 @@ The player detail surface is intentionally split across two columns.
 
 Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and limited the clan battle seasons table viewport to five visible rows before scroll.
 
-When the player payload includes a fresh published efficiency-rank snapshot for an Expert-ranked player, the header now renders a compact Battlestats sigma icon next to the player name. The underlying published tier data still covers `III`, `II`, `I`, and `E`, but the current visible header treatment is intentionally limited to Expert players and remains distinct from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
+When the player payload includes a fresh published efficiency-rank snapshot, the header renders the Battlestats sigma icon in the published `III`, `II`, `I`, or `E` tier color. When no published header tier exists but `efficiency_json` contains stored badge rows, the header still renders only the sigma icon by falling back to the best stored WG badge class. This header marker remains distinct from the lower `Efficiency Badges` section, which still represents the raw ship-level WG badge rows.
 
 The clan activity chart render path was also narrowed so icon-only hydration updates do not trigger full D3 redraws. That removes the flicker that previously appeared while ranked or clan-battle badges were hydrating in the background.
 

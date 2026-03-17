@@ -102,13 +102,12 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
             return;
         }
 
-        if (loading || error || seasons.length === 0) {
-            onSummaryChange(null);
+        if (loading || error) {
             return;
         }
 
         onSummaryChange(summary);
-    }, [error, loading, onSummaryChange, seasons.length, summary]);
+    }, [error, loading, onSummaryChange, summary]);
 
     return (
         <div>

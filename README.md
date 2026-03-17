@@ -219,7 +219,7 @@ the right column carries the broader profile and comparison views:
 
 the clan battle seasons table viewport is tuned to show five visible season rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
 
-when a fresh published efficiency-rank snapshot exists for an Expert-ranked player, the player header shows a compact Battlestats sigma icon next to the player name. the broader published rank tiers (`III`, `II`, `I`, `E`) still exist in the payload and tooltip copy, but the current header treatment only renders the visible icon for `E`. this remains intentionally separate from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
+when stored efficiency badge rows exist for a player, the player header shows a compact sigma marker in the corresponding tier color. when a fresh published Battlestats efficiency-rank snapshot exists, that published tier drives the same sigma marker; otherwise the header falls back to the best stored WG badge class from `efficiency_json`. this header marker remains distinct from the lower `Efficiency Badges` section, which still shows the underlying raw ship-level WG badge rows.
 
 the shared clan roster on both clan detail and player detail now uses the single `/api/fetch/clan_members/<clan_id>/` hydration path for efficiency-rank state. when roster rows are stale, the client shows a compact `Updating Battlestats rank icons...` status while the backend warms player efficiency data and republishes the tracked rank snapshot; once the refresh completes, only Expert-ranked clan members render the inline sigma icon without switching to per-player browser requests.
 
@@ -309,7 +309,7 @@ python manage.py backfill_achievements_data --only-missing
 
 this refreshes the raw `account/achievements/` payload onto each player and rebuilds curated `PlayerAchievementStat` rows from the Battlestats combat-achievement catalog. by default it targets visible players missing achievements data; add `--force`, `--player-id`, `--older-than-hours`, or `--include-hidden` to widen the scope.
 
-the player detail header now also renders a Battlestats efficiency-rank marker when the published player payload includes a fresh `efficiency_rank_tier`. this marker is distinct from the lower `Efficiency Badges` section: the header chip summarizes tracked-player rank from stored WG badge profile data, while the lower section still shows raw ship-level badge rows.
+the player detail header now renders a single sigma marker for efficiency. when the published player payload includes a fresh `efficiency_rank_tier`, the header uses the published `III`, `II`, `I`, or `E` tier color and tooltip. when no published header tier exists but `efficiency_json` contains stored badge rows, the header falls back to the best stored WG badge class and still renders only the sigma marker. this remains distinct from the lower `Efficiency Badges` section, which still shows the per-ship badge rows.
 
 for the ongoing ranked incremental refresh, use the queue-based command that keeps known ranked players fresh and samples likely discovery candidates without sweeping the entire player table every day:
 

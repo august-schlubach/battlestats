@@ -3,9 +3,21 @@ import { render, screen } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
 
 const mockUseClanMembers = jest.fn();
+let mockClanBattleSummary:
+    | { seasonsPlayed: number; totalBattles: number; overallWinRate: number; }
+    | null
+    | undefined;
 
 jest.mock('next/dynamic', () => {
-    return () => function MockDynamicComponent() {
+    return () => function MockDynamicComponent(props: { playerId?: number; onSummaryChange?: (summary: { seasonsPlayed: number; totalBattles: number; overallWinRate: number; } | null) => void }) {
+        const React = require('react');
+
+        React.useEffect(() => {
+            if (typeof props?.onSummaryChange === 'function' && props?.playerId && mockClanBattleSummary !== undefined) {
+                props.onSummaryChange(mockClanBattleSummary);
+            }
+        }, [props?.onSummaryChange, props?.playerId]);
+
         return null;
     };
 });
@@ -63,6 +75,7 @@ const basePlayer = {
     clan_name: '',
     clan_tag: null,
     clan_id: 0,
+    is_pve_player: false,
     verdict: null,
     randoms_json: [],
     efficiency_json: [],
@@ -72,6 +85,7 @@ const basePlayer = {
 describe('PlayerDetail efficiency-rank icon', () => {
     beforeEach(() => {
         mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
+        mockClanBattleSummary = undefined;
     });
 
     afterEach(() => {
@@ -95,7 +109,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(mockUseClanMembers).toHaveBeenCalledWith(4444);
     });
 
-    it('does not render the icon for non-Expert tracked-player ranks', () => {
+    it('renders the icon for non-Expert tracked-player ranks on player detail', () => {
         render(
             <PlayerDetail
                 player={{
@@ -112,10 +126,11 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/Battlestats efficiency rank Grade II: 81st percentile among eligible tracked players\. Based on stored WG badge profile for 120 tracked players\./i)).toBeInTheDocument();
+        expect(screen.getByText('Σ')).toBeInTheDocument();
     });
 
-    it('does not render the icon for legacy non-Expert fallback tiers', () => {
+    it('renders the icon for legacy non-Expert fallback tiers on player detail', () => {
         render(
             <PlayerDetail
                 player={{
@@ -131,7 +146,8 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
+        expect(screen.getByLabelText(/Battlestats efficiency rank Grade III: 62nd percentile among eligible tracked players\. Based on stored WG badge profile for 84 tracked players\./i)).toBeInTheDocument();
+        expect(screen.getByText('Σ')).toBeInTheDocument();
     });
 
     it('renders the sigma icon for Expert tracked-player ranks', () => {
@@ -191,5 +207,198 @@ describe('PlayerDetail efficiency-rank icon', () => {
         );
 
         expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
+    });
+
+    it('renders a sigma icon from the best stored WG efficiency badge when no published rank exists', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    efficiency_json: [
+                        {
+                            ship_id: 1001,
+                            ship_name: 'Fixture Cruiser',
+                            top_grade_class: 3,
+                            top_grade_label: 'II',
+                            badge_label: 'II',
+                        },
+                        {
+                            ship_id: 1002,
+                            ship_name: 'Fixture Destroyer',
+                            top_grade_class: 4,
+                            top_grade_label: 'III',
+                            badge_label: 'III',
+                        },
+                    ],
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        const badge = screen.getByLabelText(/Best stored WG Efficiency Badge: Grade II across 2 ships\./i);
+        expect(badge).toBeInTheDocument();
+        expect(badge).toHaveTextContent('Σ');
+        expect(screen.queryByText('II')).not.toBeInTheDocument();
+    });
+
+    it('renders only a sigma icon for stored Expert badge rows without a published rank', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    efficiency_json: [
+                        {
+                            ship_id: 1003,
+                            ship_name: 'Fixture Battleship',
+                            top_grade_class: 1,
+                            top_grade_label: 'Expert',
+                            badge_label: 'Expert',
+                        },
+                    ],
+                    efficiency_rank_tier: null,
+                    has_efficiency_rank_icon: false,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        const badge = screen.getByLabelText(/Best stored WG Efficiency Badge: Expert\./i);
+        expect(badge).toBeInTheDocument();
+        expect(badge).toHaveTextContent('Σ');
+        expect(screen.queryByText('Expert')).not.toBeInTheDocument();
+    });
+
+    it('renders the PvE robot from the shared backend flag even when PvE does not exceed PvP', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    total_battles: 14344,
+                    pvp_battles: 9549,
+                    is_pve_player: true,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText(/pve enjoyer/i)).toBeInTheDocument();
+    });
+
+    it('does not render the PvE robot when the shared backend flag is false', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    total_battles: 4951,
+                    pvp_battles: 464,
+                    is_pve_player: false,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByLabelText(/pve enjoyer/i)).not.toBeInTheDocument();
+    });
+
+    it('renders the clan battle shield immediately from cached player payload state', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_battle_header_eligible: true,
+                    clan_battle_header_total_battles: 48,
+                    clan_battle_header_seasons_played: 3,
+                    clan_battle_header_overall_win_rate: 56.3,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText(/clan battle enjoyer 56\.3 percent WR/i)).toBeInTheDocument();
+    });
+
+    it('updates the clan battle shield when fetched summary changes the rendered state', () => {
+        mockClanBattleSummary = {
+            seasonsPlayed: 4,
+            totalBattles: 67,
+            overallWinRate: 60.2,
+        };
+
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                    clan_battle_header_eligible: true,
+                    clan_battle_header_total_battles: 48,
+                    clan_battle_header_seasons_played: 3,
+                    clan_battle_header_overall_win_rate: 56.3,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText(/clan battle enjoyer 60\.2 percent WR/i)).toBeInTheDocument();
+    });
+
+    it('clears a cached clan battle shield when fetched summary is no longer eligible', () => {
+        mockClanBattleSummary = {
+            seasonsPlayed: 1,
+            totalBattles: 18,
+            overallWinRate: 60.2,
+        };
+
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                    clan_battle_header_eligible: true,
+                    clan_battle_header_total_battles: 48,
+                    clan_battle_header_seasons_played: 3,
+                    clan_battle_header_overall_win_rate: 56.3,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.queryByLabelText(/clan battle enjoyer/i)).not.toBeInTheDocument();
+    });
+
+    it('preserves cached clan battle shield state when the seasons component never reports a new summary', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                    clan_battle_header_eligible: true,
+                    clan_battle_header_total_battles: 48,
+                    clan_battle_header_seasons_played: 3,
+                    clan_battle_header_overall_win_rate: 56.3,
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText(/clan battle enjoyer 56\.3 percent WR/i)).toBeInTheDocument();
     });
 });

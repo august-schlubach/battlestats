@@ -132,6 +132,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
 
 - landing page:
   - clan/player discovery
+  - active player list modes now include `random`, `best`, and `sigma`; `sigma` ranks active visible players by fresh published `efficiency_rank_percentile`
   - landing clan table currently uses tighter spacing and no striped background fill
 - player detail currently includes:
   - summary cards
@@ -204,7 +205,7 @@ Future agent sessions need one high-density bootstrap file that explains the liv
   - `unknown`
 - clan PvE marker rule is runtime-derived:
   - `pve_battles = max(total_battles - pvp_battles, 0)`
-  - marker only if `total_battles > 500` and `pve_battles > pvp_battles`
+  - marker only if `total_battles > 500`, `pve_battles >= 1500`, and `pve_battles / total_battles >= 0.30`
 - clan leader marker rule:
   - prefer `leader_id`
   - fallback to case-insensitive `leader_name` matching when `leader_id` missing

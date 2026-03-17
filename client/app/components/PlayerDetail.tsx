@@ -10,6 +10,8 @@ import { getHighestRankedLeagueName, getRankedLeagueTooltip, getRankedLeagueColo
 import { useClanMembers } from './useClanMembers';
 import HiddenAccountIcon from './HiddenAccountIcon';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier } from './EfficiencyRankIcon';
+import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
+import type { EfficiencyRankTier } from './EfficiencyRankIcon';
 
 interface PlayerDetailProps {
     player: {
@@ -38,12 +40,18 @@ interface PlayerDetailProps {
         clan_tag: string | null;
         clan_id: number;
         is_clan_leader?: boolean;
+        is_pve_player?: boolean;
         highest_ranked_league?: RankedLeagueName | null;
         efficiency_rank_percentile?: number | null;
         efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
         has_efficiency_rank_icon?: boolean;
         efficiency_rank_population_size?: number | null;
         efficiency_rank_updated_at?: string | null;
+        clan_battle_header_eligible?: boolean;
+        clan_battle_header_total_battles?: number | null;
+        clan_battle_header_seasons_played?: number | null;
+        clan_battle_header_overall_win_rate?: number | null;
+        clan_battle_header_updated_at?: string | null;
         verdict: string | null;
         randoms_json?: Array<{
             ship_name?: string | null;
@@ -253,6 +261,120 @@ const HeaderClanBattleShield: React.FC<{ winRate: number }> = ({ winRate }) => (
     </span>
 );
 
+type EfficiencyBadgeHeaderState = {
+    tier: EfficiencyRankTier;
+    badgeTitle: string;
+    shipCount: number;
+};
+
+const HEADER_EFFICIENCY_BADGE_TITLES: Record<1 | 2 | 3 | 4, string> = {
+    1: 'Expert',
+    2: 'Grade I',
+    3: 'Grade II',
+    4: 'Grade III',
+};
+
+const HEADER_EFFICIENCY_BADGE_TIERS: Record<1 | 2 | 3 | 4, EfficiencyRankTier> = {
+    1: 'E',
+    2: 'I',
+    3: 'II',
+    4: 'III',
+};
+
+const getBestEfficiencyBadgeHeaderState = (
+    efficiencyRows: PlayerDetailProps['player']['efficiency_json'],
+): EfficiencyBadgeHeaderState | null => {
+    if (!Array.isArray(efficiencyRows) || efficiencyRows.length === 0) {
+        return null;
+    }
+
+    let bestBadgeClass: 1 | 2 | 3 | 4 | null = null;
+    let bestBadgeLabel: string | null = null;
+    let shipCount = 0;
+
+    for (const row of efficiencyRows) {
+        const badgeClass = Number(row?.top_grade_class || 0);
+        if (badgeClass < 1 || badgeClass > 4) {
+            continue;
+        }
+
+        shipCount += 1;
+
+        if (bestBadgeClass == null || badgeClass < bestBadgeClass) {
+            bestBadgeClass = badgeClass as 1 | 2 | 3 | 4;
+            bestBadgeLabel = (row?.top_grade_label || row?.badge_label || HEADER_EFFICIENCY_BADGE_LABELS[bestBadgeClass]).trim();
+        }
+    }
+
+    if (bestBadgeClass == null || shipCount === 0) {
+        return null;
+    }
+
+    return {
+        tier: HEADER_EFFICIENCY_BADGE_TIERS[bestBadgeClass],
+        badgeTitle: HEADER_EFFICIENCY_BADGE_TITLES[bestBadgeClass],
+        shipCount,
+    };
+};
+
+const buildClanBattleHeaderState = (
+    summary: PlayerClanBattleSummary | null | undefined,
+): PlayerClanBattleSummary | null => {
+    if (!summary) {
+        return null;
+    }
+
+    if (summary.totalBattles < 40 || summary.seasonsPlayed < 2) {
+        return null;
+    }
+
+    return {
+        seasonsPlayed: summary.seasonsPlayed,
+        totalBattles: summary.totalBattles,
+        overallWinRate: Number(summary.overallWinRate.toFixed(1)),
+    };
+};
+
+const getInitialClanBattleHeaderState = (
+    player: PlayerDetailProps['player'],
+): PlayerClanBattleSummary | null => {
+    if (!player.clan_battle_header_eligible) {
+        return null;
+    }
+
+    const totalBattles = Number(player.clan_battle_header_total_battles ?? 0);
+    const seasonsPlayed = Number(player.clan_battle_header_seasons_played ?? 0);
+    const overallWinRate = player.clan_battle_header_overall_win_rate;
+
+    if (!Number.isFinite(totalBattles) || !Number.isFinite(seasonsPlayed) || overallWinRate == null) {
+        return null;
+    }
+
+    return buildClanBattleHeaderState({
+        totalBattles,
+        seasonsPlayed,
+        overallWinRate,
+    });
+};
+
+const areEquivalentClanBattleHeaderStates = (
+    current: PlayerClanBattleSummary | null,
+    incoming: PlayerClanBattleSummary | null,
+): boolean => {
+    if (current === incoming) {
+        return true;
+    }
+
+    if (current == null || incoming == null) {
+        return current == null && incoming == null;
+    }
+
+    return (
+        current.overallWinRate === incoming.overallWinRate
+        && selectColorByWR(current.overallWinRate) === selectColorByWR(incoming.overallWinRate)
+    );
+};
+
 const PlayerDetail: React.FC<PlayerDetailProps> = ({
     player,
     onBack,
@@ -262,7 +384,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
 }) => {
     const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
     const pveBattles = Math.max(player.total_battles - player.pvp_battles, 0);
-    const isPveEnjoyer = player.total_battles > 500 && pveBattles > player.pvp_battles;
+    const isPveEnjoyer = Boolean(player.is_pve_player);
     const isSleepyPlayer = player.days_since_last_battle > 365;
     const rankedBattleCount = Array.isArray(player.ranked_json)
         ? player.ranked_json.reduce((total, row) => total + Math.max(row?.total_battles || 0, 0), 0)
@@ -272,13 +394,22 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     const efficiencyRankTier = !player.is_hidden
         ? resolveEfficiencyRankTier(player.efficiency_rank_tier, player.has_efficiency_rank_icon)
         : null;
-    const hasEfficiencyRankIcon = !player.is_hidden && efficiencyRankTier === 'E';
+    const bestEfficiencyBadge = !player.is_hidden
+        ? getBestEfficiencyBadgeHeaderState(player.efficiency_json)
+        : null;
+    const headerEfficiencyTier = efficiencyRankTier ?? bestEfficiencyBadge?.tier ?? null;
+    const headerEfficiencyDescription = efficiencyRankTier == null && bestEfficiencyBadge
+        ? (bestEfficiencyBadge.shipCount === 1
+            ? `Best stored WG Efficiency Badge: ${bestEfficiencyBadge.badgeTitle}.`
+            : `Best stored WG Efficiency Badge: ${bestEfficiencyBadge.badgeTitle} across ${bestEfficiencyBadge.shipCount} ships.`)
+        : undefined;
+    const hasEfficiencyRankIcon = !player.is_hidden && headerEfficiencyTier !== null;
     const hasKnownRankedGames = Array.isArray(player.ranked_json)
         ? player.ranked_json.some((row) => (row?.total_battles || 0) > 0)
         : true;
     const [showRankedHeatmap, setShowRankedHeatmap] = useState(hasKnownRankedGames);
-    const [clanBattleSummary, setClanBattleSummary] = useState<{ seasonsPlayed: number; totalBattles: number; overallWinRate: number; } | null>(null);
-    const isClanBattleEnjoyer = (clanBattleSummary?.totalBattles ?? 0) >= 40 && (clanBattleSummary?.seasonsPlayed ?? 0) >= 2;
+    const [clanBattleSummary, setClanBattleSummary] = useState<PlayerClanBattleSummary | null>(() => getInitialClanBattleHeaderState(player));
+    const isClanBattleEnjoyer = clanBattleSummary !== null;
     const { members: clanMembers, loading: clanMembersLoading, error: clanMembersError } = useClanMembers(player.clan_id || null);
 
     useEffect(() => {
@@ -286,8 +417,14 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     }, [hasKnownRankedGames, player.player_id]);
 
     useEffect(() => {
-        setClanBattleSummary(null);
-    }, [player.player_id]);
+        setClanBattleSummary(getInitialClanBattleHeaderState(player));
+    }, [
+        player.player_id,
+        player.clan_battle_header_eligible,
+        player.clan_battle_header_total_battles,
+        player.clan_battle_header_seasons_played,
+        player.clan_battle_header_overall_win_rate,
+    ]);
 
     useEffect(() => {
         if (shareState === 'idle') {
@@ -309,6 +446,18 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
             console.error('Failed to copy player URL:', error);
             setShareState('failed');
         }
+    };
+
+    const handleClanBattleSummaryChange = (nextSummary: PlayerClanBattleSummary | null) => {
+        const nextHeaderState = buildClanBattleHeaderState(nextSummary);
+
+        setClanBattleSummary((current) => {
+            if (areEquivalentClanBattleHeaderStates(current, nextHeaderState)) {
+                return current;
+            }
+
+            return nextHeaderState;
+        });
     };
 
     return (
@@ -365,7 +514,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     placeholder={<LoadingPanel label="Preparing clan battle seasons..." minHeight={180} />}
                                 >
                                     <div id="player_clan_battle_seasons_container">
-                                        <PlayerClanBattleSeasons playerId={player.player_id} onSummaryChange={setClanBattleSummary} />
+                                        <PlayerClanBattleSeasons playerId={player.player_id} onSummaryChange={handleClanBattleSummaryChange} />
                                     </div>
                                 </DeferredSection>
                             ) : null}
@@ -455,7 +604,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {isSleepyPlayer ? <HeaderSleepyBed /> : null}
                                 {isRankedEnjoyer ? <HeaderRankedStar league={highestRankedLeague} /> : null}
                                 {isClanBattleEnjoyer && clanBattleSummary ? <HeaderClanBattleShield winRate={clanBattleSummary.overallWinRate} /> : null}
-                                {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
+                                {hasEfficiencyRankIcon && headerEfficiencyTier ? <EfficiencyRankIcon tier={headerEfficiencyTier} percentile={efficiencyRankTier ? player.efficiency_rank_percentile : null} populationSize={efficiencyRankTier ? player.efficiency_rank_population_size : null} size="header" descriptionOverride={headerEfficiencyDescription} /> : null}
                             </div>
                             <div className="flex items-center gap-2 self-start">
                                 <button
