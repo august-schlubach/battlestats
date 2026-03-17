@@ -4,7 +4,7 @@ _Reviewed: 2026-03-15_
 
 ## Scope Reviewed
 
-- [agents/runbooks/runbook-player-efficiency-badges-story.md](agents/runbooks/runbook-player-efficiency-badges-story.md)
+- [agents/runbooks/archive/runbook-player-efficiency-badges-story.md](agents/runbooks/archive/runbook-player-efficiency-badges-story.md)
 - [agents/work-items/efficiency-badges-player-story-spec.md](agents/work-items/efficiency-badges-player-story-spec.md)
 
 ## QA Verdict

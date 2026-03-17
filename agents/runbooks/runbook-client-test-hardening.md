@@ -2,6 +2,8 @@
 
 _Last updated: 2026-03-16_
 
+_Status: Active maintenance reference_
+
 ## Purpose
 
 Capture the current client-side test baseline, the highest-risk uncovered areas, and the next recommended steps to make the Next.js frontend reliable enough for CI/CD and production deployment.

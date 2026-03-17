@@ -36,6 +36,8 @@ The header search box only mirrors explicit search query usage. Visiting a playe
 
 Both routed detail headers now include a `Share` button that copies the current player or clan URL.
 
+Those routed detail views also emit first-party `entity_detail_view` analytics after a successful player or clan load. The canonical ingest path is `/api/analytics/entity-view/`, and optional GA4 emission is enabled only when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is present.
+
 Hidden accounts now use a shared mask icon treatment across suggestions, landing lists, explorer rows, clan members, and player detail headers.
 
 ## Player Detail Notes
@@ -46,6 +48,8 @@ The player detail surface is intentionally split across two columns.
 - The right column focuses on broader comparison views: summary cards, top ships, ranked sections, tier-vs-type profile, and the ship-type chart.
 
 Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and limited the clan battle seasons table viewport to five visible rows before scroll.
+
+When the player payload includes a fresh published efficiency-rank snapshot, the header now renders a Battlestats `BST` rank chip with the published tier. This header chip is intentionally distinct from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
 
 The clan activity chart render path was also narrowed so icon-only hydration updates do not trigger full D3 redraws. That removes the flicker that previously appeared while ranked or clan-battle badges were hydrating in the background.
 
@@ -63,6 +67,26 @@ npm run test:ci
 ```
 
 Current coverage is intentionally focused on route loaders, route helpers, header search behavior, compact efficiency badge rendering/sorting, and clan-chart redraw signatures.
+
+Focused route and analytics checks include:
+
+```bash
+npm test -- --runInBand app/components/__tests__/PlayerRouteView.test.tsx app/components/__tests__/ClanRouteView.test.tsx app/lib/__tests__/visitAnalytics.test.ts
+```
+
+The client also has a focused player-detail regression for the Battlestats efficiency-rank header chip:
+
+```bash
+npm test -- --runInBand app/components/__tests__/PlayerDetail.test.tsx
+```
+
+## Analytics
+
+The client-side analytics helper lives in `app/lib/visitAnalytics.ts`.
+
+- It posts first-party page-view events for routed player and clan detail pages.
+- It is fire-and-forget and should not block route rendering.
+- It optionally emits a parallel GA4 `entity_detail_view` event when `NEXT_PUBLIC_GA_MEASUREMENT_ID` is configured and `window.gtag` is available.
 
 ## Font Awesome
 

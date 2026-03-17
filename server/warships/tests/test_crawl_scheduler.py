@@ -74,7 +74,7 @@ class ClanCrawlSchedulerTests(TestCase):
 
         task = PeriodicTask.objects.get(name="daily-clan-crawl")
         self.assertEqual(task.task, "warships.tasks.crawl_all_clans_task")
-        self.assertEqual(task.kwargs, '{"resume": true}')
+        self.assertEqual(task.kwargs, '{"resume": false}')
         self.assertTrue(task.enabled)
 
         schedule = CrontabSchedule.objects.get(id=task.crontab_id)
@@ -114,13 +114,12 @@ class ClanCrawlSchedulerTests(TestCase):
         self.assertEqual(warm_schedule.every, 30)
         self.assertEqual(warm_schedule.period, IntervalSchedule.MINUTES)
 
-    def test_watchdog_schedules_crawl_when_not_running(self):
+    def test_watchdog_stays_idle_when_not_running(self):
         with patch("warships.tasks.crawl_all_clans_task.delay") as mock_delay:
             result = ensure_crawl_all_clans_running_task.run()
 
-        self.assertEqual(
-            result, {"status": "scheduled", "reason": "not-running"})
-        mock_delay.assert_called_once_with(resume=True)
+        self.assertEqual(result, {"status": "skipped", "reason": "idle"})
+        mock_delay.assert_not_called()
 
     def test_watchdog_skips_when_crawl_has_fresh_heartbeat(self):
         cache.add(CLAN_CRAWL_LOCK_KEY, "existing-run", timeout=60)
@@ -327,7 +326,7 @@ class RefreshTaskLockTests(TestCase):
 
         task = PeriodicTask.objects.get(name="daily-clan-crawl")
         self.assertEqual(task.task, "warships.tasks.crawl_all_clans_task")
-        self.assertEqual(task.kwargs, '{"resume": true}')
+        self.assertEqual(task.kwargs, '{"resume": false}')
 
         watchdog_task = PeriodicTask.objects.get(name="clan-crawl-watchdog")
         self.assertEqual(watchdog_task.task,

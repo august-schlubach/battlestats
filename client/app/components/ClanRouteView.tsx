@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import type { LandingClan } from './entityTypes';
 import { buildPlayerPath, parseClanIdFromRouteSegment } from '../lib/entityRoutes';
+import { trackEntityDetailView } from '../lib/visitAnalytics';
 
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -67,6 +68,7 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
     const [clanData, setClanData] = useState<LandingClan | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
+    const trackedClanIdRef = useRef<number | null>(null);
 
     useEffect(() => {
         if (clanId == null) {
@@ -108,6 +110,25 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
             cancelled = true;
         };
     }, [clanId]);
+
+    useEffect(() => {
+        if (!clanData) {
+            trackedClanIdRef.current = null;
+            return;
+        }
+
+        if (trackedClanIdRef.current === clanData.clan_id) {
+            return;
+        }
+
+        trackedClanIdRef.current = clanData.clan_id;
+        void trackEntityDetailView({
+            entityType: 'clan',
+            entityId: clanData.clan_id,
+            entityName: clanData.name,
+            entitySlug: clanSlug,
+        });
+    }, [clanData, clanSlug]);
 
     if (isLoading) {
         return <LoadingPanel label="Loading clan profile..." minHeight={280} />;

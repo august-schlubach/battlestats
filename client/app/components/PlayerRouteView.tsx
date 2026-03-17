@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import PlayerDetail from './PlayerDetail';
 import type { PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
+import { trackEntityDetailView } from '../lib/visitAnalytics';
 
 
 const LoadingPanel: React.FC<{ label: string; minHeight?: number }> = ({ label, minHeight = 220 }) => (
@@ -44,6 +45,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
     const [playerData, setPlayerData] = useState<PlayerData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
+    const trackedPlayerIdRef = useRef<number | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -76,6 +78,25 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             cancelled = true;
         };
     }, [playerName]);
+
+    useEffect(() => {
+        if (!playerData) {
+            trackedPlayerIdRef.current = null;
+            return;
+        }
+
+        if (trackedPlayerIdRef.current === playerData.player_id) {
+            return;
+        }
+
+        trackedPlayerIdRef.current = playerData.player_id;
+        void trackEntityDetailView({
+            entityType: 'player',
+            entityId: playerData.player_id,
+            entityName: playerData.name,
+            entitySlug: playerName,
+        });
+    }, [playerData, playerName]);
 
     if (isLoading) {
         return <LoadingPanel label="Loading player profile..." minHeight={280} />;

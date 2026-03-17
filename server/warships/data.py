@@ -1,3 +1,4 @@
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Optional, Iterable
 from datetime import datetime, timezone, timedelta, date
@@ -5,12 +6,15 @@ import logging
 import math
 import os
 from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Count, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone as django_timezone
 from warships.models import Player, Snapshot, Clan, PlayerExplorerSummary, Ship
+from warships.models import PlayerAchievementStat
+from warships.achievements_catalog import get_achievement_catalog_entry
 from warships.api.ships import _fetch_ship_stats_for_player, _fetch_ship_info, _fetch_ranked_ship_stats_for_player, _fetch_efficiency_badges_for_player, build_ship_chart_name
-from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info
+from warships.api.players import _fetch_snapshot_data, _fetch_player_personal_data, _fetch_ranked_account_info, _fetch_player_achievements
 from warships.api.clans import _fetch_clan_data, _fetch_clan_member_ids, _fetch_clan_membership_for_player, \
     _fetch_clan_battle_seasons_info, _fetch_clan_battle_season_stats
 from warships.tasks import update_tiers_data_task, update_type_data_task
@@ -55,11 +59,35 @@ CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
 CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
+PLAYER_ACHIEVEMENTS_STALE_AFTER = timedelta(hours=24)
 EFFICIENCY_BADGE_CLASS_LABELS = {
     1: 'Expert',
     2: 'Grade I',
     3: 'Grade II',
     4: 'Grade III',
+}
+EFFICIENCY_RANK_MIN_PVP_BATTLES = 200
+EFFICIENCY_RANK_MIN_SHIP_BATTLES = 5
+EFFICIENCY_RANK_MIN_ELIGIBLE_SHIPS = 5
+EFFICIENCY_RANK_MAX_BADGE_POINTS_PER_SHIP = 8
+EFFICIENCY_RANK_SHRINKAGE_K = 12.0
+EFFICIENCY_RANK_UNMAPPED_SHARE_LIMIT = 0.10
+EFFICIENCY_RANK_SNAPSHOT_STALE_AFTER = timedelta(hours=48)
+EFFICIENCY_RANK_MIN_VISIBLE_PERCENTILE = 0.50
+EFFICIENCY_RANK_GRADE_II_PERCENTILE = 0.75
+EFFICIENCY_RANK_GRADE_I_PERCENTILE = 0.90
+EFFICIENCY_RANK_EXPERT_PERCENTILE = 0.97
+EFFICIENCY_BADGE_CLASS_POINTS = {
+    1: 8,
+    2: 4,
+    3: 2,
+    4: 1,
+}
+EFFICIENCY_RANK_TIER_LABELS = {
+    'E': 'Expert',
+    'I': 'Grade I',
+    'II': 'Grade II',
+    'III': 'Grade III',
 }
 CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_RANKED_HYDRATION_MAX_IN_FLIGHT', '8')))
@@ -233,6 +261,152 @@ def update_player_efficiency_data(player: Player, force_refresh: bool = False) -
     player.efficiency_updated_at = django_timezone.now()
     player.save(update_fields=['efficiency_json', 'efficiency_updated_at'])
     return rows
+
+
+def player_achievements_need_refresh(
+    player: Player,
+    stale_after: timedelta = PLAYER_ACHIEVEMENTS_STALE_AFTER,
+) -> bool:
+    updated_at = player.achievements_updated_at
+    if player.achievements_json is None or updated_at is None:
+        return True
+
+    return django_timezone.now() - updated_at >= stale_after
+
+
+def _coerce_achievement_count(value: Any) -> int:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return count if count > 0 else 0
+
+
+def _looks_like_combat_achievement_code(code: str) -> bool:
+    lowered = str(code or '').casefold()
+    if not lowered.startswith('pch'):
+        return False
+
+    excluded_markers = ('campaign', 'album', 'pve',
+                        'twitch', 'dockyard', 'collection')
+    return not any(marker in lowered for marker in excluded_markers)
+
+
+def normalize_player_achievement_rows(raw_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if not isinstance(raw_payload, dict):
+        return []
+
+    battle_map = raw_payload.get('battle')
+    if not isinstance(battle_map, dict):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    unknown_combat_like_codes: list[str] = []
+
+    for code, raw_count in battle_map.items():
+        count = _coerce_achievement_count(raw_count)
+        if count <= 0:
+            continue
+
+        entry = get_achievement_catalog_entry(code)
+        if entry is None:
+            if _looks_like_combat_achievement_code(code):
+                unknown_combat_like_codes.append(code)
+            continue
+
+        if not entry.get('enabled_for_player_surface'):
+            continue
+
+        if entry.get('kind') != 'combat':
+            continue
+
+        rows.append({
+            'achievement_code': str(entry['code']),
+            'achievement_slug': str(entry['slug']),
+            'achievement_label': str(entry['label']),
+            'category': str(entry['category']),
+            'count': count,
+            'source_kind': 'battle',
+        })
+
+    if unknown_combat_like_codes:
+        logging.info(
+            'Ignoring unknown combat-like achievement codes for curated lane: %s',
+            ', '.join(sorted(set(unknown_combat_like_codes))),
+        )
+
+    rows.sort(key=lambda row: (
+        row['achievement_label'], row['achievement_code']))
+    return rows
+
+
+def update_achievements_data(player_id: int, force_refresh: bool = False) -> list[dict[str, Any]]:
+    player = Player.objects.get(player_id=player_id)
+
+    if player.is_hidden:
+        logging.info(
+            'Skipping achievements refresh for hidden player_id=%s; retaining stored data.',
+            player.player_id,
+        )
+        return list(player.achievement_stats.order_by('achievement_slug').values(
+            'achievement_code',
+            'achievement_slug',
+            'achievement_label',
+            'category',
+            'count',
+            'source_kind',
+        ))
+
+    if not force_refresh and not player_achievements_need_refresh(player):
+        return list(player.achievement_stats.order_by('achievement_slug').values(
+            'achievement_code',
+            'achievement_slug',
+            'achievement_label',
+            'category',
+            'count',
+            'source_kind',
+        ))
+
+    raw_payload = _fetch_player_achievements(player.player_id)
+    if raw_payload is None:
+        logging.info(
+            'Skipping achievements refresh because upstream returned no payload for player_id=%s',
+            player.player_id,
+        )
+        return list(player.achievement_stats.order_by('achievement_slug').values(
+            'achievement_code',
+            'achievement_slug',
+            'achievement_label',
+            'category',
+            'count',
+            'source_kind',
+        ))
+
+    normalized_rows = normalize_player_achievement_rows(raw_payload)
+    refreshed_at = django_timezone.now()
+
+    with transaction.atomic():
+        player.achievements_json = raw_payload
+        player.achievements_updated_at = refreshed_at
+        player.save(update_fields=[
+                    'achievements_json', 'achievements_updated_at'])
+
+        PlayerAchievementStat.objects.filter(player=player).delete()
+        PlayerAchievementStat.objects.bulk_create([
+            PlayerAchievementStat(
+                player=player,
+                achievement_code=row['achievement_code'],
+                achievement_slug=row['achievement_slug'],
+                achievement_label=row['achievement_label'],
+                category=row['category'],
+                count=row['count'],
+                source_kind=row['source_kind'],
+                refreshed_at=refreshed_at,
+            )
+            for row in normalized_rows
+        ])
+
+    return normalized_rows
 
 
 def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
@@ -467,6 +641,419 @@ def _coerce_battle_rows(battles_rows: Any) -> list[dict]:
         return []
 
     return [row for row in battles_rows if isinstance(row, dict)]
+
+
+def _coerce_efficiency_rows(efficiency_rows: Any) -> list[dict]:
+    if not isinstance(efficiency_rows, list):
+        return []
+
+    return [row for row in efficiency_rows if isinstance(row, dict)]
+
+
+def _eligible_efficiency_ship_count(battle_rows: Any) -> int:
+    eligible_ship_count = 0
+
+    for row in _coerce_battle_rows(battle_rows):
+        try:
+            ship_tier = int(row.get('ship_tier') or 0)
+            pvp_battles = int(row.get('pvp_battles', 0) or 0)
+        except (TypeError, ValueError):
+            continue
+
+        if ship_tier < 5 or pvp_battles < EFFICIENCY_RANK_MIN_SHIP_BATTLES:
+            continue
+
+        eligible_ship_count += 1
+
+    return eligible_ship_count
+
+
+def _build_efficiency_rank_inputs(
+    player: Player,
+    battle_rows: Any = None,
+    efficiency_rows: Any = None,
+) -> dict[str, Any]:
+    if player.is_hidden:
+        return {
+            'eligible_ship_count': None,
+            'efficiency_badge_rows_total': None,
+            'badge_rows_unmapped': None,
+            'expert_count': None,
+            'grade_i_count': None,
+            'grade_ii_count': None,
+            'grade_iii_count': None,
+            'raw_badge_points': None,
+            'normalized_badge_strength': None,
+        }
+
+    normalized_battle_rows = _coerce_battle_rows(
+        player.battles_json if battle_rows is None else battle_rows)
+    normalized_efficiency_rows = _coerce_efficiency_rows(
+        player.efficiency_json if efficiency_rows is None else efficiency_rows)
+
+    eligible_ship_count = _eligible_efficiency_ship_count(
+        normalized_battle_rows)
+    badge_counts: Counter[int] = Counter()
+    badge_rows_total = 0
+    badge_rows_unmapped = 0
+
+    for row in normalized_efficiency_rows:
+        try:
+            badge_class = int(row.get('top_grade_class') or 0)
+        except (TypeError, ValueError):
+            continue
+
+        if badge_class not in EFFICIENCY_BADGE_CLASS_POINTS:
+            continue
+
+        badge_rows_total += 1
+
+        try:
+            ship_tier = int(row.get('ship_tier'))
+        except (TypeError, ValueError):
+            badge_rows_unmapped += 1
+            continue
+
+        if ship_tier < 5:
+            continue
+
+        badge_counts[badge_class] += 1
+
+    raw_badge_points = sum(
+        EFFICIENCY_BADGE_CLASS_POINTS[badge_class] * count
+        for badge_class, count in badge_counts.items()
+    )
+
+    normalized_badge_strength = None
+    if eligible_ship_count > 0:
+        normalized_badge_strength = round(
+            raw_badge_points / (eligible_ship_count *
+                                EFFICIENCY_RANK_MAX_BADGE_POINTS_PER_SHIP),
+            6,
+        )
+
+    return {
+        'eligible_ship_count': eligible_ship_count,
+        'efficiency_badge_rows_total': badge_rows_total,
+        'badge_rows_unmapped': badge_rows_unmapped,
+        'expert_count': badge_counts.get(1, 0),
+        'grade_i_count': badge_counts.get(2, 0),
+        'grade_ii_count': badge_counts.get(3, 0),
+        'grade_iii_count': badge_counts.get(4, 0),
+        'raw_badge_points': raw_badge_points,
+        'normalized_badge_strength': normalized_badge_strength,
+    }
+
+
+def _efficiency_rank_inputs_match_summary(player: Player, explorer_summary: PlayerExplorerSummary) -> bool:
+    expected_inputs = _build_efficiency_rank_inputs(player)
+
+    return (
+        explorer_summary.eligible_ship_count == expected_inputs['eligible_ship_count'] and
+        explorer_summary.efficiency_badge_rows_total == expected_inputs['efficiency_badge_rows_total'] and
+        explorer_summary.badge_rows_unmapped == expected_inputs['badge_rows_unmapped'] and
+        explorer_summary.expert_count == expected_inputs['expert_count'] and
+        explorer_summary.grade_i_count == expected_inputs['grade_i_count'] and
+        explorer_summary.grade_ii_count == expected_inputs['grade_ii_count'] and
+        explorer_summary.grade_iii_count == expected_inputs['grade_iii_count'] and
+        explorer_summary.raw_badge_points == expected_inputs['raw_badge_points'] and
+        explorer_summary.normalized_badge_strength == expected_inputs['normalized_badge_strength']
+    )
+
+
+def _efficiency_rank_snapshot_is_fresh(
+    player: Player,
+    explorer_summary: Optional[PlayerExplorerSummary],
+    stale_after: timedelta = EFFICIENCY_RANK_SNAPSHOT_STALE_AFTER,
+) -> bool:
+    if player.is_hidden or explorer_summary is None:
+        return False
+
+    updated_at = explorer_summary.efficiency_rank_updated_at
+    if updated_at is None:
+        return False
+
+    if django_timezone.now() - updated_at >= stale_after:
+        return False
+
+    latest_input_updated_at = max(
+        (timestamp for timestamp in (player.efficiency_updated_at,
+         player.battles_updated_at) if timestamp is not None),
+        default=None,
+    )
+    if latest_input_updated_at is not None and latest_input_updated_at > updated_at:
+        return False
+
+    return True
+
+
+def _get_published_efficiency_rank_payload(player: Player) -> dict[str, Any]:
+    explorer_summary = getattr(player, 'explorer_summary', None)
+    if not _efficiency_rank_snapshot_is_fresh(player, explorer_summary):
+        return {
+            'efficiency_rank_percentile': None,
+            'efficiency_rank_tier': None,
+            'has_efficiency_rank_icon': False,
+            'efficiency_rank_population_size': None,
+            'efficiency_rank_updated_at': None,
+        }
+
+    return {
+        'efficiency_rank_percentile': explorer_summary.efficiency_rank_percentile,
+        'efficiency_rank_tier': explorer_summary.efficiency_rank_tier,
+        'has_efficiency_rank_icon': bool(explorer_summary.has_efficiency_rank_icon),
+        'efficiency_rank_population_size': explorer_summary.efficiency_rank_population_size,
+        'efficiency_rank_updated_at': explorer_summary.efficiency_rank_updated_at,
+    }
+
+
+def _efficiency_rank_tier_from_percentile(percentile: Optional[float]) -> Optional[str]:
+    if percentile is None:
+        return None
+    if percentile >= EFFICIENCY_RANK_EXPERT_PERCENTILE:
+        return 'E'
+    if percentile >= EFFICIENCY_RANK_GRADE_I_PERCENTILE:
+        return 'I'
+    if percentile >= EFFICIENCY_RANK_GRADE_II_PERCENTILE:
+        return 'II'
+    if percentile >= EFFICIENCY_RANK_MIN_VISIBLE_PERCENTILE:
+        return 'III'
+    return None
+
+
+def _efficiency_rank_eligibility_reason(player: Player, explorer_summary: PlayerExplorerSummary) -> Optional[str]:
+    total_badge_rows = int(explorer_summary.efficiency_badge_rows_total or 0)
+    badge_rows_unmapped = int(explorer_summary.badge_rows_unmapped or 0)
+
+    if player.is_hidden:
+        return 'hidden'
+    if (player.pvp_battles or 0) < EFFICIENCY_RANK_MIN_PVP_BATTLES:
+        return 'low_pvp_battles'
+    if explorer_summary.eligible_ship_count is None:
+        return 'missing_denominator'
+    if (explorer_summary.eligible_ship_count or 0) < EFFICIENCY_RANK_MIN_ELIGIBLE_SHIPS:
+        return 'too_few_eligible_ships'
+    if total_badge_rows <= 0:
+        return 'no_badge_rows'
+    if explorer_summary.normalized_badge_strength is None:
+        return 'missing_strength'
+    if total_badge_rows > 0 and (badge_rows_unmapped / total_badge_rows) > EFFICIENCY_RANK_UNMAPPED_SHARE_LIMIT:
+        return 'unmapped_badge_gate'
+
+    return None
+
+
+def _calculate_shrunken_efficiency_strength(
+    normalized_badge_strength: float,
+    eligible_ship_count: int,
+    field_mean_strength: float,
+    shrinkage_k: float = EFFICIENCY_RANK_SHRINKAGE_K,
+) -> float:
+    if eligible_ship_count <= 0:
+        return field_mean_strength
+
+    weight = eligible_ship_count / (eligible_ship_count + shrinkage_k)
+    shrunken_strength = (
+        weight * normalized_badge_strength +
+        ((1.0 - weight) * field_mean_strength)
+    )
+    return round(shrunken_strength, 6)
+
+
+def _score_percentile_from_rank(average_rank: float, population_size: int) -> float:
+    if population_size <= 1:
+        return 1.0
+
+    return round((population_size - average_rank) / (population_size - 1), 6)
+
+
+def _interpolate_quantile(sorted_values: list[float], percentile: float) -> Optional[float]:
+    if not sorted_values:
+        return None
+
+    if len(sorted_values) == 1:
+        return round(sorted_values[0], 6)
+
+    position = min(max(percentile, 0.0), 1.0) * (len(sorted_values) - 1)
+    lower_index = int(math.floor(position))
+    upper_index = int(math.ceil(position))
+    lower_value = sorted_values[lower_index]
+    upper_value = sorted_values[upper_index]
+    if lower_index == upper_index:
+        return round(lower_value, 6)
+
+    fraction = position - lower_index
+    return round(lower_value + ((upper_value - lower_value) * fraction), 6)
+
+
+def recompute_efficiency_rank_snapshot(
+    *,
+    player_limit: int = 0,
+    skip_refresh: bool = False,
+    publish_partial: bool = False,
+) -> dict[str, Any]:
+    refresh_queryset = Player.objects.order_by('id')
+    if player_limit > 0:
+        refresh_queryset = refresh_queryset[:player_limit]
+
+    if not skip_refresh:
+        for player in refresh_queryset.iterator(chunk_size=100):
+            refresh_player_explorer_summary(player)
+
+    ranking_queryset = Player.objects.select_related('explorer_summary').only(
+        'id',
+        'player_id',
+        'is_hidden',
+        'pvp_battles',
+        'efficiency_updated_at',
+        'battles_updated_at',
+        'explorer_summary__id',
+        'explorer_summary__player_id',
+        'explorer_summary__eligible_ship_count',
+        'explorer_summary__efficiency_badge_rows_total',
+        'explorer_summary__badge_rows_unmapped',
+        'explorer_summary__normalized_badge_strength',
+    ).order_by('id')
+    if player_limit > 0:
+        ranking_queryset = ranking_queryset[:player_limit]
+
+    suppression_counts: Counter[str] = Counter()
+    candidates: list[dict[str, Any]] = []
+    processed_player_ids: list[int] = []
+
+    for player in ranking_queryset.iterator(chunk_size=500):
+        processed_player_ids.append(player.id)
+        explorer_summary = getattr(player, 'explorer_summary', None)
+        if explorer_summary is None:
+            if skip_refresh:
+                refresh_player_explorer_summary(player)
+                player.refresh_from_db()
+                explorer_summary = getattr(player, 'explorer_summary', None)
+        if explorer_summary is None:
+            suppression_counts['missing_summary'] += 1
+            continue
+
+        reason = _efficiency_rank_eligibility_reason(player, explorer_summary)
+        if reason is not None:
+            suppression_counts[reason] += 1
+            continue
+
+        candidates.append({
+            'summary_id': explorer_summary.id,
+            'player_id': explorer_summary.player_id,
+            'eligible_ship_count': int(explorer_summary.eligible_ship_count or 0),
+            'normalized_strength': float(explorer_summary.normalized_badge_strength or 0.0),
+        })
+
+    population_size = len(candidates)
+    field_mean_strength = round(
+        sum(candidate['normalized_strength']
+            for candidate in candidates) / population_size,
+        6,
+    ) if population_size else 0.0
+
+    for candidate in candidates:
+        candidate['shrunken_strength'] = _calculate_shrunken_efficiency_strength(
+            candidate['normalized_strength'],
+            candidate['eligible_ship_count'],
+            field_mean_strength,
+        )
+
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda item: (-item['shrunken_strength'], item['player_id']),
+    )
+
+    current_rank = 1
+    index = 0
+    qualifying_count = 0
+    tier_counts: Counter[str] = Counter()
+    while index < len(sorted_candidates):
+        score = sorted_candidates[index]['shrunken_strength']
+        group_end = index
+        while group_end < len(sorted_candidates) and round(sorted_candidates[group_end]['shrunken_strength'], 12) == round(score, 12):
+            group_end += 1
+
+        average_rank = current_rank + ((group_end - index) - 1) / 2.0
+        percentile = _score_percentile_from_rank(average_rank, population_size)
+        tier = _efficiency_rank_tier_from_percentile(percentile)
+        has_icon = tier is not None
+
+        for candidate_index in range(index, group_end):
+            sorted_candidates[candidate_index]['efficiency_rank_percentile'] = percentile
+            sorted_candidates[candidate_index]['efficiency_rank_tier'] = tier
+            sorted_candidates[candidate_index]['has_efficiency_rank_icon'] = has_icon
+            if has_icon:
+                qualifying_count += 1
+                if tier is not None:
+                    tier_counts[tier] += 1
+
+        current_rank += group_end - index
+        index = group_end
+
+    snapshot_updated_at = django_timezone.now() if population_size else None
+
+    publish_applied = player_limit <= 0 or publish_partial
+    if publish_applied:
+        with transaction.atomic():
+            PlayerExplorerSummary.objects.filter(player__id__in=processed_player_ids).update(
+                shrunken_efficiency_strength=None,
+                efficiency_rank_percentile=None,
+                efficiency_rank_tier=None,
+                has_efficiency_rank_icon=False,
+                efficiency_rank_population_size=None,
+                efficiency_rank_updated_at=snapshot_updated_at,
+            )
+
+            if sorted_candidates:
+                PlayerExplorerSummary.objects.bulk_update(
+                    [
+                        PlayerExplorerSummary(
+                            id=candidate['summary_id'],
+                            shrunken_efficiency_strength=candidate['shrunken_strength'],
+                            efficiency_rank_percentile=candidate['efficiency_rank_percentile'],
+                            efficiency_rank_tier=candidate['efficiency_rank_tier'],
+                            has_efficiency_rank_icon=candidate['has_efficiency_rank_icon'],
+                            efficiency_rank_population_size=population_size,
+                            efficiency_rank_updated_at=snapshot_updated_at,
+                        )
+                        for candidate in sorted_candidates
+                    ],
+                    fields=[
+                        'shrunken_efficiency_strength',
+                        'efficiency_rank_percentile',
+                        'efficiency_rank_tier',
+                        'has_efficiency_rank_icon',
+                        'efficiency_rank_population_size',
+                        'efficiency_rank_updated_at',
+                    ],
+                    batch_size=500,
+                )
+
+    sorted_strengths = sorted(candidate['shrunken_strength']
+                              for candidate in sorted_candidates)
+    return {
+        'publish_applied': publish_applied,
+        'partial_population': player_limit > 0,
+        'population_size': population_size,
+        'qualifying_count': qualifying_count,
+        'qualifying_share': round(qualifying_count / population_size, 6) if population_size else 0.0,
+        'field_mean_strength': field_mean_strength,
+        'tier_thresholds': {
+            'III': EFFICIENCY_RANK_MIN_VISIBLE_PERCENTILE,
+            'II': EFFICIENCY_RANK_GRADE_II_PERCENTILE,
+            'I': EFFICIENCY_RANK_GRADE_I_PERCENTILE,
+            'E': EFFICIENCY_RANK_EXPERT_PERCENTILE,
+        },
+        'tier_counts': dict(sorted(tier_counts.items())),
+        'suppressed_counts': dict(sorted(suppression_counts.items())),
+        'distribution': {
+            'p50': _interpolate_quantile(sorted_strengths, 0.50),
+            'p67': _interpolate_quantile(sorted_strengths, 0.67),
+            'p75': _interpolate_quantile(sorted_strengths, 0.75),
+            'p90': _interpolate_quantile(sorted_strengths, 0.90),
+        },
+    }
 
 
 def _kill_ratio_tier_weight(ship_tier: Any) -> float:
@@ -987,6 +1574,8 @@ def _explorer_summary_needs_refresh(player: Player) -> bool:
         return True
     if explorer_summary.player_score != expected_player_score:
         return True
+    if not _efficiency_rank_inputs_match_summary(player, explorer_summary):
+        return True
     if explorer_summary.ranked_seasons_participated is None and isinstance(player.ranked_json, list):
         return True
     if explorer_summary.battles_last_29_days is None and isinstance(player.activity_json, list):
@@ -1027,6 +1616,15 @@ def build_player_summary(
         'ships_played_total': None,
         'ship_type_spread': None,
         'tier_spread': None,
+        'eligible_ship_count': None,
+        'efficiency_badge_rows_total': None,
+        'badge_rows_unmapped': None,
+        'expert_count': None,
+        'grade_i_count': None,
+        'grade_ii_count': None,
+        'grade_iii_count': None,
+        'raw_badge_points': None,
+        'normalized_badge_strength': None,
         'ranked_seasons_participated': None,
         'latest_ranked_battles': None,
         'highest_ranked_league_recent': None,
@@ -1037,6 +1635,10 @@ def build_player_summary(
     has_battle_data = _summary_has_battle_data(player, normalized_battles_rows)
     summary['kill_ratio'] = _calculate_player_kill_ratio(
         normalized_battles_rows) if has_battle_data else None
+    summary.update(_build_efficiency_rank_inputs(
+        player,
+        battle_rows=normalized_battles_rows,
+    ))
 
     if player.is_hidden:
         return summary
@@ -1054,6 +1656,15 @@ def build_player_summary(
             'ships_played_total': explorer_summary.ships_played_total,
             'ship_type_spread': explorer_summary.ship_type_spread,
             'tier_spread': explorer_summary.tier_spread,
+            'eligible_ship_count': explorer_summary.eligible_ship_count,
+            'efficiency_badge_rows_total': explorer_summary.efficiency_badge_rows_total,
+            'badge_rows_unmapped': explorer_summary.badge_rows_unmapped,
+            'expert_count': explorer_summary.expert_count,
+            'grade_i_count': explorer_summary.grade_i_count,
+            'grade_ii_count': explorer_summary.grade_ii_count,
+            'grade_iii_count': explorer_summary.grade_iii_count,
+            'raw_badge_points': explorer_summary.raw_badge_points,
+            'normalized_badge_strength': explorer_summary.normalized_badge_strength,
             'ranked_seasons_participated': explorer_summary.ranked_seasons_participated,
             'latest_ranked_battles': explorer_summary.latest_ranked_battles,
             'highest_ranked_league_recent': explorer_summary.highest_ranked_league_recent,
@@ -1102,6 +1713,15 @@ def build_player_summary(
         'ships_played_total': len(played_rows) if has_battle_data else None,
         'ship_type_spread': ship_type_spread if has_battle_data else None,
         'tier_spread': tier_spread if has_battle_data else None,
+        'eligible_ship_count': summary['eligible_ship_count'],
+        'efficiency_badge_rows_total': summary['efficiency_badge_rows_total'],
+        'badge_rows_unmapped': summary['badge_rows_unmapped'],
+        'expert_count': summary['expert_count'],
+        'grade_i_count': summary['grade_i_count'],
+        'grade_ii_count': summary['grade_ii_count'],
+        'grade_iii_count': summary['grade_iii_count'],
+        'raw_badge_points': summary['raw_badge_points'],
+        'normalized_badge_strength': summary['normalized_badge_strength'],
         'ranked_seasons_participated': len(normalized_ranked_rows),
         'latest_ranked_battles': int(latest_ranked_row.get('total_battles', 0) or 0) if latest_ranked_row else None,
         'highest_ranked_league_recent': latest_ranked_row.get('highest_league_name') if latest_ranked_row else None,
@@ -1135,12 +1755,37 @@ def refresh_player_explorer_summary(
             'ships_played_total': summary['ships_played_total'],
             'ship_type_spread': summary['ship_type_spread'],
             'tier_spread': summary['tier_spread'],
+            'eligible_ship_count': summary['eligible_ship_count'],
+            'efficiency_badge_rows_total': summary['efficiency_badge_rows_total'],
+            'badge_rows_unmapped': summary['badge_rows_unmapped'],
+            'expert_count': summary['expert_count'],
+            'grade_i_count': summary['grade_i_count'],
+            'grade_ii_count': summary['grade_ii_count'],
+            'grade_iii_count': summary['grade_iii_count'],
+            'raw_badge_points': summary['raw_badge_points'],
+            'normalized_badge_strength': summary['normalized_badge_strength'],
             'ranked_seasons_participated': summary['ranked_seasons_participated'],
             'latest_ranked_battles': summary['latest_ranked_battles'],
             'highest_ranked_league_recent': summary['highest_ranked_league_recent'],
             'kill_ratio': summary['kill_ratio'],
         },
     )
+
+    if player.is_hidden:
+        explorer_summary.shrunken_efficiency_strength = None
+        explorer_summary.efficiency_rank_percentile = None
+        explorer_summary.efficiency_rank_tier = None
+        explorer_summary.has_efficiency_rank_icon = False
+        explorer_summary.efficiency_rank_population_size = None
+        explorer_summary.efficiency_rank_updated_at = None
+        explorer_summary.save(update_fields=[
+            'shrunken_efficiency_strength',
+            'efficiency_rank_percentile',
+            'efficiency_rank_tier',
+            'has_efficiency_rank_icon',
+            'efficiency_rank_population_size',
+            'efficiency_rank_updated_at',
+        ])
 
     player.explorer_summary = explorer_summary
     return explorer_summary
@@ -1718,7 +2363,8 @@ def fetch_landing_activity_attrition() -> dict:
         cursor = _shift_month_start(cursor, 1)
 
     recent_window = months[-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW:]
-    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2):-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
+    prior_window = months[-(LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW * 2)
+                            :-LANDING_ACTIVITY_ATTRITION_COMPARE_WINDOW]
     recent_active_avg = round(
         sum(row['active_players'] for row in recent_window) / len(recent_window), 1) if recent_window else 0.0
     prior_active_avg = round(

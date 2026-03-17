@@ -163,6 +163,15 @@ LANDING_WARMUP_START_DELAY_SECONDS=5
 - set `WARM_LANDING_PAGE_ON_STARTUP=0` if you want to disable the automatic landing-cache warm-up.
 - `LANDING_WARMUP_START_DELAY_SECONDS` controls how long the server waits after migrations before launching the background warm command.
 
+optional client analytics knob:
+
+```env
+NEXT_PUBLIC_GA_MEASUREMENT_ID=your_ga4_measurement_id
+```
+
+- when set, the routed player and clan pages still send the first-party battlestats analytics POST and also emit a parallel GA4 `entity_detail_view` event.
+- when omitted, the first-party analytics path stays active and GA4 emission is skipped.
+
 ### local access
 
 - frontend app: <http://localhost:3001>
@@ -182,6 +191,8 @@ the landing-page search box, clan-member links, and clan selection controls now 
 the header search input now only reflects explicit `q` query usage. simply navigating to a player detail route no longer backfills the viewed player name into the global search box.
 
 player and clan detail headers now also expose a `Share` action that copies the current route URL, so the route-based pages are easy to hand off without manual URL copying.
+
+those same routed detail views now emit first-party `entity_detail_view` analytics only after a real player or clan payload resolves successfully. the canonical ingest endpoint is `POST /api/analytics/entity-view/`, and ranked rollups are available from `GET /api/analytics/top-entities/`.
 
 hidden accounts are now signaled consistently with a mask icon across search suggestions, landing-player rows, clan member rows, explorer rows, and player detail headers.
 
@@ -207,6 +218,8 @@ the right column carries the broader profile and comparison views:
 - performance by ship type
 
 the clan battle seasons table viewport is tuned to show five visible season rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
+
+when a fresh published efficiency-rank snapshot exists, the player header also shows a Battlestats-specific `BST` rank chip with the published tier (`III`, `II`, `I`, or `E`). this is intentionally separate from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
 
 ### stop the stack
 
@@ -245,6 +258,12 @@ cd client && npm run test:ci
 
 the current targeted client coverage includes route loaders, route helper utilities, header search behavior, compact efficiency badge rendering/sorting, and clan-chart redraw signatures.
 
+targeted analytics and routed-detail regressions are also available with:
+
+```bash
+cd client && npm test -- --runInBand app/components/__tests__/PlayerRouteView.test.tsx app/components/__tests__/ClanRouteView.test.tsx app/lib/__tests__/visitAnalytics.test.ts
+```
+
 if the script is not executable in your shell, run:
 
 ```bash
@@ -265,6 +284,24 @@ python scripts/backfill_ranked_data.py --state-file logs/backfill_ranked_data_st
 ```
 
 it writes an atomic JSON checkpoint after each player attempt, retries previously failed player IDs on the next run, and resumes from the last processed player ID if the job is interrupted. by default it targets visible players missing ranked data; add `--refresh-older-than-hours 168` to revisit stale rows or `--force` to sweep all players in scope.
+
+to backfill player efficiency badges durably, use the resumable management command from `server/`:
+
+```bash
+python manage.py backfill_player_efficiency_badges --state-file logs/backfill_player_efficiency_badges_state.json
+```
+
+it uses the same checkpoint pattern as the ranked backfill, retries failed player IDs on the next run, and resumes from the last processed player ID after interruption. by default it targets visible players with PvP activity whose badge payload is missing or unstamped; add `--refresh-older-than-hours 168` to revisit stale rows, `--include-zero-pvp` to stamp zero-PvP accounts, or `--force` to sweep all players in scope.
+
+to backfill player combat achievements, use the dedicated achievements command from `server/`:
+
+```bash
+python manage.py backfill_achievements_data --only-missing
+```
+
+this refreshes the raw `account/achievements/` payload onto each player and rebuilds curated `PlayerAchievementStat` rows from the Battlestats combat-achievement catalog. by default it targets visible players missing achievements data; add `--force`, `--player-id`, `--older-than-hours`, or `--include-hidden` to widen the scope.
+
+the player detail header now also renders a Battlestats efficiency-rank marker when the published player payload includes a fresh `efficiency_rank_tier`. this marker is distinct from the lower `Efficiency Badges` section: the header chip summarizes tracked-player rank from stored WG badge profile data, while the lower section still shows raw ship-level badge rows.
 
 for the ongoing ranked incremental refresh, use the queue-based command that keeps known ranked players fresh and samples likely discovery candidates without sweeping the entire player table every day:
 

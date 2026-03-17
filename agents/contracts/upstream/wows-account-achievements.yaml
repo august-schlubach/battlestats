@@ -1,0 +1,93 @@
+id: wows.account.achievements
+provider: Wargaming
+service: World of Warships Public API
+endpoint: /wows/account/achievements/
+purpose: Return per-account achievement code maps for combat awards, progress counters, campaigns, and other upstream achievement groups.
+docs_url: https://developers.wargaming.net/reference/all/wows/account/achievements/
+
+hosts:
+  default: https://api.worldofwarships.com
+  realms:
+    eu: https://api.worldofwarships.eu
+    na: https://api.worldofwarships.com
+    asia: https://api.worldofwarships.asia
+
+request:
+  method: GET
+  query_params:
+    application_id:
+      required: true
+      type: string
+      description: Wargaming application ID.
+    account_id:
+      required: true
+      type: integer_or_csv_of_integers
+      description: One or more player account IDs. Docs state a maximum limit of 100 IDs.
+    fields:
+      required: false
+      type: string
+      description: Comma-separated response field selection.
+    access_token:
+      required: false
+      type: string
+      description: Token for private user data when applicable.
+    language:
+      required: false
+      type: string
+      description: Localization language.
+
+response:
+  envelope:
+    status: string
+    meta:
+      count: integer
+      hidden: integer_or_null
+    data:
+      account_id_keyed_object: true
+  expected_data_shape:
+    battle:
+      type: associative_array_or_null
+      example_key: PCH003_MainCaliber
+      example_value: integer
+    progress:
+      type: associative_array_or_null
+      example_key: PCH031_EarningMoney1
+      example_value: integer
+
+observed_behavior:
+  last_verified: 2026-03-16
+  docs_notes:
+    - Docs describe the response as per-account achievement sections keyed by upstream achievement codes.
+    - Docs state hidden profiles are excluded from the main data payload and reported in meta.hidden.
+  live_notes:
+    - The raw payload mixes combat awards, campaign completions, albums, PvE counters, and other non-player-surface achievement codes in the same battle map.
+    - The endpoint is not user-ready without a local Battlestats catalog that maps opaque WG codes to stable product labels and filters out non-combat noise.
+    - A verified NA sample for lil_boots returned both combat codes such as PCH016_FirstBlood and noise codes such as PCH070_Campaign1Completed and PCH097_PVE_HON_WIN_ALL_DONE.
+
+trust:
+  rating: medium
+  suitable_for:
+    - raw achievement ingestion
+    - curated combat achievement normalization after local filtering
+    - periodic backfill and refresh workflows
+  not_suitable_for:
+    - direct frontend rendering without a local catalog
+    - inferring chronology because the payload is cumulative, not event-timestamped
+  recommendation: Treat as a raw cumulative achievement source that must be filtered through a local catalog before product use.
+
+repo_usage:
+  current_state:
+    - Used for backend-only player achievement ingestion.
+    - The repo requests only battle and progress so the relied-on field set stays explicit.
+    - Hidden-profile omission is handled non-destructively so older stored combat achievement data is retained.
+  code_refs:
+    - server/warships/api/players.py
+    - server/warships/data.py
+    - server/warships/achievements_catalog.py
+
+evidence_refs:
+  knowledge_notes:
+    - agents/knowledge/wows-account-hydration-notes.md
+    - agents/knowledge/wows-api-contract-strategy.md
+  reproduced_with:
+    - curl against https://api.worldofwarships.com/wows/account/achievements/

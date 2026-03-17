@@ -1,5 +1,9 @@
 # Runbook: LangSmith Trace Dashboard
 
+_Last updated: 2026-03-15_
+
+_Status: Active operational reference_
+
 ## Purpose
 
 Operate and validate the battlestats `/trace` dashboard that summarizes LangSmith tracing state and recent local agent workflow runs.

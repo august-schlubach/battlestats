@@ -1,5 +1,9 @@
 # CrewAI Integration Runbook
 
+_Last updated: 2026-03-10_
+
+_Status: Active platform reference_
+
 ## Purpose
 
 Add CrewAI as a second orchestration layer for the existing battlestats agent federation so the team can use either:

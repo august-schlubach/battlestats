@@ -19,13 +19,14 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
     RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, PlayerExplorerRowSerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, PlayerCorrelationDistributionSerializer, PlayerExtendedCorrelationDistributionSerializer, \
-    PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer
+    PlayerTierTypeCorrelationSerializer, LandingActivityAttritionSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer, TopEntitiesQuerySerializer, TopEntityVisitSerializer
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, get_player_clan_battle_summaries, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
 from warships.landing import get_landing_clans_payload, get_landing_players_payload, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.visit_analytics import get_top_entities, record_entity_visit
 from warships.agentic.dashboard import get_agentic_trace_dashboard
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
 from .tasks import update_clan_battle_summary_task
@@ -643,3 +644,32 @@ def agentic_trace_dashboard(request) -> Response:
         15,
     )
     return Response(data)
+
+
+@api_view(["POST"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def analytics_entity_view(request) -> Response:
+    serializer = EntityVisitIngestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    result = record_entity_visit(
+        serializer.validated_data,
+        user_agent=request.META.get('HTTP_USER_AGENT', ''),
+    )
+
+    response_serializer = EntityVisitIngestResponseSerializer(data=result)
+    response_serializer.is_valid(raise_exception=True)
+    status_code = status.HTTP_201_CREATED if result['accepted'] else status.HTTP_200_OK
+    return Response(response_serializer.data, status=status_code)
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def analytics_top_entities(request) -> Response:
+    serializer = TopEntitiesQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+
+    rows = get_top_entities(**serializer.validated_data)
+    response_serializer = TopEntityVisitSerializer(data=rows, many=True)
+    response_serializer.is_valid(raise_exception=True)
+    return Response(response_serializer.data)

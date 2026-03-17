@@ -2,6 +2,8 @@
 
 _Last updated: 2026-03-15_
 
+_Status: Active operational reference_
+
 ## Purpose
 
 Operate and validate the battlestats caching layer with an emphasis on:

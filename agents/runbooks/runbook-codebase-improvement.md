@@ -1,5 +1,9 @@
 # Runbook: Multi-Agent Codebase Improvement
 
+_Last updated: 2026-03-04_
+
+_Status: Evergreen workflow reference_
+
 You are using the term **runbook** correctly. In this context, it is an operational, repeatable procedure for executing planned engineering improvements.
 
 ## Purpose

@@ -38,6 +38,7 @@ Rule of thumb: put facts that should be machine-readable here; put investigation
 
 ## Current Profiles
 
+- `wows-account-achievements.yaml`
 - `wows-account-info.yaml`
 - `wows-account-list.yaml`
 - `wows-clans-accountinfo.yaml`

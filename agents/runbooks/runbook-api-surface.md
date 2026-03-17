@@ -1,5 +1,9 @@
 # Runbook: API Surface Coverage
 
+_Last updated: 2026-03-16_
+
+_Status: Active operational reference_
+
 Tracks every public API endpoint, its smoke test case name, and coverage status.
 Update this file when endpoints are added, removed, or renamed.
 
@@ -132,9 +136,12 @@ docker compose exec -T server python scripts/smoke_test_site_endpoints.py
 - Ranked maintenance is now split intentionally:
   - `backfill_ranked_data` repairs historic coverage and missing enrichment.
   - `incremental_ranked_data` keeps known-ranked rows fresh and samples discovery candidates.
+- Efficiency badge maintenance now also has a dedicated sweep path:
+  - `backfill_player_efficiency_badges` durably fills missing or unstamped `efficiency_json` rows for players in scope.
+- Player detail now publishes and renders a Battlestats efficiency-rank header marker from the player payload fields `efficiency_rank_tier`, `efficiency_rank_percentile`, `efficiency_rank_population_size`, and `efficiency_rank_updated_at` when the published snapshot is fresh.
 - API read paths should not be used as a ranked-data repair mechanism.
 - Contract-backed surfaces for this API area currently include `player_summary` and `player_explorer_rows`; see the contracts runbook and ODCS artifacts when fields change.
-- For deeper behavior and QA acceptance criteria around player-detail reads, ranked league semantics, ranked correlation, and ranked maintenance reconciliation, see [agents/runbooks/runbook-player-detail-ranked-hardening.md](/home/august/code/archive/battlestats/agents/runbooks/runbook-player-detail-ranked-hardening.md).
+- For deeper behavior and QA acceptance criteria around player-detail reads, ranked league semantics, ranked correlation, and ranked maintenance reconciliation, see [agents/runbooks/archive/runbook-player-detail-ranked-hardening.md](/home/august/code/archive/battlestats/agents/runbooks/archive/runbook-player-detail-ranked-hardening.md).
 
 ## Changelog
 

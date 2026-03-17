@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Player, Clan, Ship
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, build_player_summary, get_highest_ranked_league_name
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name
 
 
 class PlayerSerializer(serializers.ModelSerializer):
@@ -11,6 +11,11 @@ class PlayerSerializer(serializers.ModelSerializer):
     highest_ranked_league = serializers.SerializerMethodField()
     kill_ratio = serializers.SerializerMethodField()
     player_score = serializers.SerializerMethodField()
+    efficiency_rank_percentile = serializers.SerializerMethodField()
+    efficiency_rank_tier = serializers.SerializerMethodField()
+    has_efficiency_rank_icon = serializers.SerializerMethodField()
+    efficiency_rank_population_size = serializers.SerializerMethodField()
+    efficiency_rank_updated_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Player
@@ -45,6 +50,34 @@ class PlayerSerializer(serializers.ModelSerializer):
 
         return build_player_summary(obj, use_cached_summary=False).get('player_score')
 
+    def _get_efficiency_rank_payload(self, obj):
+        payload_cache = getattr(self, '_efficiency_rank_payload_cache', None)
+        if payload_cache is None:
+            payload_cache = {}
+            self._efficiency_rank_payload_cache = payload_cache
+
+        cache_key = getattr(obj, 'pk', id(obj))
+        if cache_key not in payload_cache:
+            payload_cache[cache_key] = _get_published_efficiency_rank_payload(
+                obj)
+
+        return payload_cache[cache_key]
+
+    def get_efficiency_rank_percentile(self, obj):
+        return self._get_efficiency_rank_payload(obj)['efficiency_rank_percentile']
+
+    def get_efficiency_rank_tier(self, obj):
+        return self._get_efficiency_rank_payload(obj)['efficiency_rank_tier']
+
+    def get_has_efficiency_rank_icon(self, obj):
+        return self._get_efficiency_rank_payload(obj)['has_efficiency_rank_icon']
+
+    def get_efficiency_rank_population_size(self, obj):
+        return self._get_efficiency_rank_payload(obj)['efficiency_rank_population_size']
+
+    def get_efficiency_rank_updated_at(self, obj):
+        return self._get_efficiency_rank_payload(obj)['efficiency_rank_updated_at']
+
 
 class ClanSerializer(serializers.ModelSerializer):
 
@@ -64,6 +97,51 @@ class ActivityDataSerializer(serializers.Serializer):
     date = serializers.DateField()
     battles = serializers.IntegerField()
     wins = serializers.IntegerField()
+
+
+class EntityVisitIngestSerializer(serializers.Serializer):
+    event_uuid = serializers.UUIDField()
+    occurred_at = serializers.DateTimeField()
+    entity_type = serializers.ChoiceField(choices=['player', 'clan'])
+    entity_id = serializers.IntegerField(min_value=1)
+    entity_slug = serializers.CharField(
+        max_length=255, allow_blank=True, required=False)
+    entity_name = serializers.CharField(max_length=200)
+    route_path = serializers.CharField(max_length=255)
+    referrer_path = serializers.CharField(
+        max_length=255, allow_blank=True, required=False)
+    source = serializers.ChoiceField(
+        choices=['web_first_party', 'ga4'], required=False)
+    visitor_key = serializers.CharField(max_length=128)
+    session_key = serializers.CharField(max_length=128)
+
+
+class EntityVisitIngestResponseSerializer(serializers.Serializer):
+    accepted = serializers.BooleanField()
+    counted_in_deduped_views = serializers.BooleanField()
+    reason = serializers.CharField()
+
+
+class TopEntitiesQuerySerializer(serializers.Serializer):
+    entity_type = serializers.ChoiceField(choices=['player', 'clan'])
+    period = serializers.ChoiceField(choices=['1d', '7d', '30d'], default='7d')
+    metric = serializers.ChoiceField(
+        choices=['views_raw', 'views_deduped',
+                 'unique_visitors', 'unique_sessions'],
+        default='views_deduped',
+    )
+    limit = serializers.IntegerField(min_value=1, max_value=100, default=25)
+
+
+class TopEntityVisitSerializer(serializers.Serializer):
+    entity_type = serializers.CharField()
+    entity_id = serializers.IntegerField()
+    entity_name = serializers.CharField(allow_blank=True)
+    views_raw = serializers.IntegerField()
+    views_deduped = serializers.IntegerField()
+    unique_visitors = serializers.IntegerField()
+    unique_sessions = serializers.IntegerField()
+    last_view_at = serializers.DateTimeField(allow_null=True)
 
 
 class TierDataSerializer(serializers.Serializer):

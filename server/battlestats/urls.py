@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_battle_seasons, player_clan_battle_seasons, landing_activity_attrition, landing_clans, landing_recent_clans, landing_players, landing_recent_players, player_name_suggestions, player_summary, players_explorer, wr_distribution, player_distribution, player_correlation_distribution, db_stats, agentic_trace_dashboard, analytics_entity_view, analytics_top_entities
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -61,6 +61,10 @@ urlpatterns = [
          db_stats, name='db_stats'),
     path('api/agentic/traces/',
          agentic_trace_dashboard, name='agentic_trace_dashboard'),
+    path('api/analytics/entity-view/',
+         analytics_entity_view, name='analytics_entity_view'),
+    path('api/analytics/top-entities/',
+         analytics_top_entities, name='analytics_top_entities'),
 
 ]
 

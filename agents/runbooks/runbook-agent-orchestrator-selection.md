@@ -1,5 +1,9 @@
 # Agent Orchestrator Selection Runbook
 
+_Last updated: 2026-03-10_
+
+_Status: Active workflow reference_
+
 ## Purpose
 
 Choose the right orchestration engine for battlestats work:

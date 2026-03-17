@@ -2,6 +2,8 @@
 
 _Last updated: 2026-03-15_
 
+_Status: Active workflow reference_
+
 ## Purpose
 
 Operate, validate, and extend the battlestats LangGraph workflow now that it carries explicit team doctrine, curated guidance retrieval, and doctrine-aware review gates.

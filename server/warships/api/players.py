@@ -53,6 +53,21 @@ def _fetch_ranked_seasons_info() -> Dict:
     return data if data else {}
 
 
+def _fetch_player_achievements(player_id: int) -> Optional[Dict]:
+    """Fetch the raw achievements payload for a single player account."""
+    params = {
+        "account_id": player_id,
+        "fields": "battle,progress",
+    }
+    logging.info(
+        f' ---> Remote fetching achievements data for player_id: {player_id}')
+    data = _make_api_request("account/achievements/", params)
+    if not isinstance(data, dict):
+        return None
+    payload = data.get(str(player_id))
+    return payload if isinstance(payload, dict) else None
+
+
 def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
     """Return a player_id from local cache first, then WoWS API exact lookup."""
     normalized_name = player_name.strip()

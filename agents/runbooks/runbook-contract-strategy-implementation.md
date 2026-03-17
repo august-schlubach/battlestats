@@ -2,6 +2,8 @@
 
 _Last updated: 2026-03-14_
 
+_Status: Active maintenance reference_
+
 ## Purpose
 
 Guide agents to implement and maintain the layered contract strategy for WoWS API integration, ensuring correctness and reliability through QA review.
@@ -14,7 +16,7 @@ Guide agents to implement and maintain the layered contract strategy for WoWS AP
 - Narrative knowledge coverage now includes `wows-statsbydate-status.md` and `wows-account-hydration-notes.md`.
 - QA review for this runbook is executed by applying the criteria in `agents/qa.md` to the changed artifacts and focused tests.
 - Focused QA evidence: `manage.py test warships.tests.test_upstream_contracts warships.tests.test_data_product_contracts` passed on 2026-03-14.
-- Related follow-up work for player-detail and ranked hardening is tracked in `agents/runbooks/runbook-player-detail-ranked-hardening.md`.
+- Related follow-up work for player-detail and ranked hardening is tracked in `agents/runbooks/archive/runbook-player-detail-ranked-hardening.md`.
 
 ---
 

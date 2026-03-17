@@ -114,7 +114,7 @@ def _build_ranked_heatmap_learning_note() -> dict[str, Any]:
         "slug": "ranked_wr_battles_heatmap",
         "title": "Ranked heatmap granularity",
         "summary": "The ranked battles vs win rate heatmap now uses quarter-octave total-games bins and 0.75-point win-rate bands.",
-        "runbook_path": "agents/runbooks/runbook-ranked-wr-battles-heatmap-granularity.md",
+        "runbook_path": "agents/runbooks/archive/runbook-ranked-wr-battles-heatmap-granularity.md",
         "details": [
             {
                 "label": "X growth factor",

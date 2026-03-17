@@ -1,5 +1,9 @@
 # Runbook: Player Activity and Evaluation
 
+_Last updated: 2026-03-09_
+
+_Status: Current-state planning runbook_
+
 ## Purpose
 
 Provide a decision framework for using the current Battlestats dataset to answer broader player-evaluation questions, not just "has this player played recently?"

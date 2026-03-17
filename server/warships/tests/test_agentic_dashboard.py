@@ -95,7 +95,7 @@ class AgenticDashboardTests(TestCase):
         )
         self.assertEqual(
             payload["learning"]["chart_tuning_notes"][0]["runbook_path"],
-            "agents/runbooks/runbook-ranked-wr-battles-heatmap-granularity.md",
+            "agents/runbooks/archive/runbook-ranked-wr-battles-heatmap-granularity.md",
         )
         self.assertEqual(
             payload["learning"]["chart_tuning_notes"][0]["details"][1]["value"],

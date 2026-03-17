@@ -364,9 +364,9 @@ def ensure_crawl_all_clans_running_task():
         crawl_all_clans_task.delay(resume=True)
         return {"status": "scheduled", "reason": "stale-lock"}
 
-    logger.info("Crawl watchdog found no active crawl; scheduling resume crawl")
-    crawl_all_clans_task.delay(resume=True)
-    return {"status": "scheduled", "reason": "not-running"}
+    logger.info(
+        "Crawl watchdog found no active crawl; leaving the scheduler to start the next full crawl")
+    return {"status": "skipped", "reason": "idle"}
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)

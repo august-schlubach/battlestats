@@ -3,11 +3,16 @@ import { render, screen, waitFor } from '@testing-library/react';
 import ClanRouteView from '../ClanRouteView';
 
 const pushMock = jest.fn();
+const trackEntityDetailViewMock = jest.fn();
 
 jest.mock('next/navigation', () => ({
     useRouter: () => ({
         push: pushMock,
     }),
+}));
+
+jest.mock('../../lib/visitAnalytics', () => ({
+    trackEntityDetailView: (...args: unknown[]) => trackEntityDetailViewMock(...args),
 }));
 
 jest.mock('../ClanDetail', () => {
@@ -26,6 +31,7 @@ jest.mock('../ClanDetail', () => {
 describe('ClanRouteView', () => {
     beforeEach(() => {
         pushMock.mockReset();
+        trackEntityDetailViewMock.mockReset();
         global.fetch = jest.fn();
     });
 
@@ -53,6 +59,12 @@ describe('ClanRouteView', () => {
         expect(screen.getByText('Test Clan')).toBeInTheDocument();
         expect(screen.getByText('TEST')).toBeInTheDocument();
         expect(screen.getByText('42')).toBeInTheDocument();
+        expect(trackEntityDetailViewMock).toHaveBeenCalledWith({
+            entityType: 'clan',
+            entityId: 1000067803,
+            entityName: 'Test Clan',
+            entitySlug: '1000067803-test-clan',
+        });
     });
 
     it('shows a not found state for an invalid clan slug without fetching', async () => {
@@ -60,5 +72,6 @@ describe('ClanRouteView', () => {
 
         expect(await screen.findByText('Clan not found.')).toBeInTheDocument();
         expect(global.fetch).not.toHaveBeenCalled();
+        expect(trackEntityDetailViewMock).not.toHaveBeenCalled();
     });
 });

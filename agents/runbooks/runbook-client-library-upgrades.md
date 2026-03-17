@@ -1,5 +1,9 @@
 # Runbook: Client Library Upgrades
 
+_Last updated: 2026-03-15_
+
+_Status: Active maintenance reference_
+
 ## Goal
 
 Upgrade the main frontend libraries to the highest versions that fit the current app architecture and dependency graph without introducing avoidable migration work.

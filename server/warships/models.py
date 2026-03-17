@@ -43,6 +43,9 @@ class Player(models.Model):
     efficiency_json = models.JSONField(null=True, blank=True)
     efficiency_updated_at = models.DateTimeField(null=True, blank=True)
 
+    achievements_json = models.JSONField(null=True, blank=True)
+    achievements_updated_at = models.DateTimeField(null=True, blank=True)
+
     verdict = models.CharField(max_length=20, null=True, blank=True)
 
     def __str__(self):
@@ -134,6 +137,23 @@ class PlayerExplorerSummary(models.Model):
     ships_played_total = models.IntegerField(null=True, blank=True)
     ship_type_spread = models.IntegerField(null=True, blank=True)
     tier_spread = models.IntegerField(null=True, blank=True)
+    eligible_ship_count = models.IntegerField(null=True, blank=True)
+    efficiency_badge_rows_total = models.IntegerField(null=True, blank=True)
+    badge_rows_unmapped = models.IntegerField(null=True, blank=True)
+    expert_count = models.IntegerField(null=True, blank=True)
+    grade_i_count = models.IntegerField(null=True, blank=True)
+    grade_ii_count = models.IntegerField(null=True, blank=True)
+    grade_iii_count = models.IntegerField(null=True, blank=True)
+    raw_badge_points = models.IntegerField(null=True, blank=True)
+    normalized_badge_strength = models.FloatField(null=True, blank=True)
+    shrunken_efficiency_strength = models.FloatField(null=True, blank=True)
+    efficiency_rank_percentile = models.FloatField(null=True, blank=True)
+    efficiency_rank_tier = models.CharField(
+        max_length=4, null=True, blank=True)
+    has_efficiency_rank_icon = models.BooleanField(default=False)
+    efficiency_rank_population_size = models.IntegerField(
+        null=True, blank=True)
+    efficiency_rank_updated_at = models.DateTimeField(null=True, blank=True)
     ranked_seasons_participated = models.IntegerField(null=True, blank=True)
     latest_ranked_battles = models.IntegerField(null=True, blank=True)
     highest_ranked_league_recent = models.CharField(
@@ -150,9 +170,121 @@ class PlayerExplorerSummary(models.Model):
                          name='explorer_active29_idx'),
             models.Index(fields=['ships_played_total'],
                          name='explorer_ships_idx'),
+            models.Index(fields=['efficiency_rank_percentile'],
+                         name='explorer_eff_rank_idx'),
             models.Index(fields=['ranked_seasons_participated'],
                          name='explorer_ranked_idx'),
         ]
 
     def __str__(self):
         return f"Explorer summary for {self.player_id}"
+
+
+class EntityVisitEvent(models.Model):
+    ENTITY_TYPE_PLAYER = 'player'
+    ENTITY_TYPE_CLAN = 'clan'
+    ENTITY_TYPE_CHOICES = [
+        (ENTITY_TYPE_PLAYER, 'Player'),
+        (ENTITY_TYPE_CLAN, 'Clan'),
+    ]
+
+    SOURCE_WEB_FIRST_PARTY = 'web_first_party'
+    SOURCE_GA4 = 'ga4'
+    SOURCE_CHOICES = [
+        (SOURCE_WEB_FIRST_PARTY, 'Web First Party'),
+        (SOURCE_GA4, 'Google Analytics 4'),
+    ]
+
+    event_uuid = models.UUIDField(unique=True)
+    occurred_at = models.DateTimeField()
+    event_date = models.DateField(db_index=True)
+    entity_type = models.CharField(max_length=16, choices=ENTITY_TYPE_CHOICES)
+    entity_id = models.IntegerField()
+    entity_name_snapshot = models.CharField(max_length=200)
+    entity_slug_snapshot = models.CharField(
+        max_length=255, blank=True, default='')
+    route_path = models.CharField(max_length=255)
+    referrer_path = models.CharField(max_length=255, blank=True, default='')
+    source = models.CharField(
+        max_length=32, choices=SOURCE_CHOICES, default=SOURCE_WEB_FIRST_PARTY)
+    visitor_key_hash = models.CharField(max_length=64)
+    session_key_hash = models.CharField(max_length=64)
+    dedupe_bucket_started_at = models.DateTimeField(null=True, blank=True)
+    counted_in_deduped_views = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['entity_type', 'entity_id',
+                         'event_date'], name='visit_event_entity_day_idx'),
+            models.Index(fields=['entity_type', 'entity_id',
+                         'occurred_at'], name='visit_event_entity_time_idx'),
+            models.Index(fields=['entity_type', 'entity_id', 'visitor_key_hash',
+                         'occurred_at'], name='visit_event_dedupe_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.entity_type}:{self.entity_id} @ {self.occurred_at.isoformat()}"
+
+
+class EntityVisitDaily(models.Model):
+    date = models.DateField()
+    entity_type = models.CharField(
+        max_length=16, choices=EntityVisitEvent.ENTITY_TYPE_CHOICES)
+    entity_id = models.IntegerField()
+    entity_name_snapshot = models.CharField(max_length=200)
+    views_raw = models.IntegerField(default=0)
+    views_deduped = models.IntegerField(default=0)
+    unique_visitors = models.IntegerField(default=0)
+    unique_sessions = models.IntegerField(default=0)
+    last_view_at = models.DateTimeField(null=True, blank=True)
+    source_first_party_views = models.IntegerField(default=0)
+    source_ga4_views = models.IntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['date', 'entity_type', 'entity_id'], name='unique_entity_visit_daily'),
+        ]
+        indexes = [
+            models.Index(fields=['entity_type', 'date'],
+                         name='visit_daily_type_date_idx'),
+            models.Index(fields=['entity_type', 'entity_id',
+                         'date'], name='visit_daily_entity_date_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.date} {self.entity_type}:{self.entity_id}"
+
+
+class PlayerAchievementStat(models.Model):
+    player = models.ForeignKey(
+        Player,
+        on_delete=models.CASCADE,
+        related_name='achievement_stats',
+    )
+    achievement_code = models.CharField(max_length=64)
+    achievement_slug = models.CharField(max_length=64)
+    achievement_label = models.CharField(max_length=128)
+    category = models.CharField(max_length=32)
+    count = models.IntegerField()
+    source_kind = models.CharField(max_length=16, default='battle')
+    refreshed_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['player', 'achievement_code', 'source_kind'],
+                name='unique_player_achievement_source',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['player', 'achievement_slug'],
+                         name='player_ach_slug_idx'),
+            models.Index(fields=['achievement_slug'],
+                         name='achievement_slug_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.player.name} - {self.achievement_label}"

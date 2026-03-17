@@ -38,8 +38,8 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             "crontab": schedule,
             "enabled": True,
             "args": json.dumps([]),
-            "kwargs": json.dumps({"resume": True}),
-            "description": "Daily crawl of clans and players from the Wargaming API.",
+            "kwargs": json.dumps({"resume": False}),
+            "description": "Daily full crawl of clans and players from the Wargaming API.",
         },
     )
 
@@ -80,7 +80,7 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
             "enabled": True,
             "args": json.dumps([]),
             "kwargs": json.dumps({}),
-            "description": "Checks every few minutes that the clan crawl is still running; if not, resumes it.",
+            "description": "Checks every few minutes for a stale clan-crawl lock and resumes interrupted crawls only.",
         },
     )
 

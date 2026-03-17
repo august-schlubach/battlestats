@@ -4,11 +4,16 @@ import PlayerRouteView from '../PlayerRouteView';
 
 const pushMock = jest.fn();
 const capturedProps: { current: null | Record<string, unknown> } = { current: null };
+const trackEntityDetailViewMock = jest.fn();
 
 jest.mock('next/navigation', () => ({
     useRouter: () => ({
         push: pushMock,
     }),
+}));
+
+jest.mock('../../lib/visitAnalytics', () => ({
+    trackEntityDetailView: (...args: unknown[]) => trackEntityDetailViewMock(...args),
 }));
 
 jest.mock('../PlayerDetail', () => {
@@ -31,6 +36,7 @@ describe('PlayerRouteView', () => {
     beforeEach(() => {
         pushMock.mockReset();
         capturedProps.current = null;
+        trackEntityDetailViewMock.mockReset();
         global.fetch = jest.fn();
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     });
@@ -83,6 +89,12 @@ describe('PlayerRouteView', () => {
         expect(await screen.findByTestId('player-detail')).toBeInTheDocument();
         expect(screen.getByText('Player One')).toBeInTheDocument();
         expect(screen.getByText('Test Clan')).toBeInTheDocument();
+        expect(trackEntityDetailViewMock).toHaveBeenCalledWith({
+            entityType: 'player',
+            entityId: 77,
+            entityName: 'Player One',
+            entitySlug: 'Player One',
+        });
 
         const props = capturedProps.current as {
             onBack: () => void;
@@ -112,5 +124,6 @@ describe('PlayerRouteView', () => {
         render(<PlayerRouteView playerName="Missing Player" />);
 
         expect(await screen.findByText('Player not found.')).toBeInTheDocument();
+        expect(trackEntityDetailViewMock).not.toHaveBeenCalled();
     });
 });

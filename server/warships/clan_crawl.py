@@ -134,7 +134,7 @@ def save_clan(info: Dict) -> Clan:
 
 
 def save_player(player_data: Dict, clan: Clan) -> None:
-    from warships.data import compute_player_verdict, refresh_player_explorer_summary, update_player_efficiency_data
+    from warships.data import compute_player_verdict, refresh_player_explorer_summary, update_achievements_data, update_player_efficiency_data
 
     if player_data is None:
         return
@@ -194,6 +194,7 @@ def save_player(player_data: Dict, clan: Clan) -> None:
 
     if not player.is_hidden:
         update_player_efficiency_data(player)
+        update_achievements_data(player.player_id)
 
     refresh_player_explorer_summary(player)
 
