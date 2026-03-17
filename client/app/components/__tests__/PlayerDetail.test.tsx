@@ -2,6 +2,8 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
 
+const mockUseClanMembers = jest.fn();
+
 jest.mock('next/dynamic', () => {
     return () => function MockDynamicComponent() {
         return null;
@@ -33,7 +35,7 @@ jest.mock('../HiddenAccountIcon', () => {
 });
 
 jest.mock('../useClanMembers', () => ({
-    useClanMembers: () => ({ members: [], loading: false, error: null }),
+    useClanMembers: (...args: unknown[]) => mockUseClanMembers(...args),
 }));
 
 const basePlayer = {
@@ -68,7 +70,32 @@ const basePlayer = {
 };
 
 describe('PlayerDetail efficiency-rank icon', () => {
-    it('renders the tracked-player efficiency icon when the API flag is true', () => {
+    beforeEach(() => {
+        mockUseClanMembers.mockReturnValue({ members: [], loading: false, error: null });
+    });
+
+    afterEach(() => {
+        mockUseClanMembers.mockClear();
+    });
+
+    it('loads clan members through the shared hook using the player clan id', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    clan_id: 4444,
+                    clan_name: 'Fixture Clan',
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(mockUseClanMembers).toHaveBeenCalledWith(4444);
+    });
+
+    it('does not render the icon for non-Expert tracked-player ranks', () => {
         render(
             <PlayerDetail
                 player={{
@@ -85,12 +112,10 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/Battlestats efficiency rank Grade II: 81st percentile among eligible tracked players\. Based on stored WG badge profile for 120 tracked players\./i)).toBeInTheDocument();
-        expect(screen.getByText('BST')).toBeInTheDocument();
-        expect(screen.getByText('II')).toBeInTheDocument();
+        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
     });
 
-    it('falls back to grade III when only the legacy icon flag is present', () => {
+    it('does not render the icon for legacy non-Expert fallback tiers', () => {
         render(
             <PlayerDetail
                 player={{
@@ -106,8 +131,28 @@ describe('PlayerDetail efficiency-rank icon', () => {
             />,
         );
 
-        expect(screen.getByLabelText(/Battlestats efficiency rank Grade III: 62nd percentile among eligible tracked players\. Based on stored WG badge profile for 84 tracked players\./i)).toBeInTheDocument();
-        expect(screen.getByText('III')).toBeInTheDocument();
+        expect(screen.queryByLabelText(/Battlestats efficiency rank/i)).not.toBeInTheDocument();
+    });
+
+    it('renders the sigma icon for Expert tracked-player ranks', () => {
+        render(
+            <PlayerDetail
+                player={{
+                    ...basePlayer,
+                    efficiency_rank_tier: 'E',
+                    has_efficiency_rank_icon: true,
+                    efficiency_rank_percentile: 0.99,
+                    efficiency_rank_population_size: 120,
+                    efficiency_rank_updated_at: '2026-03-16T00:00:00Z',
+                }}
+                onBack={() => undefined}
+                onSelectMember={() => undefined}
+                onSelectClan={() => undefined}
+            />,
+        );
+
+        expect(screen.getByLabelText(/Battlestats efficiency rank Expert: 99th percentile among eligible tracked players\. Based on stored WG badge profile for 120 tracked players\./i)).toBeInTheDocument();
+        expect(screen.getByText('Σ')).toBeInTheDocument();
     });
 
     it('hides the tracked-player efficiency icon when the API flag is false', () => {

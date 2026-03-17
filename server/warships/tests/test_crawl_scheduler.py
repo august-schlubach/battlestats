@@ -12,7 +12,8 @@ from django.test import TestCase, override_settings
 from django_celery_beat.models import CrontabSchedule, IntervalSchedule, PeriodicTask
 
 from warships.signals import ensure_daily_clan_crawl_schedule
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_clan_battle_data_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_ranked_data_refresh, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_ranked_data_task, warm_clan_battle_summaries_task
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_clan_battle_data_refresh_pending, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task
+from warships.models import Player
 
 
 @override_settings(
@@ -305,6 +306,61 @@ class RefreshTaskLockTests(TestCase):
         self.assertEqual(
             result, {"status": "skipped", "reason": "broker-unavailable"})
         mock_delay.assert_not_called()
+
+    def test_queue_efficiency_data_refresh_sets_pending_marker_until_task_finishes(self):
+        with patch("warships.tasks.update_player_efficiency_data_task.delay") as mock_delay:
+            result = queue_efficiency_data_refresh(3234)
+
+        self.assertEqual(result, {"status": "queued"})
+        self.assertTrue(is_efficiency_data_refresh_pending(3234))
+        mock_delay.assert_called_once_with(player_id=3234)
+
+    def test_queue_efficiency_data_refresh_skips_during_broker_cooldown(self):
+        cache.add("warships:tasks:update_player_efficiency_data_dispatch:cooldown",
+                  True, timeout=60)
+
+        with patch("warships.tasks.update_player_efficiency_data_task.delay") as mock_delay:
+            result = queue_efficiency_data_refresh(3234)
+
+        self.assertEqual(
+            result, {"status": "skipped", "reason": "broker-unavailable"})
+        mock_delay.assert_not_called()
+
+    def test_efficiency_refresh_task_clears_pending_marker(self):
+        cache.add("warships:tasks:update_player_efficiency_data_dispatch:5567",
+                  "queued", timeout=60)
+        player = Player.objects.create(
+            name="EfficiencyTaskPlayer", player_id=5567)
+
+        with patch("warships.data.update_player_efficiency_data") as mock_update_efficiency_data, patch("warships.data.refresh_player_explorer_summary") as mock_refresh_summary, patch("warships.tasks.queue_efficiency_rank_snapshot_refresh") as mock_queue_snapshot_refresh:
+            result = update_player_efficiency_data_task.run(player_id=5567)
+
+        self.assertEqual(result, {"status": "completed"})
+        mock_update_efficiency_data.assert_called_once()
+        self.assertEqual(
+            mock_update_efficiency_data.call_args.kwargs["player"].player_id, player.player_id)
+        mock_refresh_summary.assert_called_once()
+        mock_queue_snapshot_refresh.assert_called_once_with()
+        self.assertFalse(is_efficiency_data_refresh_pending(5567))
+
+    def test_queue_efficiency_rank_snapshot_refresh_sets_pending_marker_until_task_finishes(self):
+        with patch("warships.tasks.refresh_efficiency_rank_snapshot_task.delay") as mock_delay:
+            result = queue_efficiency_rank_snapshot_refresh()
+
+        self.assertEqual(result, {"status": "queued"})
+        self.assertTrue(is_efficiency_rank_snapshot_refresh_pending())
+        mock_delay.assert_called_once_with()
+
+    def test_efficiency_rank_snapshot_refresh_task_clears_pending_marker(self):
+        cache.add("warships:tasks:refresh_efficiency_rank_snapshot_dispatch",
+                  "queued", timeout=60)
+
+        with patch("warships.data.recompute_efficiency_rank_snapshot") as mock_recompute_snapshot:
+            result = refresh_efficiency_rank_snapshot_task.run()
+
+        self.assertEqual(result, {"status": "completed"})
+        mock_recompute_snapshot.assert_called_once_with(skip_refresh=True)
+        self.assertFalse(is_efficiency_rank_snapshot_refresh_pending())
 
     def test_post_migrate_updates_existing_periodic_task(self):
         schedule = CrontabSchedule.objects.create(

@@ -14,8 +14,14 @@ export interface ClanMemberData {
     is_clan_battle_player: boolean;
     clan_battle_win_rate: number | null;
     clan_battle_hydration_pending: boolean;
+    efficiency_hydration_pending?: boolean;
     highest_ranked_league: RankedLeagueName | null;
     ranked_hydration_pending: boolean;
     ranked_updated_at: string | null;
+    efficiency_rank_percentile?: number | null;
+    efficiency_rank_tier?: 'E' | 'I' | 'II' | 'III' | null;
+    has_efficiency_rank_icon?: boolean;
+    efficiency_rank_population_size?: number | null;
+    efficiency_rank_updated_at?: string | null;
     activity_bucket: ActivityBucketKey;
 }

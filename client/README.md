@@ -40,6 +40,8 @@ Those routed detail views also emit first-party `entity_detail_view` analytics a
 
 Hidden accounts now use a shared mask icon treatment across suggestions, landing lists, explorer rows, clan members, and player detail headers.
 
+The clan roster mounted on both `ClanDetail` and `PlayerDetail` is also the shared owner of clan-member efficiency-rank icon hydration. It fetches the single `/api/fetch/clan_members/<clan_id>/` payload, shows a compact `Updating Battlestats rank icons...` status while any member row is still warming, and then renders inline sigma icons for Expert-ranked clan members once the published rank snapshot catches up.
+
 ## Player Detail Notes
 
 The player detail surface is intentionally split across two columns.
@@ -49,7 +51,7 @@ The player detail surface is intentionally split across two columns.
 
 Recent UI tightening also reduced the badge-table body font size, simplified the efficiency summary cards, added inline badge totals in the section header, and limited the clan battle seasons table viewport to five visible rows before scroll.
 
-When the player payload includes a fresh published efficiency-rank snapshot, the header now renders a Battlestats `BST` rank chip with the published tier. This header chip is intentionally distinct from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
+When the player payload includes a fresh published efficiency-rank snapshot for an Expert-ranked player, the header now renders a compact Battlestats sigma icon next to the player name. The underlying published tier data still covers `III`, `II`, `I`, and `E`, but the current visible header treatment is intentionally limited to Expert players and remains distinct from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
 
 The clan activity chart render path was also narrowed so icon-only hydration updates do not trigger full D3 redraws. That removes the flicker that previously appeared while ranked or clan-battle badges were hydrating in the background.
 
@@ -74,10 +76,16 @@ Focused route and analytics checks include:
 npm test -- --runInBand app/components/__tests__/PlayerRouteView.test.tsx app/components/__tests__/ClanRouteView.test.tsx app/lib/__tests__/visitAnalytics.test.ts
 ```
 
-The client also has a focused player-detail regression for the Battlestats efficiency-rank header chip:
+The client also has a focused player-detail regression for the Battlestats efficiency-rank header icon:
 
 ```bash
 npm test -- --runInBand app/components/__tests__/PlayerDetail.test.tsx
+```
+
+The shared clan-roster efficiency-rank coverage is:
+
+```bash
+npm test -- --runInBand app/components/__tests__/ClanMembers.test.tsx app/components/__tests__/ClanDetail.test.tsx app/components/__tests__/PlayerDetail.test.tsx
 ```
 
 ## Analytics

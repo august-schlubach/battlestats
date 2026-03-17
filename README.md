@@ -219,7 +219,9 @@ the right column carries the broader profile and comparison views:
 
 the clan battle seasons table viewport is tuned to show five visible season rows before scrolling, and the efficiency badge section uses a denser compact layout with inline badge totals in the header.
 
-when a fresh published efficiency-rank snapshot exists, the player header also shows a Battlestats-specific `BST` rank chip with the published tier (`III`, `II`, `I`, or `E`). this is intentionally separate from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
+when a fresh published efficiency-rank snapshot exists for an Expert-ranked player, the player header shows a compact Battlestats sigma icon next to the player name. the broader published rank tiers (`III`, `II`, `I`, `E`) still exist in the payload and tooltip copy, but the current header treatment only renders the visible icon for `E`. this remains intentionally separate from the lower `Efficiency Badges` section, which still represents raw ship-level WG badge rows.
+
+the shared clan roster on both clan detail and player detail now uses the single `/api/fetch/clan_members/<clan_id>/` hydration path for efficiency-rank state. when roster rows are stale, the client shows a compact `Updating Battlestats rank icons...` status while the backend warms player efficiency data and republishes the tracked rank snapshot; once the refresh completes, only Expert-ranked clan members render the inline sigma icon without switching to per-player browser requests.
 
 ### stop the stack
 
@@ -257,6 +259,12 @@ cd client && npm run test:ci
 ```
 
 the current targeted client coverage includes route loaders, route helper utilities, header search behavior, compact efficiency badge rendering/sorting, and clan-chart redraw signatures.
+
+the focused clan/player roster efficiency-rank checks are:
+
+```bash
+cd client && npm test -- --runInBand app/components/__tests__/ClanMembers.test.tsx app/components/__tests__/ClanDetail.test.tsx app/components/__tests__/PlayerDetail.test.tsx
+```
 
 targeted analytics and routed-detail regressions are also available with:
 

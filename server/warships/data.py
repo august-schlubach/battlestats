@@ -58,6 +58,8 @@ SLEEPY_PLAYER_DAYS_THRESHOLD = 365
 CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
 CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
+CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT = max(
+    1, int(os.getenv('CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
 PLAYER_ACHIEVEMENTS_STALE_AFTER = timedelta(hours=24)
 EFFICIENCY_BADGE_CLASS_LABELS = {
@@ -521,6 +523,83 @@ def queue_clan_battle_hydration(players: Iterable[Player]) -> dict[str, Any]:
     }
 
 
+def queue_clan_efficiency_hydration(players: Iterable[Player]) -> dict[str, Any]:
+    from warships.tasks import is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh
+
+    eligible_players = [
+        player for player in players if player_efficiency_needs_refresh(player)
+    ]
+    eligible_player_ids = {player.player_id for player in eligible_players}
+    publication_stale_players = [
+        player for player in players
+        if player.player_id not in eligible_player_ids
+        and efficiency_rank_publication_needs_refresh(player)
+    ]
+    pending_player_ids: set[int] = set()
+    queued_player_ids: set[int] = set()
+    deferred_player_ids: set[int] = set()
+
+    for player in eligible_players:
+        if is_efficiency_data_refresh_pending(player.player_id):
+            pending_player_ids.add(player.player_id)
+
+    available_slots = max(
+        0, CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT - len(pending_player_ids))
+
+    for player in eligible_players:
+        if player.player_id in pending_player_ids:
+            continue
+
+        if available_slots <= 0:
+            deferred_player_ids.add(player.player_id)
+            continue
+
+        enqueue_result = queue_efficiency_data_refresh(player.player_id)
+        if enqueue_result.get("status") == "queued":
+            pending_player_ids.add(player.player_id)
+            queued_player_ids.add(player.player_id)
+            available_slots -= 1
+            continue
+
+        if enqueue_result.get("reason") == "enqueue-failed":
+            deferred_player_ids.update(
+                queued_player.player_id
+                for queued_player in eligible_players
+                if queued_player.player_id not in pending_player_ids and queued_player.player_id != player.player_id
+            )
+            deferred_player_ids.add(player.player_id)
+            break
+
+    pending_player_ids.update(deferred_player_ids)
+
+    if publication_stale_players:
+        publication_player_ids = {
+            player.player_id for player in publication_stale_players}
+
+        if is_efficiency_rank_snapshot_refresh_pending():
+            pending_player_ids.update(publication_player_ids)
+        else:
+            enqueue_result = queue_efficiency_rank_snapshot_refresh()
+            if enqueue_result.get("status") == "queued":
+                pending_player_ids.update(publication_player_ids)
+                queued_player_ids.update(publication_player_ids)
+            elif enqueue_result.get("reason") == "already-queued":
+                pending_player_ids.update(publication_player_ids)
+            elif enqueue_result.get("reason") == "enqueue-failed":
+                pending_player_ids.update(publication_player_ids)
+                deferred_player_ids.update(publication_player_ids)
+
+    return {
+        'pending_player_ids': pending_player_ids,
+        'queued_player_ids': queued_player_ids,
+        'deferred_player_ids': deferred_player_ids,
+        'eligible_player_ids': eligible_player_ids.union(
+            player.player_id for player in publication_stale_players
+        ),
+        'max_in_flight': CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT,
+    }
+
+
 def _ranked_rows_have_top_ship(rows: Any) -> bool:
     normalized_rows = _coerce_ranked_rows(rows)
     return all('top_ship_name' in row for row in normalized_rows)
@@ -805,6 +884,20 @@ def _get_published_efficiency_rank_payload(player: Player) -> dict[str, Any]:
         'efficiency_rank_population_size': explorer_summary.efficiency_rank_population_size,
         'efficiency_rank_updated_at': explorer_summary.efficiency_rank_updated_at,
     }
+
+
+def efficiency_rank_publication_needs_refresh(player: Player) -> bool:
+    if player.is_hidden:
+        return False
+
+    explorer_summary = getattr(player, 'explorer_summary', None)
+    if explorer_summary is None:
+        return False
+
+    if _efficiency_rank_eligibility_reason(player, explorer_summary) is not None:
+        return False
+
+    return not _efficiency_rank_snapshot_is_fresh(player, explorer_summary)
 
 
 def _efficiency_rank_tier_from_percentile(percentile: Optional[float]) -> Optional[str]:

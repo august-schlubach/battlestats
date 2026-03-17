@@ -301,6 +301,8 @@ def run_clan_crawl(
     limit: Optional[int] = None,
     heartbeat_callback: Optional[Callable[[], None]] = None,
 ) -> dict[str, int | bool]:
+    from warships.tasks import queue_efficiency_rank_snapshot_refresh
+
     if not APP_ID:
         raise RuntimeError("WG_APP_ID environment variable is not set")
 
@@ -328,6 +330,8 @@ def run_clan_crawl(
         resume=resume,
         heartbeat_callback=heartbeat_callback,
     )
+    if summary.get("players_saved", 0) > 0:
+        queue_efficiency_rank_snapshot_refresh()
     summary.update({
         "resume": resume,
         "dry_run": False,

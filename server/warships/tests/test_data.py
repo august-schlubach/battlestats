@@ -5,9 +5,9 @@ from django.test import TestCase, override_settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from warships.clan_crawl import save_player
+from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
@@ -33,6 +33,59 @@ class SnapshotDataTests(TestCase):
         snapshot = Snapshot.objects.get(player=player, date=today)
         self.assertEqual(snapshot.battles, 103)
         self.assertEqual(snapshot.wins, 52)
+
+
+class ClanCrawlPublicationTests(TestCase):
+    @patch("warships.clan_crawl.crawl_clan_members", return_value={"clans_processed": 1, "players_saved": 3, "skipped": 0})
+    @patch("warships.clan_crawl.crawl_clan_ids", return_value=[{"clan_id": 1001}])
+    @patch("warships.tasks.queue_efficiency_rank_snapshot_refresh")
+    @patch("warships.clan_crawl.APP_ID", "fixture-app-id")
+    def test_run_clan_crawl_queues_efficiency_rank_snapshot_after_saving_players(
+        self,
+        mock_queue_efficiency_rank_snapshot_refresh,
+        mock_crawl_clan_ids,
+        mock_crawl_clan_members,
+    ):
+        summary = run_clan_crawl()
+
+        self.assertEqual(summary["players_saved"], 3)
+        mock_crawl_clan_ids.assert_called_once()
+        mock_crawl_clan_members.assert_called_once()
+        mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with()
+
+    @patch("warships.clan_crawl.crawl_clan_members", return_value={"clans_processed": 1, "players_saved": 0, "skipped": 1})
+    @patch("warships.clan_crawl.crawl_clan_ids", return_value=[{"clan_id": 1001}])
+    @patch("warships.tasks.queue_efficiency_rank_snapshot_refresh")
+    @patch("warships.clan_crawl.APP_ID", "fixture-app-id")
+    def test_run_clan_crawl_skips_efficiency_rank_snapshot_when_no_players_saved(
+        self,
+        mock_queue_efficiency_rank_snapshot_refresh,
+        mock_crawl_clan_ids,
+        mock_crawl_clan_members,
+    ):
+        summary = run_clan_crawl()
+
+        self.assertEqual(summary["players_saved"], 0)
+        mock_crawl_clan_ids.assert_called_once()
+        mock_crawl_clan_members.assert_called_once()
+        mock_queue_efficiency_rank_snapshot_refresh.assert_not_called()
+
+    @patch("warships.clan_crawl.crawl_clan_members")
+    @patch("warships.clan_crawl.crawl_clan_ids", return_value=[{"clan_id": 1001}])
+    @patch("warships.tasks.queue_efficiency_rank_snapshot_refresh")
+    @patch("warships.clan_crawl.APP_ID", "fixture-app-id")
+    def test_run_clan_crawl_dry_run_does_not_queue_efficiency_rank_snapshot(
+        self,
+        mock_queue_efficiency_rank_snapshot_refresh,
+        mock_crawl_clan_ids,
+        mock_crawl_clan_members,
+    ):
+        summary = run_clan_crawl(dry_run=True)
+
+        self.assertTrue(summary["dry_run"])
+        mock_crawl_clan_ids.assert_called_once()
+        mock_crawl_clan_members.assert_not_called()
+        mock_queue_efficiency_rank_snapshot_refresh.assert_not_called()
 
 
 class ActivityDataRefreshTests(TestCase):
@@ -757,6 +810,123 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(hydration_state["deferred_player_ids"], {7115})
         self.assertEqual(hydration_state["max_in_flight"], 1)
         mock_queue_clan_battle_data_refresh.assert_not_called()
+
+    @patch("warships.tasks.queue_efficiency_data_refresh")
+    @patch("warships.tasks.is_efficiency_data_refresh_pending")
+    @patch("warships.tasks.is_efficiency_rank_snapshot_refresh_pending", return_value=False)
+    def test_queue_clan_efficiency_hydration_only_enqueues_missing_or_stale_players(
+        self,
+        mock_is_efficiency_rank_snapshot_refresh_pending,
+        mock_is_efficiency_data_refresh_pending,
+        mock_queue_efficiency_data_refresh,
+    ):
+        fresh_player = Player.objects.create(
+            name="FreshEfficiencyMember",
+            player_id=7116,
+            efficiency_json=[],
+            efficiency_updated_at=timezone.now() - timedelta(hours=2),
+            pvp_battles=500,
+        )
+        missing_player = Player.objects.create(
+            name="MissingEfficiencyMember",
+            player_id=7117,
+            efficiency_json=None,
+            efficiency_updated_at=None,
+            pvp_battles=500,
+        )
+        queued_player = Player.objects.create(
+            name="AlreadyQueuedEfficiencyMember",
+            player_id=7118,
+            efficiency_json=None,
+            efficiency_updated_at=timezone.now() - timedelta(days=2),
+            pvp_battles=500,
+        )
+
+        mock_is_efficiency_data_refresh_pending.side_effect = lambda player_id: player_id == queued_player.player_id
+        mock_queue_efficiency_data_refresh.return_value = {"status": "queued"}
+
+        hydration_state = queue_clan_efficiency_hydration(
+            [fresh_player, missing_player, queued_player]
+        )
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7117, 7118})
+        self.assertEqual(hydration_state["queued_player_ids"], {7117})
+        self.assertEqual(hydration_state["deferred_player_ids"], set())
+        mock_queue_efficiency_data_refresh.assert_called_once_with(7117)
+
+    @patch("warships.tasks.queue_efficiency_data_refresh")
+    @patch("warships.tasks.is_efficiency_data_refresh_pending")
+    @patch("warships.data.CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT", 1)
+    @patch("warships.tasks.is_efficiency_rank_snapshot_refresh_pending", return_value=False)
+    def test_queue_clan_efficiency_hydration_defers_when_in_flight_budget_is_full(
+        self,
+        mock_is_efficiency_rank_snapshot_refresh_pending,
+        mock_is_efficiency_data_refresh_pending,
+        mock_queue_efficiency_data_refresh,
+    ):
+        already_pending_player = Player.objects.create(
+            name="AlreadyPendingEfficiencyMember",
+            player_id=7119,
+            efficiency_json=None,
+            efficiency_updated_at=timezone.now() - timedelta(days=2),
+            pvp_battles=500,
+        )
+        deferred_player = Player.objects.create(
+            name="DeferredEfficiencyMember",
+            player_id=7120,
+            efficiency_json=None,
+            efficiency_updated_at=timezone.now() - timedelta(days=2),
+            pvp_battles=500,
+        )
+
+        mock_is_efficiency_data_refresh_pending.side_effect = lambda player_id: player_id == already_pending_player.player_id
+
+        hydration_state = queue_clan_efficiency_hydration(
+            [already_pending_player, deferred_player]
+        )
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7119, 7120})
+        self.assertEqual(hydration_state["queued_player_ids"], set())
+        self.assertEqual(hydration_state["deferred_player_ids"], {7120})
+        self.assertEqual(hydration_state["max_in_flight"], 1)
+        mock_queue_efficiency_data_refresh.assert_not_called()
+
+    @patch("warships.tasks.queue_efficiency_rank_snapshot_refresh")
+    @patch("warships.tasks.is_efficiency_rank_snapshot_refresh_pending")
+    @patch("warships.tasks.is_efficiency_data_refresh_pending", return_value=False)
+    def test_queue_clan_efficiency_hydration_marks_snapshot_stale_players_pending(
+        self,
+        mock_is_efficiency_data_refresh_pending,
+        mock_is_efficiency_rank_snapshot_refresh_pending,
+        mock_queue_efficiency_rank_snapshot_refresh,
+    ):
+        player = Player.objects.create(
+            name="PublicationStaleMember",
+            player_id=7121,
+            pvp_battles=500,
+            efficiency_json=[{"ship_id": 1, "top_grade_class": 4}],
+            efficiency_updated_at=timezone.now(),
+            battles_updated_at=timezone.now(),
+        )
+        PlayerExplorerSummary.objects.create(
+            player=player,
+            eligible_ship_count=6,
+            efficiency_badge_rows_total=6,
+            badge_rows_unmapped=0,
+            normalized_badge_strength=0.6,
+            efficiency_rank_updated_at=None,
+        )
+
+        mock_is_efficiency_rank_snapshot_refresh_pending.return_value = False
+        mock_queue_efficiency_rank_snapshot_refresh.return_value = {
+            "status": "queued"}
+
+        hydration_state = queue_clan_efficiency_hydration([player])
+
+        self.assertEqual(hydration_state["pending_player_ids"], {7121})
+        self.assertEqual(hydration_state["queued_player_ids"], {7121})
+        self.assertEqual(hydration_state["deferred_player_ids"], set())
+        mock_queue_efficiency_rank_snapshot_refresh.assert_called_once_with()
 
 
 class PlayerDataHardeningTests(TestCase):

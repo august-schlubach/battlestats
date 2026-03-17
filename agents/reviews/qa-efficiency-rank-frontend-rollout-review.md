@@ -11,7 +11,7 @@ _Reviewed: 2026-03-16_
 5. [server/warships/data.py](/home/august/code/archive/battlestats/server/warships/data.py)
 6. [client/app/components/PlayerDetail.tsx](/home/august/code/archive/battlestats/client/app/components/PlayerDetail.tsx)
 7. [client/app/components/PlayerEfficiencyBadges.tsx](/home/august/code/archive/battlestats/client/app/components/PlayerEfficiencyBadges.tsx)
-8. [client/app/components/**tests**/PlayerDetail.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerDetail.test.tsx)
+8. [client/app/components/__tests__/PlayerDetail.test.tsx](/home/august/code/archive/battlestats/client/app/components/__tests__/PlayerDetail.test.tsx)
 
 ## QA Verdict
 

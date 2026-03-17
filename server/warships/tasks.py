@@ -29,6 +29,8 @@ RANKED_INCREMENTAL_LOCK_KEY = "warships:tasks:incremental_ranked_data:lock"
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
 RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 
 
@@ -50,12 +52,28 @@ def _clan_battle_refresh_dispatch_key(player_id: object) -> str:
     return f"warships:tasks:update_player_clan_battle_data_dispatch:{player_id}"
 
 
+def _efficiency_refresh_dispatch_key(player_id: object) -> str:
+    return f"warships:tasks:update_player_efficiency_data_dispatch:{player_id}"
+
+
+def _efficiency_snapshot_refresh_dispatch_key() -> str:
+    return "warships:tasks:refresh_efficiency_rank_snapshot_dispatch"
+
+
 def _ranked_refresh_failure_key() -> str:
     return "warships:tasks:update_ranked_data_dispatch:cooldown"
 
 
 def _clan_battle_refresh_failure_key() -> str:
     return "warships:tasks:update_player_clan_battle_data_dispatch:cooldown"
+
+
+def _efficiency_refresh_failure_key() -> str:
+    return "warships:tasks:update_player_efficiency_data_dispatch:cooldown"
+
+
+def _efficiency_snapshot_refresh_failure_key() -> str:
+    return "warships:tasks:refresh_efficiency_rank_snapshot_dispatch:cooldown"
 
 
 def touch_clan_crawl_heartbeat(timestamp: float | None = None) -> float:
@@ -140,6 +158,59 @@ def queue_clan_battle_data_refresh(player_id: object):
         logger.warning(
             "Skipping clan battle refresh enqueue for player_id=%s because broker dispatch failed: %s",
             player_id,
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def is_efficiency_data_refresh_pending(player_id: object) -> bool:
+    return bool(cache.get(_efficiency_refresh_dispatch_key(player_id)))
+
+
+def queue_efficiency_data_refresh(player_id: object):
+    if cache.get(_efficiency_refresh_failure_key()):
+        return {"status": "skipped", "reason": "broker-unavailable"}
+
+    dispatch_key = _efficiency_refresh_dispatch_key(player_id)
+    if not cache.add(dispatch_key, "queued", timeout=EFFICIENCY_REFRESH_DISPATCH_TIMEOUT):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        update_player_efficiency_data_task.delay(player_id=player_id)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        cache.set(_efficiency_refresh_failure_key(), True,
+                  timeout=BROKER_DISPATCH_FAILURE_COOLDOWN)
+        logger.warning(
+            "Skipping efficiency refresh enqueue for player_id=%s because broker dispatch failed: %s",
+            player_id,
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def is_efficiency_rank_snapshot_refresh_pending() -> bool:
+    return bool(cache.get(_efficiency_snapshot_refresh_dispatch_key()))
+
+
+def queue_efficiency_rank_snapshot_refresh():
+    if cache.get(_efficiency_snapshot_refresh_failure_key()):
+        return {"status": "skipped", "reason": "broker-unavailable"}
+
+    dispatch_key = _efficiency_snapshot_refresh_dispatch_key()
+    if not cache.add(dispatch_key, "queued", timeout=EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        refresh_efficiency_rank_snapshot_task.delay()
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        cache.set(_efficiency_snapshot_refresh_failure_key(), True,
+                  timeout=BROKER_DISPATCH_FAILURE_COOLDOWN)
+        logger.warning(
+            "Skipping efficiency-rank snapshot refresh enqueue because broker dispatch failed: %s",
             error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
@@ -274,6 +345,47 @@ def update_player_clan_battle_data_task(self, player_id):
         )
     finally:
         cache.delete(_clan_battle_refresh_dispatch_key(player_id))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def update_player_efficiency_data_task(self, player_id):
+    from warships.data import refresh_player_explorer_summary, update_player_efficiency_data
+    from warships.models import Player
+
+    logger.info(
+        "Starting update_player_efficiency_data_task for player_id=%s", player_id)
+
+    def _refresh_player_efficiency():
+        player = Player.objects.get(player_id=player_id)
+        update_player_efficiency_data(player=player)
+        refresh_player_explorer_summary(player)
+        queue_efficiency_rank_snapshot_refresh()
+
+    try:
+        return _run_locked_task(
+            "update_player_efficiency_data",
+            player_id,
+            self.request.id,
+            _refresh_player_efficiency,
+        )
+    finally:
+        cache.delete(_efficiency_refresh_dispatch_key(player_id))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def refresh_efficiency_rank_snapshot_task(self):
+    from warships.data import recompute_efficiency_rank_snapshot
+
+    logger.info("Starting refresh_efficiency_rank_snapshot_task")
+    try:
+        return _run_locked_task(
+            "refresh_efficiency_rank_snapshot",
+            "global",
+            self.request.id,
+            lambda: recompute_efficiency_rank_snapshot(skip_refresh=True),
+        )
+    finally:
+        cache.delete(_efficiency_snapshot_refresh_dispatch_key())
 
 
 @app.task(bind=True, **TASK_OPTS)

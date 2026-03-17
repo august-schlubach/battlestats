@@ -226,9 +226,15 @@ class ClanMemberSerializer(serializers.Serializer):
     is_clan_battle_player = serializers.BooleanField()
     clan_battle_win_rate = serializers.FloatField(allow_null=True)
     clan_battle_hydration_pending = serializers.BooleanField()
+    efficiency_hydration_pending = serializers.BooleanField()
     highest_ranked_league = serializers.CharField(allow_null=True)
     ranked_hydration_pending = serializers.BooleanField()
     ranked_updated_at = serializers.DateTimeField(allow_null=True)
+    efficiency_rank_percentile = serializers.FloatField(allow_null=True)
+    efficiency_rank_tier = serializers.CharField(allow_null=True)
+    has_efficiency_rank_icon = serializers.BooleanField()
+    efficiency_rank_population_size = serializers.IntegerField(allow_null=True)
+    efficiency_rank_updated_at = serializers.DateTimeField(allow_null=True)
     activity_bucket = serializers.SerializerMethodField()
 
     def get_activity_bucket(self, obj):

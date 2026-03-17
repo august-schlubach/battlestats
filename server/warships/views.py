@@ -23,7 +23,7 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
 from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data, fetch_randoms_data, fetch_clan_plot_data, _extract_randoms_rows, \
     fetch_ranked_data, fetch_clan_battle_seasons, has_clan_battle_summary_cache, fetch_player_summary, \
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
-    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, get_player_clan_battle_summaries, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
+    fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, get_player_clan_battle_summaries, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
 from warships.landing import get_landing_clans_payload, get_landing_players_payload, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
@@ -453,7 +453,7 @@ def clan_members(request, clan_id: str) -> Response:
 
     _record_clan_lookup(clan)
 
-    from warships.data import update_clan_data, update_clan_members, queue_clan_battle_hydration, queue_clan_ranked_hydration
+    from warships.data import update_clan_data, update_clan_members, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration
     if not clan.members_count or (clan.leader_id is None and not clan.leader_name):
         update_clan_data(clan_id=clan_id)
         clan.refresh_from_db()
@@ -470,6 +470,8 @@ def clan_members(request, clan_id: str) -> Response:
     pending_player_ids = hydration_state['pending_player_ids']
     clan_battle_hydration_state = queue_clan_battle_hydration(members)
     pending_clan_battle_player_ids = clan_battle_hydration_state['pending_player_ids']
+    efficiency_hydration_state = queue_clan_efficiency_hydration(members)
+    pending_efficiency_player_ids = efficiency_hydration_state['pending_player_ids']
 
     leader_name = (clan.leader_name or '').strip().lower()
     member_rows = [
@@ -489,9 +491,11 @@ def clan_members(request, clan_id: str) -> Response:
                 clan_battle_summary['total_battles'], clan_battle_summary['seasons_participated']),
             'clan_battle_win_rate': clan_battle_summary['win_rate'],
             'clan_battle_hydration_pending': member.player_id in pending_clan_battle_player_ids,
+            'efficiency_hydration_pending': member.player_id in pending_efficiency_player_ids,
             'highest_ranked_league': get_highest_ranked_league_name(member.ranked_json),
             'ranked_hydration_pending': member.player_id in pending_player_ids,
             'ranked_updated_at': member.ranked_updated_at,
+            **_get_published_efficiency_rank_payload(member),
         }
         for member in members
         for clan_battle_summary in [get_player_clan_battle_summary(member.player_id, allow_fetch=False)]
@@ -515,6 +519,14 @@ def clan_members(request, clan_id: str) -> Response:
         len(clan_battle_hydration_state['pending_player_ids']))
     response['X-Clan-Battle-Hydration-Max-In-Flight'] = str(
         clan_battle_hydration_state['max_in_flight'])
+    response['X-Efficiency-Hydration-Queued'] = str(
+        len(efficiency_hydration_state['queued_player_ids']))
+    response['X-Efficiency-Hydration-Deferred'] = str(
+        len(efficiency_hydration_state['deferred_player_ids']))
+    response['X-Efficiency-Hydration-Pending'] = str(
+        len(efficiency_hydration_state['pending_player_ids']))
+    response['X-Efficiency-Hydration-Max-In-Flight'] = str(
+        efficiency_hydration_state['max_in_flight'])
     return response
 
 
