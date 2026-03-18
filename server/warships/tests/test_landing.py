@@ -3,7 +3,7 @@ from unittest.mock import patch
 from django.core.cache import cache
 from django.test import TestCase
 
-from warships.landing import LANDING_CLAN_CACHE_TTL, LANDING_CLANS_CACHE_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, get_landing_clans_payload, get_landing_players_payload, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_player_cache_key, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import LANDING_CLAN_CACHE_TTL, LANDING_CLANS_CACHE_KEY, LANDING_PLAYER_CACHE_TTL, LANDING_PLAYER_LIMIT, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, get_landing_clans_payload, get_landing_clans_payload_with_cache_metadata, get_landing_players_payload, get_landing_players_payload_with_cache_metadata, invalidate_landing_clan_caches, invalidate_landing_player_caches, landing_player_cache_key, normalize_landing_player_limit, normalize_landing_player_mode
 
 
 class LandingHelperTests(TestCase):
@@ -58,27 +58,19 @@ class LandingHelperTests(TestCase):
         self.assertIsNone(cache.get(refreshed_best_key))
         self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
-    @patch('warships.landing.cache.get_or_set')
-    def test_landing_clans_use_one_hour_cache_ttl(self, mock_get_or_set):
-        mock_get_or_set.return_value = []
+    def test_landing_clans_use_one_hour_cache_ttl(self):
+        _, metadata = get_landing_clans_payload_with_cache_metadata()
+        self.assertEqual(metadata['ttl_seconds'], LANDING_CLAN_CACHE_TTL)
 
-        get_landing_clans_payload()
+    def test_all_landing_player_modes_use_one_hour_cache_ttl(self):
+        _, random_meta = get_landing_players_payload_with_cache_metadata(
+            'random', 40)
+        self.assertEqual(random_meta['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
 
-        self.assertEqual(
-            mock_get_or_set.call_args[0][2], LANDING_CLAN_CACHE_TTL)
+        _, best_meta = get_landing_players_payload_with_cache_metadata(
+            'best', 40)
+        self.assertEqual(best_meta['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)
 
-    @patch('warships.landing.cache.get_or_set')
-    def test_all_landing_player_modes_use_one_hour_cache_ttl(self, mock_get_or_set):
-        mock_get_or_set.return_value = []
-
-        get_landing_players_payload('random', 40)
-        self.assertEqual(
-            mock_get_or_set.call_args_list[0][0][2], LANDING_PLAYER_CACHE_TTL)
-
-        get_landing_players_payload('best', 40)
-        self.assertEqual(
-            mock_get_or_set.call_args_list[1][0][2], LANDING_PLAYER_CACHE_TTL)
-
-        get_landing_players_payload('sigma', 40)
-        self.assertEqual(
-            mock_get_or_set.call_args_list[2][0][2], LANDING_PLAYER_CACHE_TTL)
+        _, sigma_meta = get_landing_players_payload_with_cache_metadata(
+            'sigma', 40)
+        self.assertEqual(sigma_meta['ttl_seconds'], LANDING_PLAYER_CACHE_TTL)

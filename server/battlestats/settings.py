@@ -159,6 +159,13 @@ CORS_EXPOSE_HEADERS = [
     'X-Battles-Updated-At',
     'X-Ranked-Updated-At',
     'X-Clan-Battles-Pending',
+    'X-Landing-Players-Cache-Mode',
+    'X-Landing-Players-Cache-TTL-Seconds',
+    'X-Landing-Players-Cache-Cached-At',
+    'X-Landing-Players-Cache-Expires-At',
+    'X-Landing-Clans-Cache-TTL-Seconds',
+    'X-Landing-Clans-Cache-Cached-At',
+    'X-Landing-Clans-Cache-Expires-At',
 ]
 
 if not DEBUG:

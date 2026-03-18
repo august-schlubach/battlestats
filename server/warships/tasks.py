@@ -32,6 +32,8 @@ CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
+LANDING_PAGE_WARM_LOCK_KEY = "warships:tasks:warm_landing_page_content:lock"
+LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -425,6 +427,33 @@ def warm_clan_battle_summaries_task(self, clan_ids=None):
     logger.info(
         "Finished warm_clan_battle_summaries_task for clan_ids=%s", configured_ids)
     return {"status": "completed", "results": results}
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_landing_page_content_task(self, include_recent=True):
+    from warships.landing import LANDING_RECENT_CLANS_CACHE_KEY, invalidate_landing_recent_player_cache, warm_landing_page_content
+
+    logger.info(
+        "Starting warm_landing_page_content_task include_recent=%s",
+        include_recent,
+    )
+
+    if not cache.add(LANDING_PAGE_WARM_LOCK_KEY, self.request.id, timeout=LANDING_PAGE_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_landing_page_content_task because another landing warm is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        if include_recent:
+            invalidate_landing_recent_player_cache()
+            cache.delete(LANDING_RECENT_CLANS_CACHE_KEY)
+
+        result = warm_landing_page_content(force_refresh=True)
+        logger.info("Finished warm_landing_page_content_task: %s", result)
+        return result
+    finally:
+        cache.delete(LANDING_PAGE_WARM_LOCK_KEY)
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)

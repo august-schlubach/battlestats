@@ -25,7 +25,7 @@ from warships.data import fetch_tier_data, fetch_activity_data, fetch_type_data,
     fetch_player_explorer_rows, fetch_wr_distribution, fetch_player_population_distribution, fetch_player_wr_survival_correlation, \
     fetch_player_tier_type_correlation, fetch_player_ranked_wr_battles_correlation, fetch_player_clan_battle_seasons, fetch_landing_activity_attrition, compute_player_verdict, _explorer_summary_needs_refresh, _get_published_efficiency_rank_payload, refresh_player_explorer_summary, update_battle_data, _calculate_tier_filtered_pvp_record, get_player_clan_battle_summaries, get_player_clan_battle_summary, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, \
     is_sleepy_player, get_highest_ranked_league_name
-from warships.landing import get_landing_clans_payload, get_landing_players_payload, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_player_limit, normalize_landing_player_mode
+from warships.landing import get_landing_clans_payload_with_cache_metadata, get_landing_players_payload_with_cache_metadata, get_landing_recent_clans_payload, get_landing_recent_players_payload, invalidate_landing_clan_caches, invalidate_landing_recent_player_cache, normalize_landing_player_limit, normalize_landing_player_mode
 from warships.visit_analytics import get_top_entities, record_entity_visit
 from warships.agentic.dashboard import get_agentic_trace_dashboard
 from .tasks import update_clan_data_task, update_player_data_task, update_clan_members_task
@@ -586,7 +586,15 @@ def landing_activity_attrition(request) -> Response:
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def landing_clans(request) -> Response:
-    return Response(get_landing_clans_payload())
+    payload, cache_metadata = get_landing_clans_payload_with_cache_metadata()
+    response = Response(payload)
+    response['X-Landing-Clans-Cache-TTL-Seconds'] = str(
+        cache_metadata['ttl_seconds'])
+    response['X-Landing-Clans-Cache-Cached-At'] = str(
+        cache_metadata['cached_at'])
+    response['X-Landing-Clans-Cache-Expires-At'] = str(
+        cache_metadata['expires_at'])
+    return response
 
 
 @api_view(["GET"])
@@ -603,7 +611,19 @@ def landing_players(request) -> Response:
     except ValueError:
         return Response({'detail': 'mode must be one of: random, best'}, status=status.HTTP_400_BAD_REQUEST)
     limit = normalize_landing_player_limit(request.query_params.get('limit'))
-    return Response(get_landing_players_payload(mode=mode, limit=limit))
+    payload, cache_metadata = get_landing_players_payload_with_cache_metadata(
+        mode=mode,
+        limit=limit,
+    )
+    response = Response(payload)
+    response['X-Landing-Players-Cache-Mode'] = mode
+    response['X-Landing-Players-Cache-TTL-Seconds'] = str(
+        cache_metadata['ttl_seconds'])
+    response['X-Landing-Players-Cache-Cached-At'] = str(
+        cache_metadata['cached_at'])
+    response['X-Landing-Players-Cache-Expires-At'] = str(
+        cache_metadata['expires_at'])
+    return response
 
 
 @api_view(["GET"])

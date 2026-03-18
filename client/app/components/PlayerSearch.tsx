@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBed, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
+import { faBed, faCircleInfo, faRobot, faShieldHalved, faStar } from '@fortawesome/free-solid-svg-icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import ClanDetail from './ClanDetail';
 import EfficiencyRankIcon, { resolveEfficiencyRankTier, type EfficiencyRankTier } from './EfficiencyRankIcon';
@@ -246,6 +246,60 @@ const SHOW_PLAYER_EXPLORER = false;
 type LandingClanMode = 'random' | 'best';
 type LandingPlayerMode = 'random' | 'best' | 'sigma';
 
+interface LandingPlayersCacheInfo {
+    mode: LandingPlayerMode;
+    ttlSeconds: number | null;
+    cachedAt: string | null;
+    expiresAt: string | null;
+}
+
+interface LandingClansCacheInfo {
+    ttlSeconds: number | null;
+    cachedAt: string | null;
+    expiresAt: string | null;
+}
+
+const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
+
+const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
+const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ WR × I(Battles ≥ 100k) × I(ActiveShare ≥ 0.30), tie → Battles';
+
+const parseLandingPlayersCacheInfo = (response: Response, mode: LandingPlayerMode): LandingPlayersCacheInfo => {
+    const ttlSeconds = Number.parseInt(response.headers.get('X-Landing-Players-Cache-TTL-Seconds') || '', 10);
+
+    return {
+        mode,
+        ttlSeconds: Number.isFinite(ttlSeconds) ? ttlSeconds : null,
+        cachedAt: response.headers.get('X-Landing-Players-Cache-Cached-At'),
+        expiresAt: response.headers.get('X-Landing-Players-Cache-Expires-At'),
+    };
+};
+
+const parseLandingClansCacheInfo = (response: Response): LandingClansCacheInfo => {
+    const ttlSeconds = Number.parseInt(response.headers.get('X-Landing-Clans-Cache-TTL-Seconds') || '', 10);
+
+    return {
+        ttlSeconds: Number.isFinite(ttlSeconds) ? ttlSeconds : null,
+        cachedAt: response.headers.get('X-Landing-Clans-Cache-Cached-At'),
+        expiresAt: response.headers.get('X-Landing-Clans-Cache-Expires-At'),
+    };
+};
+
+const formatRemainingMinutes = (expiresAt: string | null): string => {
+    if (!expiresAt) {
+        return 'refresh window unavailable';
+    }
+
+    const expiresAtMs = Date.parse(expiresAt);
+    if (Number.isNaN(expiresAtMs)) {
+        return 'refresh window unavailable';
+    }
+
+    const remainingMs = Math.max(0, expiresAtMs - Date.now());
+    const remainingMinutes = Math.ceil(remainingMs / LANDING_PLAYER_REFRESH_INTERVAL_MS);
+    return `refreshes in about ${remainingMinutes} min`;
+};
+
 const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
     const contentType = response.headers.get('content-type') || '';
 
@@ -270,40 +324,54 @@ const PlayerSearch: React.FC = () => {
     const [isLoadingPlayer, setIsLoadingPlayer] = useState(false);
     const [clans, setClans] = useState<LandingClan[]>([]);
     const [clanMode, setClanMode] = useState<LandingClanMode>('random');
+    const [landingClansCacheInfo, setLandingClansCacheInfo] = useState<LandingClansCacheInfo | null>(null);
     const [recentClans, setRecentClans] = useState<LandingClan[]>([]);
     const [players, setPlayers] = useState<LandingPlayer[]>([]);
     const [playerMode, setPlayerMode] = useState<LandingPlayerMode>('random');
+    const [landingPlayersCacheInfo, setLandingPlayersCacheInfo] = useState<LandingPlayersCacheInfo | null>(null);
     const [recentPlayers, setRecentPlayers] = useState<LandingPlayer[]>([]);
     const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
     const lastSubmittedSearchRef = useRef<string>('');
 
+    const fetchLandingClans = useCallback(async () => {
+        const response = await fetch('http://localhost:8888/api/landing/clans/');
+        const payload = await readJsonOrThrow<LandingClan[]>(response, 'Landing clans');
+        setClans(Array.isArray(payload) ? payload : []);
+        setLandingClansCacheInfo(parseLandingClansCacheInfo(response));
+    }, []);
+
     const fetchLandingData = useCallback(async () => {
         try {
-            const [clansRes, recentClansRes, recentRes] = await Promise.all([
-                fetch('http://localhost:8888/api/landing/clans/'),
+            const [recentClansRes, recentRes] = await Promise.all([
                 fetch('http://localhost:8888/api/landing/recent-clans/'),
                 fetch('http://localhost:8888/api/landing/recent/'),
             ]);
-            const [clansPayload, recentClansPayload, recentPlayersPayload] = await Promise.all([
-                readJsonOrThrow<LandingClan[]>(clansRes, 'Landing clans'),
+            const [recentClansPayload, recentPlayersPayload] = await Promise.all([
                 readJsonOrThrow<LandingClan[]>(recentClansRes, 'Recent clans'),
                 readJsonOrThrow<LandingPlayer[]>(recentRes, 'Recent players'),
             ]);
-            setClans(Array.isArray(clansPayload) ? clansPayload : []);
             setRecentClans(Array.isArray(recentClansPayload) ? recentClansPayload : []);
             setRecentPlayers(Array.isArray(recentPlayersPayload) ? recentPlayersPayload : []);
         } catch (err) {
             console.error('Error fetching landing data:', err);
         }
-    }, []);
+        try {
+            await fetchLandingClans();
+        } catch (err) {
+            console.error('Error fetching landing clans:', err);
+            setLandingClansCacheInfo(null);
+        }
+    }, [fetchLandingClans]);
 
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
             const response = await fetch(`http://localhost:8888/api/landing/players/?mode=${mode}&limit=${LANDING_LIMIT}`);
             const payload = await readJsonOrThrow<LandingPlayer[]>(response, `Landing players (${mode})`);
+            setLandingPlayersCacheInfo(parseLandingPlayersCacheInfo(response, mode));
             setPlayers(Array.isArray(payload) ? payload : []);
         } catch (err) {
             console.error('Error fetching landing players:', err);
+            setLandingPlayersCacheInfo(null);
             setPlayers([]);
         }
     }, []);
@@ -328,6 +396,22 @@ const PlayerSearch: React.FC = () => {
 
     useEffect(() => {
         void fetchLandingPlayers(playerMode);
+    }, [fetchLandingPlayers, playerMode]);
+
+    useEffect(() => {
+        const interval = window.setInterval(() => {
+            void fetchLandingClans();
+        }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
+
+        return () => window.clearInterval(interval);
+    }, [fetchLandingClans]);
+
+    useEffect(() => {
+        const interval = window.setInterval(() => {
+            void fetchLandingPlayers(playerMode);
+        }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
+
+        return () => window.clearInterval(interval);
     }, [fetchLandingPlayers, playerMode]);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
@@ -504,6 +588,31 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Best
                                 </button>
+                                <div className="group relative inline-flex items-center">
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#c6dbef] bg-white text-[#6baed6] transition-colors hover:bg-[#eff3ff] hover:text-[#2171b5] focus:outline-none focus-visible:text-[#2171b5]"
+                                        aria-label="Clan ranking formula and clan list cache refresh details"
+                                        onMouseEnter={() => {
+                                            void fetchLandingClans();
+                                        }}
+                                        onFocus={() => {
+                                            void fetchLandingClans();
+                                        }}
+                                    >
+                                        <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
+                                    </button>
+                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[#c6dbef] bg-white px-3 py-3 text-left text-xs normal-case tracking-normal text-[#334155] shadow-lg group-hover:block group-focus-within:block">
+                                        <p className="font-semibold uppercase tracking-wide text-[#2171b5]">Best approximation</p>
+                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[#1e3a5f]">{CLAN_BEST_FORMULA_APPROXIMATION}</p>
+                                        <p className="mt-2 leading-5 text-[#475569]">
+                                            Current clan Best is a thresholded competitive surface: require at least 100k total battles and at least 30% active members, then rank by clan WR with total battles as the first tie-break.
+                                        </p>
+                                        <p className="mt-3 text-[#2171b5]">
+                                            Current clan cache {formatRemainingMinutes(landingClansCacheInfo?.expiresAt || null)}.
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                             <div className="mt-3">
                                 <LandingClanSVG
@@ -559,6 +668,31 @@ const PlayerSearch: React.FC = () => {
                                 >
                                     Sigma
                                 </button>
+                                <div className="group relative inline-flex items-center">
+                                    <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#c6dbef] bg-white text-[#6baed6] transition-colors hover:bg-[#eff3ff] hover:text-[#2171b5] focus:outline-none focus-visible:text-[#2171b5]"
+                                        aria-label="Best ranking formula and player list cache refresh details"
+                                        onMouseEnter={() => {
+                                            void fetchLandingPlayers(playerMode);
+                                        }}
+                                        onFocus={() => {
+                                            void fetchLandingPlayers(playerMode);
+                                        }}
+                                    >
+                                        <FontAwesomeIcon icon={faCircleInfo} className="text-sm" aria-hidden="true" />
+                                    </button>
+                                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[22rem] max-w-[calc(100vw-2rem)] rounded-md border border-[#c6dbef] bg-white px-3 py-3 text-left text-xs normal-case tracking-normal text-[#334155] shadow-lg group-hover:block group-focus-within:block">
+                                        <p className="font-semibold uppercase tracking-wide text-[#2171b5]">Best approximation</p>
+                                        <p className="mt-2 font-mono text-[11px] leading-5 text-[#1e3a5f]">{BEST_FORMULA_APPROXIMATION}</p>
+                                        <p className="mt-2 leading-5 text-[#475569]">
+                                            Uses tier 5-10 win rate as the anchor, then blends Battlestats score, published efficiency, competitive volume, ranked, and clan battles. Low-tier-heavy profiles are discounted by a competitive-share multiplier.
+                                        </p>
+                                        <p className="mt-3 text-[#2171b5]">
+                                            Current {landingPlayersCacheInfo?.mode || playerMode} cache {formatRemainingMinutes(landingPlayersCacheInfo?.expiresAt || null)}.
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                             <PlayerNameGrid
                                 players={players}

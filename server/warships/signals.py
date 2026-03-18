@@ -106,3 +106,21 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
     else:
         PeriodicTask.objects.filter(
             name="clan-battle-summary-warmer").update(enabled=False)
+
+    landing_warm_minutes = int(os.getenv("LANDING_PAGE_WARM_MINUTES", "55"))
+    landing_warm_schedule, _ = IntervalSchedule.objects.get_or_create(
+        every=landing_warm_minutes,
+        period=IntervalSchedule.MINUTES,
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="landing-page-warmer",
+        defaults={
+            "task": "warships.tasks.warm_landing_page_content_task",
+            "interval": landing_warm_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({"include_recent": True}),
+            "description": "Refreshes landing page caches shortly before the one-hour TTL expires so the first landing request stays hot.",
+        },
+    )
