@@ -1,6 +1,8 @@
 import logging
 from typing import Dict, Optional
 
+from django.db.models.functions import Lower
+
 from warships.models import Player
 from warships.api.client import make_api_request
 
@@ -74,7 +76,9 @@ def _fetch_player_id_by_name(player_name: str) -> Optional[str]:
     if not normalized_name or len(normalized_name) > 64:
         return None
 
-    local_player = Player.objects.filter(name__iexact=normalized_name).first()
+    local_player = Player.objects.alias(name_lower=Lower("name")).filter(
+        name_lower=normalized_name.casefold(),
+    ).first()
     if local_player:
         return str(local_player.player_id)
 

@@ -16,6 +16,15 @@ class PlayerApiLookupTests(TestCase):
         self.assertEqual(result, "12345")
         mock_request.assert_not_called()
 
+    def test_fetch_player_id_by_name_uses_local_match_case_insensitively(self):
+        Player.objects.create(name="ExactLocal", player_id=12345)
+
+        with patch("warships.api.players._make_api_request") as mock_request:
+            result = _fetch_player_id_by_name("exactlocal")
+
+        self.assertEqual(result, "12345")
+        mock_request.assert_not_called()
+
     @patch("warships.api.players._make_api_request")
     def test_fetch_player_id_by_name_rejects_non_exact_upstream_match(self, mock_request):
         mock_request.return_value = [

@@ -6,7 +6,7 @@ from hashlib import sha256
 from kombu.exceptions import OperationalError as KombuOperationalError
 from django.core.cache import cache
 from django.db.models import Sum, F, FloatField, Case, When, Value, IntegerField, Count, Q
-from django.db.models.functions import Cast
+from django.db.models.functions import Cast, Lower
 from django.http import Http404
 from rest_framework import generics, permissions, viewsets
 from rest_framework import status
@@ -104,16 +104,19 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
     def get_object(self):
         lookup_field_value = self.kwargs[self.lookup_field]
+        normalized_lookup_value = (lookup_field_value or '').strip()
         missing_lookup_cache_key = _missing_player_lookup_cache_key(
-            lookup_field_value)
+            normalized_lookup_value)
         try:
-            obj = self.queryset.get(name__iexact=lookup_field_value)
+            obj = self.queryset.alias(name_lower=Lower("name")).get(
+                name_lower=normalized_lookup_value.casefold(),
+            )
             cache.delete(missing_lookup_cache_key)
         except Player.DoesNotExist:
             if cache.get(missing_lookup_cache_key):
                 raise Http404("Player matching query does not exist.")
 
-            player_id = _fetch_player_id_by_name(lookup_field_value)
+            player_id = _fetch_player_id_by_name(normalized_lookup_value)
             if not player_id:
                 cache.set(missing_lookup_cache_key, True,
                           MISSING_PLAYER_LOOKUP_CACHE_TTL)
@@ -122,7 +125,7 @@ class PlayerViewSet(viewsets.ModelViewSet):
             cache.delete(missing_lookup_cache_key)
             obj, _ = Player.objects.get_or_create(
                 player_id=int(player_id),
-                defaults={"name": lookup_field_value.strip()}
+                defaults={"name": normalized_lookup_value}
             )
 
             from warships.data import update_player_data
