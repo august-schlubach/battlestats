@@ -238,7 +238,7 @@ const ClanActivityHistogram: React.FC<ClanActivityHistogramProps> = ({ clanId, m
             setLoadError(null);
 
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/clan_members/${clanId}/`, { signal: controller.signal });
+                const response = await fetch(`/api/fetch/clan_members/${clanId}/`, { signal: controller.signal });
                 if (!response.ok) {
                     throw new Error(`Failed to fetch clan members: ${response.status}`);
                 }

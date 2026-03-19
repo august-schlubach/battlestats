@@ -201,6 +201,16 @@ NEXT_PUBLIC_GA_MEASUREMENT_ID=your_ga4_measurement_id
 - when set, the routed player and clan pages still send the first-party battlestats analytics POST and also emit a parallel GA4 `entity_detail_view` event.
 - when omitted, the first-party analytics path stays active and GA4 emission is skipped.
 
+optional client proxy knob when the Next.js app is not running inside the local Docker stack:
+
+```env
+BATTLESTATS_API_ORIGIN=http://localhost:8888
+```
+
+- the client now fetches relative `/api/...` paths and relies on a Next.js rewrite.
+- keep the default `http://localhost:8888` for local development outside Docker.
+- on a droplet, point it at the backend origin, for example `http://127.0.0.1:8888` when Django is on the same host.
+
 ### local access
 
 - frontend app: <http://localhost:3001>
@@ -294,6 +304,10 @@ the focused clan/player roster efficiency-rank checks are:
 ```bash
 cd client && npm test -- --runInBand app/components/__tests__/ClanMembers.test.tsx app/components/__tests__/ClanDetail.test.tsx app/components/__tests__/PlayerDetail.test.tsx
 ```
+
+for a bare DigitalOcean droplet deployment of the client without adding CI/CD yet, use the bootstrap and deploy scripts under `client/deploy/`. the operator steps live in `agents/runbooks/runbook-client-droplet-deploy.md`.
+
+for a matching bare DigitalOcean droplet deployment of the Django backend, use `server/deploy/`. the backend operator steps live in `agents/runbooks/runbook-backend-droplet-deploy.md`, and that flow reuses the existing cloud DB target from `server/.env.cloud` plus `server/.env.secrets.cloud`.
 
 targeted analytics and routed-detail regressions are also available with:
 

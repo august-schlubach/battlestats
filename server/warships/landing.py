@@ -510,7 +510,7 @@ def _build_best_landing_players(limit: int) -> list[dict]:
 
 
 def _build_sigma_landing_players(limit: int) -> list[dict]:
-    candidate_rows = list(
+    players = list(
         Player.objects.exclude(name='').filter(
             is_hidden=False,
             days_since_last_battle__lte=180,
@@ -518,9 +518,7 @@ def _build_sigma_landing_players(limit: int) -> list[dict]:
             explorer_summary__efficiency_rank_percentile__isnull=False,
         ).exclude(
             last_battle_date__isnull=True,
-        ).annotate(
-            player_score=F('explorer_summary__player_score'),
-        ).values(
+        ).select_related('explorer_summary').only(
             'name',
             'player_id',
             'pvp_ratio',
@@ -528,29 +526,53 @@ def _build_sigma_landing_players(limit: int) -> list[dict]:
             'days_since_last_battle',
             'total_battles',
             'pvp_battles',
-            'battles_json',
-            'ranked_json',
-            'player_score',
-        )
+            'explorer_summary__player_score',
+            'explorer_summary__efficiency_rank_percentile',
+            'explorer_summary__efficiency_rank_tier',
+            'explorer_summary__has_efficiency_rank_icon',
+            'explorer_summary__efficiency_rank_population_size',
+            'explorer_summary__efficiency_rank_updated_at',
+            'explorer_summary__eligible_ship_count',
+            'explorer_summary__efficiency_badge_rows_total',
+            'explorer_summary__badge_rows_unmapped',
+            'explorer_summary__latest_ranked_battles',
+            'explorer_summary__highest_ranked_league_recent',
+            'explorer_summary__clan_battle_seasons_participated',
+            'explorer_summary__clan_battle_total_battles',
+            'explorer_summary__clan_battle_overall_win_rate',
+            'explorer_summary__clan_battle_summary_updated_at',
+        ).order_by(
+            F('explorer_summary__efficiency_rank_percentile').desc(nulls_last=True),
+            F('explorer_summary__player_score').desc(nulls_last=True),
+            F('pvp_ratio').desc(nulls_last=True),
+            'name',
+        )[:limit]
     )
 
-    rows = _serialize_landing_player_rows(candidate_rows)
-    rows = [row for row in rows if row.get(
-        'efficiency_rank_percentile') is not None]
-    rows.sort(key=lambda row: (
-        -(row.get('efficiency_rank_percentile')
-          if row.get('efficiency_rank_percentile') is not None else float('-inf')),
-        -(row.get('player_score') if row.get('player_score')
-          is not None else float('-inf')),
-        -(row.get('pvp_ratio') if row.get('pvp_ratio')
-          is not None else float('-inf')),
-        row.get('name') or '',
-    ))
+    rows = []
+    for player in players:
+        explorer_summary = getattr(player, 'explorer_summary', None)
+        rows.append({
+            'name': player.name,
+            'pvp_ratio': player.pvp_ratio,
+            'is_hidden': player.is_hidden,
+            'pvp_battles': player.pvp_battles,
+            'total_battles': player.total_battles,
+            'days_since_last_battle': player.days_since_last_battle,
+            'is_pve_player': is_pve_player(player.total_battles, player.pvp_battles),
+            'is_sleepy_player': is_sleepy_player(player.days_since_last_battle),
+            'is_ranked_player': max(int(getattr(explorer_summary, 'latest_ranked_battles', 0) or 0), 0) > 0,
+            'highest_ranked_league': getattr(explorer_summary, 'highest_ranked_league_recent', None),
+            'is_clan_battle_player': is_clan_battle_enjoyer(
+                getattr(explorer_summary, 'clan_battle_total_battles', None),
+                getattr(explorer_summary,
+                        'clan_battle_seasons_participated', None),
+            ),
+            'clan_battle_win_rate': getattr(explorer_summary, 'clan_battle_overall_win_rate', None),
+            **_get_published_efficiency_rank_payload(player),
+        })
 
-    for row in rows:
-        row.pop('player_score', None)
-
-    return rows[:limit]
+    return rows
 
 
 def get_landing_players_payload_with_cache_metadata(mode: str = 'random', limit: int = LANDING_PLAYER_LIMIT, force_refresh: bool = False) -> tuple[list[dict], dict[str, str | int]]:

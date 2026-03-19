@@ -62,7 +62,7 @@ const PlayerClanBattleSeasons: React.FC<PlayerClanBattleSeasonsProps> = ({ playe
             setLoading(true);
             setError('');
             try {
-                const { data } = await fetchSharedJson<unknown>(`http://localhost:8888/api/fetch/player_clan_battle_seasons/${playerId}/`, {
+                const { data } = await fetchSharedJson<unknown>(`/api/fetch/player_clan_battle_seasons/${playerId}/`, {
                     label: `Player clan battle seasons ${playerId}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });

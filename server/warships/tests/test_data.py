@@ -89,6 +89,9 @@ class ClanCrawlPublicationTests(TestCase):
 
 
 class ActivityDataRefreshTests(TestCase):
+    def test_fetch_activity_data_for_missing_player_returns_empty_list(self):
+        self.assertEqual(fetch_activity_data("999999"), [])
+
     @patch("warships.data.update_activity_data")
     @patch("warships.data.update_snapshot_data")
     def test_fetch_activity_data_keeps_fresh_all_zero_cache(

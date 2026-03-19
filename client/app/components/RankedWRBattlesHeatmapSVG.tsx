@@ -252,7 +252,7 @@ const RankedWRBattlesHeatmapSVG: React.FC<RankedWRBattlesHeatmapSVGProps> = ({
 
         const fetchAndDraw = async () => {
             try {
-                const { data: payload } = await fetchSharedJson<RankedWRBattlesPayload>(`http://localhost:8888/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, {
+                const { data: payload } = await fetchSharedJson<RankedWRBattlesPayload>(`/api/fetch/player_correlation/ranked_wr_battles/${playerId}/`, {
                     label: `Ranked correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });

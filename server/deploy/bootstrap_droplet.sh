@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+HOST="${1:-45.55.66.19}"
+DEPLOY_USER="${DEPLOY_USER:-root}"
+APP_ROOT="${APP_ROOT:-/opt/battlestats-server}"
+APP_USER="${APP_USER:-battlestats}"
+
+ssh "${DEPLOY_USER}@${HOST}" \
+  APP_ROOT="${APP_ROOT}" \
+  APP_USER="${APP_USER}" \
+  'bash -s' <<'REMOTE'
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y python3 python3-venv python3-pip redis-server rabbitmq-server rsync
+
+if ! id -u "${APP_USER}" >/dev/null 2>&1; then
+  useradd --system --home "${APP_ROOT}" --shell /usr/sbin/nologin "${APP_USER}"
+fi
+
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}"
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/releases"
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared"
+
+if [[ ! -x "${APP_ROOT}/venv/bin/python" ]]; then
+  python3 -m venv "${APP_ROOT}/venv"
+fi
+
+if [[ ! -f /etc/battlestats-server.env ]]; then
+  cat > /etc/battlestats-server.env <<'EOF'
+DB_ENGINE=postgresql_psycopg2
+DB_NAME=defaultdb
+DB_USER=doadmin
+DB_HOST=db-postgresql-nyc3-11231-do-user-8591796-0.m.db.ondigitalocean.com
+DB_PORT=25060
+DB_SSLMODE=require
+DB_SSLROOTCERT=/etc/ssl/certs/battlestats-do-ca-certificate.crt
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,45.55.66.19,battlestats.io
+DJANGO_DEBUG=False
+DJANGO_LOGLEVEL=INFO
+REDIS_URL=redis://127.0.0.1:6379/0
+CELERY_BROKER_URL=amqp://guest:guest@127.0.0.1:5672//
+CELERY_RESULT_BACKEND=rpc://
+WARM_LANDING_PAGE_ON_STARTUP=1
+LANDING_WARMUP_START_DELAY_SECONDS=5
+EOF
+fi
+
+if [[ ! -f /etc/battlestats-server.secrets.env ]]; then
+  cat > /etc/battlestats-server.secrets.env <<'EOF'
+# WG_APP_ID=
+# DB_PASSWORD=
+# DJANGO_SECRET_KEY=
+EOF
+fi
+
+chgrp "${APP_USER}" /etc/battlestats-server.secrets.env
+chmod 640 /etc/battlestats-server.secrets.env
+
+cat > /etc/systemd/system/battlestats-gunicorn.service <<EOF
+[Unit]
+Description=Battlestats Django gunicorn
+After=network.target redis-server.service rabbitmq-server.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=${APP_ROOT}/venv/bin/gunicorn --config gunicorn.conf.py battlestats.wsgi:application --bind 127.0.0.1:8888
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/battlestats-celery.service <<EOF
+[Unit]
+Description=Battlestats Celery worker
+After=network.target redis-server.service rabbitmq-server.service battlestats-gunicorn.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats worker -l INFO --time-limit=600 --prefetch-multiplier=1 --max-tasks-per-child=200 --without-gossip --without-mingle
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/battlestats-beat.service <<EOF
+[Unit]
+Description=Battlestats Celery beat
+After=network.target redis-server.service rabbitmq-server.service battlestats-celery.service
+Requires=redis-server.service rabbitmq-server.service
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+ExecStart=${APP_ROOT}/venv/bin/celery -A battlestats beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable redis-server rabbitmq-server battlestats-gunicorn battlestats-celery battlestats-beat
+systemctl restart redis-server rabbitmq-server
+
+if [[ -d "${APP_ROOT}/current/server" ]]; then
+  systemctl restart battlestats-gunicorn battlestats-celery battlestats-beat
+fi
+REMOTE
+
+echo "Backend droplet bootstrap complete for ${DEPLOY_USER}@${HOST}"

@@ -90,7 +90,7 @@ const HeaderSearch: React.FC = () => {
         const controller = new AbortController();
         const timeoutId = setTimeout(async () => {
             try {
-                const response = await fetch(`http://localhost:8888/api/landing/player-suggestions/?q=${encodeURIComponent(trimmedQuery)}`, {
+                const response = await fetch(`/api/landing/player-suggestions/?q=${encodeURIComponent(trimmedQuery)}`, {
                     signal: controller.signal,
                 });
                 if (!response.ok) {

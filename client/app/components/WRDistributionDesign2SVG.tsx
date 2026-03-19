@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
+import { PLAYER_ROUTE_FETCH_TTL_MS } from '../lib/playerRouteFetch';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 
 type D3Selection = ReturnType<typeof d3.select>;
 
@@ -373,12 +375,10 @@ const WRDistributionDesign2SVG: React.FC<WRDistributionDesign2Props> = ({
 
         const load = async () => {
             try {
-                const response = await fetch('http://localhost:8888/api/fetch/player_correlation/win_rate_survival/', { signal: abortController.signal });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-
-                const payload: CorrelationPayload = await response.json();
+                const { data: payload } = await fetchSharedJson<CorrelationPayload>('/api/fetch/player_correlation/win_rate_survival/', {
+                    label: 'Win rate survival correlation',
+                    ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
+                });
                 if (abortController.signal.aborted) {
                     return;
                 }

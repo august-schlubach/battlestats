@@ -116,7 +116,7 @@ const RankedSeasons: React.FC<RankedSeasonsProps> = ({ playerId, isLoading = fal
 
                 for (let attempt = 0; attempt < 2; attempt += 1) {
                     try {
-                        const payload = await fetchSharedJson<RankedSeason[]>(`http://localhost:8888/api/fetch/ranked_data/${playerId}/`, {
+                        const payload = await fetchSharedJson<RankedSeason[]>(`/api/fetch/ranked_data/${playerId}/`, {
                             label: `Ranked data ${playerId}`,
                             ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                         });

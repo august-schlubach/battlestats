@@ -176,25 +176,25 @@ const installFetchMock = ({
     global.fetch = jest.fn((input: RequestInfo | URL) => {
         const url = input.toString();
 
-        if (url === 'http://localhost:8888/api/landing/clans/') {
+        if (url === '/api/landing/clans/') {
             return Promise.resolve(buildJsonResponse(clans));
         }
 
-        if (url === 'http://localhost:8888/api/landing/recent-clans/') {
+        if (url === '/api/landing/recent-clans/') {
             return Promise.resolve(buildJsonResponse(recentClans));
         }
 
-        if (url === 'http://localhost:8888/api/landing/recent/') {
+        if (url === '/api/landing/recent/') {
             return Promise.resolve(buildJsonResponse(recentPlayers));
         }
 
-        if (url.startsWith('http://localhost:8888/api/landing/players/')) {
+        if (url.startsWith('/api/landing/players/')) {
             const mode = new URL(url).searchParams.get('mode') || 'random';
             return Promise.resolve(buildJsonResponse(playersByMode[mode] ?? []));
         }
 
-        if (url.startsWith('http://localhost:8888/api/player/')) {
-            const playerName = decodeURIComponent(url.replace('http://localhost:8888/api/player/', '').replace(/\/$/, ''));
+        if (url.startsWith('/api/player/')) {
+            const playerName = decodeURIComponent(url.replace('/api/player/', '').replace(/\/$/, ''));
             const queue = responseQueues.get(playerName);
             if (!queue || queue.length === 0) {
                 return Promise.reject(new Error(`Unexpected player fetch: ${playerName}`));
@@ -282,7 +282,9 @@ describe('PlayerSearch landing efficiency icon', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Sigma' }));
 
         await waitFor(() => {
-            expect(global.fetch).toHaveBeenCalledWith('http://localhost:8888/api/landing/players/?mode=sigma&limit=40');
+            expect((global.fetch as jest.Mock).mock.calls.some(
+                ([url]) => url === '/api/landing/players/?mode=sigma&limit=40',
+            )).toBe(true);
         });
 
         const sigmaLeaderRow = await screen.findByRole('button', { name: /Show player SigmaLeader/i });
@@ -479,8 +481,10 @@ describe('PlayerSearch landing efficiency icon', () => {
         await waitFor(() => {
             expect(screen.getByText('Hydrated Clan')).toBeInTheDocument();
         });
-        expect(global.fetch).toHaveBeenCalledWith('http://localhost:8888/api/player/Hydrated%20Player/');
-        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => url === 'http://localhost:8888/api/player/Hydrated%20Player/')).toHaveLength(2);
+        expect((global.fetch as jest.Mock).mock.calls.some(
+            ([url]) => url === '/api/player/Hydrated%20Player/',
+        )).toBe(true);
+        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => url === '/api/player/Hydrated%20Player/')).toHaveLength(2);
     });
 
     it('shows the best formula tooltip without cache timing copy', async () => {

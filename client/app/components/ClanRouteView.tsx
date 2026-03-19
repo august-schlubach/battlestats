@@ -85,7 +85,7 @@ const ClanRouteView: React.FC<ClanRouteViewProps> = ({ clanSlug }) => {
             setError('');
 
             try {
-                const response = await fetch(`http://localhost:8888/api/clan/${clanId}/`);
+                const response = await fetch(`/api/clan/${clanId}/`);
                 const data = await readJsonOrThrow<Partial<LandingClan>>(response, `Clan ${clanId}`);
                 const normalizedClan = normalizeClanRoutePayload(data, clanId);
                 if (!cancelled) {

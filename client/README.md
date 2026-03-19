@@ -18,6 +18,8 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 In the full Docker stack used by this repo, the client is exposed at [http://localhost:3001](http://localhost:3001).
 
+The client now calls relative `/api/...` paths and relies on a Next.js rewrite to reach Django. By default the rewrite target is `http://localhost:8888`, and you can override it with `BATTLESTATS_API_ORIGIN` when running the client outside the local stack.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
@@ -81,6 +83,19 @@ The client also has a focused player-detail regression for the Battlestats effic
 ```bash
 npm test -- --runInBand app/components/__tests__/PlayerDetail.test.tsx
 ```
+
+## Bare Droplet Deploy
+
+For a simple DigitalOcean droplet deployment without changing local development, use the versioned scripts in `client/deploy/`:
+
+```bash
+./client/deploy/bootstrap_droplet.sh 45.55.66.19
+./client/deploy/deploy_to_droplet.sh 45.55.66.19
+```
+
+The bootstrap sets up Node.js 20, Nginx, a systemd service, and `/etc/battlestats-client.env` on the droplet. The deploy script rsyncs the client source, builds on the droplet, and restarts the service.
+
+See `agents/runbooks/runbook-client-droplet-deploy.md` for the operator runbook.
 
 The shared clan-roster efficiency-rank coverage is:
 

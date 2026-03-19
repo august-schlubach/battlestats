@@ -10,6 +10,7 @@ import { resilientDynamicImport } from './resilientDynamicImport';
 import { getRankedLeagueColor, getRankedLeagueTooltip, type RankedLeagueName } from './rankedLeague';
 import type { LandingClan, PlayerData } from './entityTypes';
 import { buildClanPath, buildPlayerPath } from '../lib/entityRoutes';
+import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import HiddenAccountIcon from './HiddenAccountIcon';
 
 interface LandingPlayer {
@@ -242,6 +243,7 @@ const BEST_PLAYER_MIN_PVP_BATTLES = 2500;
 const CLAN_HYDRATION_POLL_LIMIT = 6;
 const CLAN_HYDRATION_POLL_INTERVAL_MS = 2500;
 const SHOW_PLAYER_EXPLORER = false;
+const LANDING_FETCH_TTL_MS = 1500;
 
 type LandingClanMode = 'random' | 'best';
 type LandingPlayerMode = 'random' | 'best' | 'sigma';
@@ -250,22 +252,6 @@ const LANDING_PLAYER_REFRESH_INTERVAL_MS = 60_000;
 
 const BEST_FORMULA_APPROXIMATION = 'Best ≈ (0.40·WR_5-10 + 0.22·Score + 0.18·Eff + 0.10·Vol_5-10 + 0.06·Ranked + 0.04·Clan) × M_share';
 const CLAN_BEST_FORMULA_APPROXIMATION = 'Best_clan ≈ WR × I(Battles ≥ 100k) × I(ActiveShare ≥ 0.30), tie → Battles';
-
-const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T> => {
-    const contentType = response.headers.get('content-type') || '';
-
-    if (!response.ok) {
-        const body = await response.text();
-        throw new Error(`${label} failed with ${response.status}: ${body.slice(0, 120)}`);
-    }
-
-    if (!contentType.toLowerCase().includes('application/json')) {
-        const body = await response.text();
-        throw new Error(`${label} returned non-JSON content: ${body.slice(0, 120)}`);
-    }
-
-    return response.json() as Promise<T>;
-};
 
 const PlayerSearch: React.FC = () => {
     const router = useRouter();
@@ -283,20 +269,27 @@ const PlayerSearch: React.FC = () => {
     const lastSubmittedSearchRef = useRef<string>('');
 
     const fetchLandingClans = useCallback(async () => {
-        const response = await fetch('http://localhost:8888/api/landing/clans/');
-        const payload = await readJsonOrThrow<LandingClan[]>(response, 'Landing clans');
+        const { data: payload } = await fetchSharedJson<LandingClan[]>(
+            '/api/landing/clans/',
+            {
+                label: 'Landing clans',
+                ttlMs: LANDING_FETCH_TTL_MS,
+            },
+        );
         setClans(Array.isArray(payload) ? payload : []);
     }, []);
 
     const fetchLandingData = useCallback(async () => {
         try {
-            const [recentClansRes, recentRes] = await Promise.all([
-                fetch('http://localhost:8888/api/landing/recent-clans/'),
-                fetch('http://localhost:8888/api/landing/recent/'),
-            ]);
-            const [recentClansPayload, recentPlayersPayload] = await Promise.all([
-                readJsonOrThrow<LandingClan[]>(recentClansRes, 'Recent clans'),
-                readJsonOrThrow<LandingPlayer[]>(recentRes, 'Recent players'),
+            const [{ data: recentClansPayload }, { data: recentPlayersPayload }] = await Promise.all([
+                fetchSharedJson<LandingClan[]>('/api/landing/recent-clans/', {
+                    label: 'Recent clans',
+                    ttlMs: LANDING_FETCH_TTL_MS,
+                }),
+                fetchSharedJson<LandingPlayer[]>('/api/landing/recent/', {
+                    label: 'Recent players',
+                    ttlMs: LANDING_FETCH_TTL_MS,
+                }),
             ]);
             setRecentClans(Array.isArray(recentClansPayload) ? recentClansPayload : []);
             setRecentPlayers(Array.isArray(recentPlayersPayload) ? recentPlayersPayload : []);
@@ -312,8 +305,13 @@ const PlayerSearch: React.FC = () => {
 
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
-            const response = await fetch(`http://localhost:8888/api/landing/players/?mode=${mode}&limit=${LANDING_LIMIT}`);
-            const payload = await readJsonOrThrow<LandingPlayer[]>(response, `Landing players (${mode})`);
+            const { data: payload } = await fetchSharedJson<LandingPlayer[]>(
+                `/api/landing/players/?mode=${mode}&limit=${LANDING_LIMIT}`,
+                {
+                    label: `Landing players (${mode})`,
+                    ttlMs: LANDING_FETCH_TTL_MS,
+                },
+            );
             setPlayers(Array.isArray(payload) ? payload : []);
         } catch (err) {
             console.error('Error fetching landing players:', err);
@@ -360,8 +358,14 @@ const PlayerSearch: React.FC = () => {
     }, [fetchLandingPlayers, playerMode]);
 
     const fetchPlayerByName = async (playerName: string): Promise<PlayerData | null> => {
-        const response = await fetch(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}/`);
-        return readJsonOrThrow<PlayerData>(response, `Player ${playerName}`);
+        const { data } = await fetchSharedJson<PlayerData>(
+            `/api/player/${encodeURIComponent(playerName)}/`,
+            {
+                label: `Player ${playerName}`,
+                ttlMs: LANDING_FETCH_TTL_MS,
+            },
+        );
+        return data;
     };
 
     const executePlayerSearch = useCallback(async (playerName: string) => {

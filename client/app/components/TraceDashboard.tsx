@@ -210,7 +210,7 @@ const TraceDashboard: React.FC = () => {
     useEffect(() => {
         let cancelled = false;
 
-        fetch("http://localhost:8888/api/agentic/traces/")
+        fetch("/api/agentic/traces/")
             .then((response) => {
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);

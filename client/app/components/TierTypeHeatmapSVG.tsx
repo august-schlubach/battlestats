@@ -376,7 +376,7 @@ const TierTypeHeatmapSVG: React.FC<TierTypeHeatmapSVGProps> = ({
 
         const load = async () => {
             try {
-                const { data } = await fetchSharedJson<TierTypePayload>(`http://localhost:8888/api/fetch/player_correlation/tier_type/${playerId}/`, {
+                const { data } = await fetchSharedJson<TierTypePayload>(`/api/fetch/player_correlation/tier_type/${playerId}/`, {
                     label: `Tier type correlation ${playerId}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });

@@ -63,7 +63,7 @@ describe('ClanRouteView', () => {
         render(<ClanRouteView clanSlug="1000067803-test-clan" />);
 
         await waitFor(() => {
-            expect(global.fetch).toHaveBeenCalledWith('http://localhost:8888/api/clan/1000067803/');
+            expect(global.fetch).toHaveBeenCalledWith('/api/clan/1000067803/');
         });
 
         expect(await screen.findByTestId('clan-detail')).toBeInTheDocument();

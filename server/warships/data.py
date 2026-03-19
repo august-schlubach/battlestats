@@ -2385,7 +2385,10 @@ def update_snapshot_data(player_id: int) -> None:
 
 
 def fetch_activity_data(player_id: str) -> list:
-    player = Player.objects.get(player_id=player_id)
+    try:
+        player = Player.objects.get(player_id=player_id)
+    except Player.DoesNotExist:
+        return []
 
     def _is_empty_activity(activity_rows: Any) -> bool:
         return not isinstance(activity_rows, list) or not activity_rows

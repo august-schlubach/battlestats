@@ -40,7 +40,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
             setError('');
 
             try {
-                const { data } = await fetchSharedJson<PlayerData>(`http://localhost:8888/api/player/${encodeURIComponent(playerName)}/`, {
+                const { data } = await fetchSharedJson<PlayerData>(`/api/player/${encodeURIComponent(playerName)}/`, {
                     label: `Player ${playerName}`,
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
                 });

@@ -2,7 +2,17 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClanMemberData } from './clanMembersShared';
 
 const HYDRATION_POLL_LIMIT = 6;
-const HYDRATION_POLL_INTERVAL_MS = 2500;
+const HYDRATION_ACTIVE_POLL_INTERVAL_MS = 2500;
+const HYDRATION_DEFERRED_POLL_INTERVAL_MS = 8000;
+
+interface ClanMembersHydrationState {
+    rankedQueued: number;
+    rankedDeferred: number;
+    rankedPending: number;
+    efficiencyQueued: number;
+    efficiencyDeferred: number;
+    efficiencyPending: number;
+}
 
 const isAbortError = (error: unknown): boolean => {
     return error instanceof DOMException && error.name === 'AbortError';
@@ -22,6 +32,29 @@ const readJsonOrThrow = async <T,>(response: Response, label: string): Promise<T
     }
 
     return response.json() as Promise<T>;
+};
+
+const readCountHeader = (response: Response, headerName: string): number => {
+    const rawValue = response.headers.get(headerName);
+    const parsedValue = Number.parseInt(rawValue || '0', 10);
+    return Number.isFinite(parsedValue) ? Math.max(parsedValue, 0) : 0;
+};
+
+const readHydrationState = (response: Response): ClanMembersHydrationState => ({
+    rankedQueued: readCountHeader(response, 'X-Ranked-Hydration-Queued'),
+    rankedDeferred: readCountHeader(response, 'X-Ranked-Hydration-Deferred'),
+    rankedPending: readCountHeader(response, 'X-Ranked-Hydration-Pending'),
+    efficiencyQueued: readCountHeader(response, 'X-Efficiency-Hydration-Queued'),
+    efficiencyDeferred: readCountHeader(response, 'X-Efficiency-Hydration-Deferred'),
+    efficiencyPending: readCountHeader(response, 'X-Efficiency-Hydration-Pending'),
+});
+
+const resolveHydrationPollDelay = (state: ClanMembersHydrationState): number => {
+    const queuedCount = state.rankedQueued + state.efficiencyQueued;
+    const deferredCount = state.rankedDeferred + state.efficiencyDeferred;
+    return deferredCount > 0 && queuedCount === 0
+        ? HYDRATION_DEFERRED_POLL_INTERVAL_MS
+        : HYDRATION_ACTIVE_POLL_INTERVAL_MS;
 };
 
 export const useClanMembers = (clanId: number | null | undefined, enabled = true) => {
@@ -53,7 +86,7 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             activeController = controller;
 
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/clan_members/${clanId}/`, {
+                const response = await fetch(`/api/fetch/clan_members/${clanId}/`, {
                     signal: controller.signal,
                 });
                 const data = await readJsonOrThrow<ClanMemberData[]>(response, `Clan members ${clanId}`);
@@ -64,15 +97,19 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
                 setMembers(Array.isArray(data) ? data : []);
                 setError('');
 
+                const hydrationState = readHydrationState(response);
                 const hasPendingHydration = data.some(
                     (member) => member.ranked_hydration_pending
                         || member.efficiency_hydration_pending,
                 );
-                if (hasPendingHydration && attempt < HYDRATION_POLL_LIMIT) {
+                const shouldPollAgain = hasPendingHydration
+                    || hydrationState.rankedPending > 0
+                    || hydrationState.efficiencyPending > 0;
+                if (shouldPollAgain && attempt < HYDRATION_POLL_LIMIT) {
                     attemptsRef.current = attempt + 1;
                     timeoutId = setTimeout(() => {
                         void fetchMembers(false, attempt + 1);
-                    }, HYDRATION_POLL_INTERVAL_MS);
+                    }, resolveHydrationPollDelay(hydrationState));
                 }
             } catch (fetchError) {
                 if (isAbortError(fetchError)) {

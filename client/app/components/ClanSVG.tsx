@@ -114,7 +114,7 @@ const drawClanPlot = (
         .attr('transform', `translate(${margin.left}, 16)`);
 
     const filterType = 'active';
-    const plotPath = `http://localhost:8888/api/fetch/clan_data/${clanId}:${filterType}`;
+    const plotPath = `/api/fetch/clan_data/${clanId}:${filterType}`;
     const hideDetails = () => {
         activityGroup.select('.player-details').remove();
     };

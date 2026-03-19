@@ -65,7 +65,7 @@ const ClanBattleSeasons: React.FC<ClanBattleSeasonsProps> = ({ clanId, memberCou
             }
 
             try {
-                const response = await fetch(`http://localhost:8888/api/fetch/clan_battle_seasons/${clanId}/`);
+                const response = await fetch(`/api/fetch/clan_battle_seasons/${clanId}/`);
                 if (!response.ok) {
                     throw new Error(`Failed to fetch clan battle seasons: ${response.status}`);
                 }

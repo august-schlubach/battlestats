@@ -85,7 +85,7 @@ const PlayerExplorer: React.FC<PlayerExplorerProps> = ({ onSelectMember }) => {
                     page: String(page),
                     page_size: String(PAGE_SIZE),
                 });
-                const response = await fetch(`http://localhost:8888/api/players/explorer/?${params.toString()}`, {
+                const response = await fetch(`/api/players/explorer/?${params.toString()}`, {
                     signal: controller.signal,
                 });
 

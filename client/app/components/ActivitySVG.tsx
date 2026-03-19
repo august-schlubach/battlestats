@@ -19,7 +19,7 @@ const ActivitySVG: React.FC<ActivityProps> = ({ playerId }) => {
     // 1. Fetch data ONCE whenever playerId changes
     useEffect(() => {
         let isMounted = true;
-        const path = `http://localhost:8888/api/fetch/activity_data/${playerId}/`;
+        const path = `/api/fetch/activity_data/${playerId}/`;
 
         fetch(path)
             .then(response => response.json())

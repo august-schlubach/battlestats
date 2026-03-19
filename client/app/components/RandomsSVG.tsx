@@ -507,7 +507,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         const fetchData = async () => {
             setIsChartLoading(true);
             try {
-                const { data, headers } = await fetchSharedJson<unknown>(`http://localhost:8888/api/fetch/randoms_data/${playerId}/?all=true`, {
+                const { data, headers } = await fetchSharedJson<unknown>(`/api/fetch/randoms_data/${playerId}/?all=true`, {
                     label: `Randoms data ${playerId}`,
                     responseHeaders: ['X-Randoms-Updated-At'],
                     ttlMs: PLAYER_ROUTE_FETCH_TTL_MS,
@@ -517,7 +517,9 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                 setRandomsUpdatedAt(headers['X-Randoms-Updated-At'] ?? null);
 
                 const types = Array.from(new Set(result.map((r) => r.ship_type)));
-                const tiers = Array.from(new Set(result.map((r) => r.ship_tier))).sort((a, b) => b - a);
+                const tiers = Array.from(new Set(result.map((r) => r.ship_tier)))
+                    .filter((tier) => tier >= 5)
+                    .sort((a, b) => b - a);
                 setSelectedTypes(types);
                 setSelectedTiers(tiers);
             } catch (error) {
