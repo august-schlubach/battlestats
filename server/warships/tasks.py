@@ -27,6 +27,8 @@ CLAN_CRAWL_HEARTBEAT_STALE_AFTER = 15 * 60
 RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60
 RANKED_INCREMENTAL_LOCK_KEY = "warships:tasks:incremental_ranked_data:lock"
 RANKED_INCREMENTAL_LOCK_TIMEOUT = 6 * 60 * 60
+PLAYER_REFRESH_LOCK_KEY = "warships:tasks:incremental_player_refresh:lock"
+PLAYER_REFRESH_LOCK_TIMEOUT = 6 * 60 * 60
 RANKED_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
@@ -508,6 +510,50 @@ def ensure_crawl_all_clans_running_task():
     logger.info(
         "Crawl watchdog found no active crawl; leaving the scheduler to start the next full crawl")
     return {"status": "skipped", "reason": "idle"}
+
+
+@app.task(bind=True, **CRAWL_TASK_OPTS)
+def incremental_player_refresh_task(self):
+    if cache.get(CLAN_CRAWL_LOCK_KEY) is not None:
+        logger.info(
+            "Skipping incremental_player_refresh_task because clan crawl is currently running"
+        )
+        return {"status": "skipped", "reason": "crawl-running"}
+
+    if not cache.add(PLAYER_REFRESH_LOCK_KEY, self.request.id, timeout=PLAYER_REFRESH_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping incremental_player_refresh_task because another player refresh is already running"
+        )
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        call_command(
+            'incremental_player_refresh',
+            state_file=os.getenv(
+                'PLAYER_REFRESH_STATE_FILE', 'logs/incremental_player_refresh_state.json'),
+            limit=int(os.getenv('PLAYER_REFRESH_TOTAL_LIMIT', '1200')),
+            batch_size=int(os.getenv('PLAYER_REFRESH_BATCH_SIZE', '50')),
+            hot_stale_hours=int(
+                os.getenv('PLAYER_REFRESH_HOT_STALE_HOURS', '12')),
+            active_stale_hours=int(
+                os.getenv('PLAYER_REFRESH_ACTIVE_STALE_HOURS', '24')),
+            warm_stale_hours=int(
+                os.getenv('PLAYER_REFRESH_WARM_STALE_HOURS', '72')),
+            active_limit=int(
+                os.getenv('PLAYER_REFRESH_ACTIVE_LIMIT', '500')),
+            warm_limit=int(
+                os.getenv('PLAYER_REFRESH_WARM_LIMIT', '200')),
+            hot_lookback_days=int(
+                os.getenv('PLAYER_REFRESH_HOT_LOOKBACK_DAYS', '14')),
+            active_lookback_days=int(
+                os.getenv('PLAYER_REFRESH_ACTIVE_LOOKBACK_DAYS', '30')),
+            warm_lookback_days=int(
+                os.getenv('PLAYER_REFRESH_WARM_LOOKBACK_DAYS', '90')),
+            max_errors=int(os.getenv('PLAYER_REFRESH_MAX_ERRORS', '25')),
+        )
+        return {"status": "completed"}
+    finally:
+        cache.delete(PLAYER_REFRESH_LOCK_KEY)
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)

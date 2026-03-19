@@ -408,18 +408,23 @@ class ClanBattlePlayerStatsCacheTests(TestCase):
         ]
         original_random_key = landing_player_cache_key('random', 40)
         cache.set(original_random_key, [{'name': 'stale'}], 60)
-        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, [{'name': 'recent-stale'}], 60)
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY,
+                  [{'name': 'recent-stale'}], 60)
 
         result = fetch_player_clan_battle_seasons(5510)
 
         self.assertEqual(len(result), 2)
         player.refresh_from_db()
         self.assertEqual(player.explorer_summary.clan_battle_total_battles, 60)
-        self.assertEqual(player.explorer_summary.clan_battle_seasons_participated, 2)
-        self.assertEqual(player.explorer_summary.clan_battle_overall_win_rate, 53.3)
-        self.assertIsNotNone(player.explorer_summary.clan_battle_summary_updated_at)
+        self.assertEqual(
+            player.explorer_summary.clan_battle_seasons_participated, 2)
+        self.assertEqual(
+            player.explorer_summary.clan_battle_overall_win_rate, 53.3)
+        self.assertIsNotNone(
+            player.explorer_summary.clan_battle_summary_updated_at)
         self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
-        self.assertNotEqual(original_random_key, landing_player_cache_key('random', 40))
+        self.assertNotEqual(original_random_key,
+                            landing_player_cache_key('random', 40))
 
 
 @override_settings(CACHES=LOCMEM_CACHES)

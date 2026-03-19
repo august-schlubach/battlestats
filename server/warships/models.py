@@ -69,6 +69,8 @@ class Player(models.Model):
             models.Index(
                 fields=['pvp_battles', 'pvp_survival_rate'], name='player_battles_surv_idx'),
             models.Index(Lower('name'), name='player_name_lower_idx'),
+            models.Index(fields=['last_fetch'],
+                         name='player_last_fetch_idx'),
         ]
 
 

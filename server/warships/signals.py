@@ -43,6 +43,52 @@ def ensure_daily_clan_crawl_schedule(sender, **kwargs):
         },
     )
 
+    # -- Incremental Player Refresh (AM + PM) --
+    player_refresh_am_hour = os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_AM", "5")
+    player_refresh_pm_hour = os.getenv("PLAYER_REFRESH_SCHEDULE_HOUR_PM", "15")
+
+    player_am_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute="0",
+        hour=player_refresh_am_hour,
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="incremental-player-refresh-am",
+        defaults={
+            "task": "warships.tasks.incremental_player_refresh_task",
+            "crontab": player_am_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Morning incremental refresh of active player data.",
+        },
+    )
+
+    player_pm_schedule, _ = CrontabSchedule.objects.get_or_create(
+        minute="0",
+        hour=player_refresh_pm_hour,
+        day_of_week="*",
+        day_of_month="*",
+        month_of_year="*",
+        timezone="UTC",
+    )
+
+    PeriodicTask.objects.update_or_create(
+        name="incremental-player-refresh-pm",
+        defaults={
+            "task": "warships.tasks.incremental_player_refresh_task",
+            "crontab": player_pm_schedule,
+            "enabled": True,
+            "args": json.dumps([]),
+            "kwargs": json.dumps({}),
+            "description": "Afternoon incremental refresh of active player data.",
+        },
+    )
+
     ranked_hour = os.getenv("RANKED_INCREMENTAL_SCHEDULE_HOUR", "10")
     ranked_minute = os.getenv("RANKED_INCREMENTAL_SCHEDULE_MINUTE", "30")
     ranked_schedule, _ = CrontabSchedule.objects.get_or_create(
