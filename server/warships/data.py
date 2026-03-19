@@ -60,6 +60,8 @@ SLEEPY_PLAYER_DAYS_THRESHOLD = 365
 CLAN_RANKED_HYDRATION_STALE_AFTER = timedelta(hours=24)
 CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT', '8')))
+CLAN_BATTLE_SUMMARY_STALE_DAYS = max(
+    1, int(os.getenv('CLAN_BATTLE_SUMMARY_STALE_DAYS', '7')))
 CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT = max(
     1, int(os.getenv('CLAN_EFFICIENCY_HYDRATION_MAX_IN_FLIGHT', '8')))
 PLAYER_EFFICIENCY_STALE_AFTER = timedelta(hours=24)
@@ -465,64 +467,25 @@ def queue_clan_ranked_hydration(players: Iterable[Player]) -> dict[str, Any]:
     }
 
 
-def clan_battle_player_hydration_needs_refresh(player: Player) -> bool:
-    player_id = getattr(player, 'player_id', None)
-    if not player_id:
-        return False
+def clan_battle_summary_is_stale(player: Player) -> bool:
+    """Return True if the player's clan battle summary needs a refresh."""
+    summary = getattr(player, 'explorer_summary', None)
+    if summary is None:
+        return True
+    updated_at = summary.clan_battle_summary_updated_at
+    if updated_at is None:
+        return True
+    return (django_timezone.now() - updated_at).days >= CLAN_BATTLE_SUMMARY_STALE_DAYS
 
-    return cache.get(f'clan_battles:player:{player_id}') is None
 
-
-def queue_clan_battle_hydration(players: Iterable[Player]) -> dict[str, Any]:
-    from warships.tasks import is_clan_battle_data_refresh_pending, queue_clan_battle_data_refresh
-
-    eligible_players = [
-        player for player in players if clan_battle_player_hydration_needs_refresh(player)
-    ]
-    pending_player_ids: set[int] = set()
-    queued_player_ids: set[int] = set()
-    deferred_player_ids: set[int] = set()
-
-    for player in eligible_players:
-        if is_clan_battle_data_refresh_pending(player.player_id):
-            pending_player_ids.add(player.player_id)
-
-    available_slots = max(
-        0, CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT - len(pending_player_ids))
-
-    for player in eligible_players:
-        if player.player_id in pending_player_ids:
-            continue
-
-        if available_slots <= 0:
-            deferred_player_ids.add(player.player_id)
-            continue
-
-        enqueue_result = queue_clan_battle_data_refresh(player.player_id)
-        if enqueue_result.get("status") == "queued":
-            pending_player_ids.add(player.player_id)
-            queued_player_ids.add(player.player_id)
-            available_slots -= 1
-            continue
-
-        if enqueue_result.get("reason") == "enqueue-failed":
-            deferred_player_ids.update(
-                queued_player.player_id
-                for queued_player in eligible_players
-                if queued_player.player_id not in pending_player_ids and queued_player.player_id != player.player_id
-            )
-            deferred_player_ids.add(player.player_id)
-            break
-
-    pending_player_ids.update(deferred_player_ids)
-
-    return {
-        'pending_player_ids': pending_player_ids,
-        'queued_player_ids': queued_player_ids,
-        'deferred_player_ids': deferred_player_ids,
-        'eligible_player_ids': {player.player_id for player in eligible_players},
-        'max_in_flight': CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT,
-    }
+def maybe_refresh_clan_battle_data(player: Player) -> None:
+    """Enqueue a background CB refresh if the player's summary is stale."""
+    from warships.tasks import queue_clan_battle_data_refresh
+    if player.is_hidden:
+        return
+    if not clan_battle_summary_is_stale(player):
+        return
+    queue_clan_battle_data_refresh(player.player_id)
 
 
 def queue_clan_efficiency_hydration(players: Iterable[Player]) -> dict[str, Any]:
@@ -1316,12 +1279,11 @@ def summarize_clan_battle_seasons(season_rows: Any) -> dict[str, Any]:
 
 def get_published_clan_battle_summary_payload(
     player: Optional[Player],
-    fallback_summary: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     payload = {
-        'seasons_participated': int((fallback_summary or {}).get('seasons_participated') or 0),
-        'total_battles': int((fallback_summary or {}).get('total_battles') or 0),
-        'win_rate': (fallback_summary or {}).get('win_rate'),
+        'seasons_participated': 0,
+        'total_battles': 0,
+        'win_rate': None,
         'updated_at': None,
     }
     if player is None or player.is_hidden:
@@ -3416,32 +3378,6 @@ def get_player_clan_battle_summary(account_id: Optional[int], allow_fetch: bool 
         seasons = cache.get(f'clan_battles:player:{player_account_id}') or []
 
     return summarize_clan_battle_seasons(seasons)
-
-
-def get_player_clan_battle_summaries(account_ids: Iterable[Optional[int]], allow_fetch: bool = True) -> dict[int, dict[str, Any]]:
-    normalized_ids = [int(account_id)
-                      for account_id in account_ids if account_id]
-    if not normalized_ids:
-        return {}
-
-    if allow_fetch:
-        return {
-            account_id: get_player_clan_battle_summary(
-                account_id, allow_fetch=True)
-            for account_id in normalized_ids
-        }
-
-    cache_keys = {
-        account_id: f'clan_battles:player:{account_id}'
-        for account_id in normalized_ids
-    }
-    cached_rows_by_key = cache.get_many(cache_keys.values())
-
-    return {
-        account_id: summarize_clan_battle_seasons(
-            cached_rows_by_key.get(cache_key) or [])
-        for account_id, cache_key in cache_keys.items()
-    }
 
 
 def _persist_player_clan_battle_summary(

@@ -66,7 +66,6 @@ export const useClanMembers = (clanId: number | null | undefined) => {
 
                 const hasPendingHydration = data.some(
                     (member) => member.ranked_hydration_pending
-                        || member.clan_battle_hydration_pending
                         || member.efficiency_hydration_pending,
                 );
                 if (hasPendingHydration && attempt < HYDRATION_POLL_LIMIT) {

@@ -140,10 +140,6 @@ def queue_ranked_data_refresh(player_id: object):
         return {"status": "skipped", "reason": "enqueue-failed"}
 
 
-def is_clan_battle_data_refresh_pending(player_id: object) -> bool:
-    return bool(cache.get(_clan_battle_refresh_dispatch_key(player_id)))
-
-
 def queue_clan_battle_data_refresh(player_id: object):
     if cache.get(_clan_battle_refresh_failure_key()):
         return {"status": "skipped", "reason": "broker-unavailable"}

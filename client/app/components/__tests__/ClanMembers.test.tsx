@@ -14,7 +14,6 @@ const baseMember: ClanMemberData = {
     is_ranked_player: false,
     is_clan_battle_player: false,
     clan_battle_win_rate: null,
-    clan_battle_hydration_pending: false,
     efficiency_hydration_pending: false,
     highest_ranked_league: null,
     ranked_hydration_pending: false,

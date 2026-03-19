@@ -11,13 +11,14 @@ from django.utils import timezone
 
 from warships.clan_crawl import fetch_players_bulk, save_player
 from warships.data import (
+    fetch_player_clan_battle_seasons,
     player_achievements_need_refresh,
     player_efficiency_needs_refresh,
     refresh_player_explorer_summary,
     update_achievements_data,
     update_player_efficiency_data,
 )
-from warships.models import Player
+from warships.models import Player, PlayerExplorerSummary
 from warships.tasks import CLAN_CRAWL_LOCK_KEY
 
 
@@ -193,6 +194,12 @@ def _refresh_player(player_id: int) -> None:
             update_player_efficiency_data(player)
         if player_achievements_need_refresh(player):
             update_achievements_data(player.player_id)
+        try:
+            es = player.explorer_summary
+            if es.clan_battle_summary_updated_at is None:
+                fetch_player_clan_battle_seasons(player.player_id)
+        except PlayerExplorerSummary.DoesNotExist:
+            pass
 
 
 class Command(BaseCommand):
@@ -300,7 +307,8 @@ class Command(BaseCommand):
                 active_limit=max(int(options['active_limit']), 0),
                 warm_limit=max(int(options['warm_limit']), 0),
                 hot_lookback_days=max(int(options['hot_lookback_days']), 0),
-                active_lookback_days=max(int(options['active_lookback_days']), 0),
+                active_lookback_days=max(
+                    int(options['active_lookback_days']), 0),
                 warm_lookback_days=max(int(options['warm_lookback_days']), 0),
             )
             state['pending_player_ids'] = pending_player_ids

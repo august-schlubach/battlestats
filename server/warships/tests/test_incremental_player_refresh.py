@@ -285,7 +285,8 @@ class CheckpointTests(TestCase):
                     '--limit', '10',
                 )
 
-            processed_ids = [call.args[0] for call in mock_refresh.call_args_list]
+            processed_ids = [call.args[0]
+                             for call in mock_refresh.call_args_list]
             self.assertIn(player.id, processed_ids)
             self.assertNotIn(999999, processed_ids)
 
@@ -419,7 +420,8 @@ class RetryTests(TestCase):
                     '--limit', '2',
                 )
 
-            processed_ids = [call.args[0] for call in mock_refresh.call_args_list]
+            processed_ids = [call.args[0]
+                             for call in mock_refresh.call_args_list]
             self.assertEqual(processed_ids, [retry_player.id, queue_player.id])
             state = json.loads(state_path.read_text())
             self.assertEqual(state['failed_player_ids'], [])

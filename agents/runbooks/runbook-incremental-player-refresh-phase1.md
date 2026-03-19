@@ -59,6 +59,7 @@ Create a Django migration adding an index on `Player.last_fetch`:
 **File:** `server/warships/migrations/0032_player_last_fetch_index.py`
 
 The migration should add a B-tree index on `last_fetch`. Validate with:
+
 ```bash
 docker compose exec -T server python manage.py migrate
 ```
@@ -141,6 +142,7 @@ def _refresh_player(player_id: int) -> None:
 ### Checkpoint & Error Budget
 
 Follow `incremental_ranked_data.py` patterns exactly:
+
 - JSON state file at `logs/incremental_player_refresh_state.json`
 - Track: `pending_player_ids`, `current_index`, `failed_player_ids`, `error_count`, `tier_counts`
 - Halt when `error_count >= max_errors`
@@ -178,6 +180,7 @@ if cache.get(CLAN_CRAWL_LOCK_KEY) is not None:
 **File:** `server/warships/tasks.py`
 
 Add:
+
 ```python
 @app.task(**CRAWL_TASK_OPTS, name="warships.tasks.incremental_player_refresh_task")
 def incremental_player_refresh_task():
@@ -223,6 +226,7 @@ PeriodicTask.objects.update_or_create(
 Required test cases:
 
 ### Candidate Selection
+
 - [ ] Hot tier: player with `last_lookup` 3 days ago and `last_fetch` 13 hours ago → selected
 - [ ] Hot tier: player with `last_lookup` 3 days ago and `last_fetch` 6 hours ago → excluded (fresh)
 - [ ] Hot tier: player with `last_lookup` 20 days ago → excluded (not Hot)
@@ -234,27 +238,33 @@ Required test cases:
 - [ ] Boundary: player with `last_battle_date` exactly 90 days ago → Warm tier boundary
 
 ### Ordering & Caps
+
 - [ ] Active tier respects `active_limit` and orders by `last_battle_date DESC`
 - [ ] Hot tier is uncapped (all qualifying players included)
 
 ### Checkpoint Durability
+
 - [ ] Checkpoint saves after each batch
 - [ ] Resumed run skips already-processed players
 - [ ] Fresh run ignores stale checkpoint
 
 ### Error Budget
+
 - [ ] Stops processing after `max_errors` exceeded
 - [ ] Error count carries through checkpoint
 
 ### Lock Exclusion
+
 - [ ] Skips cycle when `CLAN_CRAWL_LOCK_KEY` is set
 - [ ] Runs normally when lock is absent
 
 ### Hidden Players
+
 - [ ] Hidden player is included in candidates
 - [ ] `save_player()` clears efficiency/verdict for hidden player
 
 ### Integration
+
 - [ ] Full cycle: creates candidates → fetches → saves → updates achievements/efficiency
 - [ ] Dry-run mode: logs candidates without API calls
 
@@ -287,6 +297,7 @@ for name, fetch in recent:
 ## Step 7: Commit & Push
 
 Pre-commit checklist (from doctrine):
+
 - [ ] Changed behavior has test coverage
 - [ ] Spec document is up to date
 - [ ] No superseded runbooks to archive

@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from warships.clan_crawl import run_clan_crawl, save_player
 from warships.api.players import _fetch_player_achievements
-from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_battle_hydration, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
+from warships.data import update_snapshot_data, fetch_activity_data, fetch_randoms_data, update_player_data, update_clan_data, update_clan_members, update_tiers_data, update_type_data, update_randoms_data, update_battle_data, _build_top_ranked_ship_names_by_season, update_ranked_data, refresh_player_explorer_summary, fetch_player_explorer_rows, compute_player_verdict, _inactivity_score_cap, _calculate_actual_kdr, _calculate_tier_filtered_pvp_record, _calculate_ranked_record, get_highest_ranked_league_name, _aggregate_ranked_seasons, fetch_ranked_data, clan_ranked_hydration_needs_refresh, queue_clan_efficiency_hydration, queue_clan_ranked_hydration, normalize_player_achievement_rows, recompute_efficiency_rank_snapshot, update_achievements_data, _efficiency_rank_tier_from_percentile
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key
 from warships.models import Player, Snapshot, Clan, PlayerAchievementStat, PlayerExplorerSummary, Ship
 
@@ -770,69 +770,6 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(hydration_state["deferred_player_ids"], {7108})
         self.assertEqual(hydration_state["max_in_flight"], 1)
         mock_queue_ranked_data_refresh.assert_not_called()
-
-    @patch("warships.tasks.queue_clan_battle_data_refresh")
-    @patch("warships.tasks.is_clan_battle_data_refresh_pending")
-    def test_queue_clan_battle_hydration_only_enqueues_cache_misses(
-        self,
-        mock_is_clan_battle_data_refresh_pending,
-        mock_queue_clan_battle_data_refresh,
-    ):
-        cached_player = Player.objects.create(
-            name="CachedClanBattleMember",
-            player_id=7111,
-        )
-        missing_player = Player.objects.create(
-            name="MissingClanBattleMember",
-            player_id=7112,
-        )
-        queued_player = Player.objects.create(
-            name="AlreadyQueuedClanBattleMember",
-            player_id=7113,
-        )
-        cache.set("clan_battles:player:7111", [
-                  {"season_id": 1, "battles": 5, "wins": 3}], 300)
-
-        mock_is_clan_battle_data_refresh_pending.side_effect = lambda player_id: player_id == queued_player.player_id
-        mock_queue_clan_battle_data_refresh.return_value = {"status": "queued"}
-
-        hydration_state = queue_clan_battle_hydration(
-            [cached_player, missing_player, queued_player]
-        )
-
-        self.assertEqual(hydration_state["pending_player_ids"], {7112, 7113})
-        self.assertEqual(hydration_state["queued_player_ids"], {7112})
-        self.assertEqual(hydration_state["deferred_player_ids"], set())
-        mock_queue_clan_battle_data_refresh.assert_called_once_with(7112)
-
-    @patch("warships.tasks.queue_clan_battle_data_refresh")
-    @patch("warships.tasks.is_clan_battle_data_refresh_pending")
-    @patch("warships.data.CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT", 1)
-    def test_queue_clan_battle_hydration_defers_when_in_flight_budget_is_full(
-        self,
-        mock_is_clan_battle_data_refresh_pending,
-        mock_queue_clan_battle_data_refresh,
-    ):
-        already_pending_player = Player.objects.create(
-            name="AlreadyPendingClanBattleMember",
-            player_id=7114,
-        )
-        deferred_player = Player.objects.create(
-            name="DeferredClanBattleMember",
-            player_id=7115,
-        )
-
-        mock_is_clan_battle_data_refresh_pending.side_effect = lambda player_id: player_id == already_pending_player.player_id
-
-        hydration_state = queue_clan_battle_hydration(
-            [already_pending_player, deferred_player]
-        )
-
-        self.assertEqual(hydration_state["pending_player_ids"], {7114, 7115})
-        self.assertEqual(hydration_state["queued_player_ids"], set())
-        self.assertEqual(hydration_state["deferred_player_ids"], {7115})
-        self.assertEqual(hydration_state["max_in_flight"], 1)
-        mock_queue_clan_battle_data_refresh.assert_not_called()
 
     @patch("warships.tasks.queue_efficiency_data_refresh")
     @patch("warships.tasks.is_efficiency_data_refresh_pending")

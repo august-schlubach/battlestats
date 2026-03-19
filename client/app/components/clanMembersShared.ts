@@ -13,7 +13,6 @@ export interface ClanMemberData {
     is_ranked_player: boolean;
     is_clan_battle_player: boolean;
     clan_battle_win_rate: number | null;
-    clan_battle_hydration_pending: boolean;
     efficiency_hydration_pending?: boolean;
     highest_ranked_league: RankedLeagueName | null;
     ranked_hydration_pending: boolean;

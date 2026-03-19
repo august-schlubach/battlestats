@@ -7,7 +7,7 @@ from django.db.models import Case, Count, F, FloatField, Q, Sum, Value, When
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, get_player_clan_battle_summaries, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
+from warships.data import _calculate_tier_filtered_pvp_record, _get_published_efficiency_rank_payload, get_highest_ranked_league_name, is_clan_battle_enjoyer, is_pve_player, is_ranked_player, is_sleepy_player
 from warships.models import Clan, Player
 
 
@@ -298,10 +298,6 @@ def invalidate_landing_player_caches(include_recent: bool = False) -> None:
 def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
     player_ids = [int(row.get('player_id') or 0)
                   for row in rows if row.get('player_id') is not None]
-    clan_battle_summaries = get_player_clan_battle_summaries(
-        player_ids,
-        allow_fetch=False,
-    )
     players_by_id = {
         player.player_id: player
         for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary').only(
@@ -332,13 +328,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             minimum_tier=5,
         )
         ranked_rows = row.pop('ranked_json', None)
-        clan_battle_summary = get_published_clan_battle_summary_payload(
-            players_by_id.get(player_id),
-            fallback_summary=clan_battle_summaries.get(
-                player_id,
-                {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
-            ),
-        )
+        player_obj = players_by_id.get(player_id)
+        es = getattr(player_obj, 'explorer_summary', None) if player_obj else None
         row['high_tier_pvp_battles'] = high_tier_battles
         row['high_tier_pvp_ratio'] = high_tier_ratio
         row['is_pve_player'] = is_pve_player(
@@ -347,8 +338,10 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             row.get('days_since_last_battle'))
         row['is_ranked_player'] = is_ranked_player(ranked_rows)
         row['is_clan_battle_player'] = is_clan_battle_enjoyer(
-            clan_battle_summary['total_battles'], clan_battle_summary['seasons_participated'])
-        row['clan_battle_win_rate'] = clan_battle_summary['win_rate']
+            getattr(es, 'clan_battle_total_battles', None),
+            getattr(es, 'clan_battle_seasons_participated', None),
+        )
+        row['clan_battle_win_rate'] = getattr(es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
         row.update(_get_published_efficiency_rank_payload(
@@ -608,10 +601,6 @@ def _build_recent_players() -> list[dict]:
     )
     player_ids = [int(row.get('player_id') or 0)
                   for row in rows if row.get('player_id') is not None]
-    clan_battle_summaries = get_player_clan_battle_summaries(
-        player_ids,
-        allow_fetch=False,
-    )
     players_by_id = {
         player.player_id: player
         for player in Player.objects.filter(player_id__in=player_ids).select_related('explorer_summary')
@@ -620,21 +609,18 @@ def _build_recent_players() -> list[dict]:
     for row in rows:
         player_id = int(row.get('player_id') or 0)
         ranked_rows = row.pop('ranked_json', None)
-        clan_battle_summary = get_published_clan_battle_summary_payload(
-            players_by_id.get(player_id),
-            fallback_summary=clan_battle_summaries.get(
-                player_id,
-                {'total_battles': 0, 'seasons_participated': 0, 'win_rate': None},
-            ),
-        )
+        player_obj = players_by_id.get(player_id)
+        es = getattr(player_obj, 'explorer_summary', None) if player_obj else None
         row['is_pve_player'] = is_pve_player(
             row.get('total_battles'), row.get('pvp_battles'))
         row['is_sleepy_player'] = is_sleepy_player(
             row.get('days_since_last_battle'))
         row['is_ranked_player'] = is_ranked_player(ranked_rows)
         row['is_clan_battle_player'] = is_clan_battle_enjoyer(
-            clan_battle_summary['total_battles'], clan_battle_summary['seasons_participated'])
-        row['clan_battle_win_rate'] = clan_battle_summary['win_rate']
+            getattr(es, 'clan_battle_total_battles', None),
+            getattr(es, 'clan_battle_seasons_participated', None),
+        )
+        row['clan_battle_win_rate'] = getattr(es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
         row.update(_get_published_efficiency_rank_payload(

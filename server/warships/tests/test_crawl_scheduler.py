@@ -14,7 +14,7 @@ from django_celery_beat.models import CrontabSchedule, IntervalSchedule, Periodi
 
 from warships.signals import ensure_daily_clan_crawl_schedule
 from warships.landing import LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, get_landing_players_payload
-from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, LANDING_PAGE_WARM_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_clan_battle_data_refresh_pending, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task, warm_landing_page_content_task
+from warships.tasks import CLAN_CRAWL_HEARTBEAT_KEY, CLAN_CRAWL_LOCK_KEY, LANDING_PAGE_WARM_LOCK_KEY, RANKED_INCREMENTAL_LOCK_KEY, crawl_all_clans_task, ensure_crawl_all_clans_running_task, incremental_ranked_data_task, is_efficiency_data_refresh_pending, is_efficiency_rank_snapshot_refresh_pending, is_ranked_data_refresh_pending, queue_clan_battle_data_refresh, queue_efficiency_data_refresh, queue_efficiency_rank_snapshot_refresh, queue_ranked_data_refresh, refresh_efficiency_rank_snapshot_task, update_clan_battle_summary_task, update_clan_data_task, update_clan_members_task, update_player_data_task, update_player_efficiency_data_task, update_ranked_data_task, warm_clan_battle_summaries_task, warm_landing_page_content_task
 from warships.models import Player
 
 
@@ -373,7 +373,7 @@ class RefreshTaskLockTests(TestCase):
             result = queue_clan_battle_data_refresh(2234)
 
         self.assertEqual(result, {"status": "queued"})
-        self.assertTrue(is_clan_battle_data_refresh_pending(2234))
+        self.assertTrue(cache.get(f"warships:tasks:update_player_clan_battle_data_dispatch:2234"))
         mock_delay.assert_called_once_with(player_id=2234)
 
     def test_queue_clan_battle_data_refresh_skips_during_broker_cooldown(self):

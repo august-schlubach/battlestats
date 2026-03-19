@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Player, Clan, Ship
-from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_player_clan_battle_summary, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
+from .data import _calculate_player_kill_ratio, _coerce_battle_rows, _get_published_efficiency_rank_payload, build_player_summary, get_highest_ranked_league_name, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player
 
 
 class PlayerSerializer(serializers.ModelSerializer):
@@ -109,10 +109,6 @@ class PlayerSerializer(serializers.ModelSerializer):
             else:
                 summary = get_published_clan_battle_summary_payload(
                     obj,
-                    fallback_summary=get_player_clan_battle_summary(
-                        obj.player_id,
-                        allow_fetch=False,
-                    ),
                 )
                 payload_cache[cache_key] = {
                     'clan_battle_header_eligible': is_clan_battle_enjoyer(
@@ -295,7 +291,6 @@ class ClanMemberSerializer(serializers.Serializer):
     is_ranked_player = serializers.BooleanField()
     is_clan_battle_player = serializers.BooleanField()
     clan_battle_win_rate = serializers.FloatField(allow_null=True)
-    clan_battle_hydration_pending = serializers.BooleanField()
     efficiency_hydration_pending = serializers.BooleanField()
     highest_ranked_league = serializers.CharField(allow_null=True)
     ranked_hydration_pending = serializers.BooleanField()
