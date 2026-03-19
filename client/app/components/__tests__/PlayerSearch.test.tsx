@@ -176,7 +176,7 @@ const installFetchMock = ({
     global.fetch = jest.fn((input: RequestInfo | URL) => {
         const url = input.toString();
 
-        if (url === '/api/landing/clans/') {
+        if (url.startsWith('/api/landing/clans/')) {
             return Promise.resolve(buildJsonResponse(clans));
         }
 
@@ -482,9 +482,9 @@ describe('PlayerSearch landing efficiency icon', () => {
             expect(screen.getByText('Hydrated Clan')).toBeInTheDocument();
         });
         expect((global.fetch as jest.Mock).mock.calls.some(
-            ([url]) => url === '/api/player/Hydrated%20Player/',
+            ([url]) => url === '/api/player/Hydrated%20Player',
         )).toBe(true);
-        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => url === '/api/player/Hydrated%20Player/')).toHaveLength(2);
+        expect((global.fetch as jest.Mock).mock.calls.filter(([url]) => url === '/api/player/Hydrated%20Player')).toHaveLength(2);
     });
 
     it('shows the best formula tooltip without cache timing copy', async () => {

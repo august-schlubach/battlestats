@@ -22,6 +22,27 @@ const inFlightRequests = new Map<string, Promise<SharedJsonFetchResult<unknown>>
 const settledRequests = new Map<string, SettledCacheEntry>();
 const resolvedCacheEnabled = process.env.NODE_ENV !== 'test';
 
+const normalizeApiUrl = (url: string): string => {
+    if (!url.startsWith('/api/')) {
+        return url;
+    }
+
+    const queryIndex = url.indexOf('?');
+    const hashIndex = url.indexOf('#');
+    const splitIndex = [queryIndex, hashIndex]
+        .filter((index) => index >= 0)
+        .sort((left, right) => left - right)[0] ?? -1;
+
+    const path = splitIndex >= 0 ? url.slice(0, splitIndex) : url;
+    const suffix = splitIndex >= 0 ? url.slice(splitIndex) : '';
+
+    if (path.length > '/api/'.length && path.endsWith('/')) {
+        return `${path.slice(0, -1)}${suffix}`;
+    }
+
+    return url;
+};
+
 const buildCacheKey = (url: string, init?: RequestInit, cacheKey?: string): string => {
     if (cacheKey) {
         return cacheKey;
@@ -63,7 +84,8 @@ const getSettledValue = (cacheKey: string): SharedJsonFetchResult<unknown> | nul
 
 export const fetchSharedJson = async <T,>(url: string, options: SharedJsonFetchOptions): Promise<SharedJsonFetchResult<T>> => {
     const { init, label, responseHeaders = [], ttlMs = 0 } = options;
-    const cacheKey = buildCacheKey(url, init, options.cacheKey);
+    const normalizedUrl = normalizeApiUrl(url);
+    const cacheKey = buildCacheKey(normalizedUrl, init, options.cacheKey);
 
     if (resolvedCacheEnabled && ttlMs > 0) {
         const settledValue = getSettledValue(cacheKey);
@@ -78,7 +100,7 @@ export const fetchSharedJson = async <T,>(url: string, options: SharedJsonFetchO
     }
 
     const request = (async () => {
-        const response = await fetch(url, init);
+        const response = await fetch(normalizedUrl, init);
         const data = await readJsonOrThrow<T>(response, label);
         const headers = responseHeaders.reduce<SharedJsonFetchHeaders>((accumulator, headerName) => {
             accumulator[headerName] = response.headers.get(headerName);

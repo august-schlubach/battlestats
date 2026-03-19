@@ -37,6 +37,10 @@ PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 LANDING_PAGE_WARM_LOCK_KEY = "warships:tasks:warm_landing_page_content:lock"
 LANDING_PAGE_WARM_LOCK_TIMEOUT = 20 * 60
+LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_player_queue_refill:dispatch"
+LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
+LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY = "warships:tasks:landing_random_clan_queue_refill:dispatch"
+LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT = 10 * 60
 
 
 def _configured_clan_battle_warm_ids(raw_value=None):
@@ -87,6 +91,46 @@ def _efficiency_snapshot_refresh_failure_key() -> str:
 
 def _player_ranked_wr_battles_correlation_refresh_failure_key() -> str:
     return "warships:tasks:warm_player_ranked_wr_battles_correlation_dispatch:cooldown"
+
+
+def queue_random_landing_player_queue_refill():
+    if not cache.add(
+        LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY,
+        "queued",
+        timeout=LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        refill_landing_random_players_queue_task.delay()
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY)
+        logger.warning(
+            "Skipping random landing player queue refill enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_random_landing_clan_queue_refill():
+    if not cache.add(
+        LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY,
+        "queued",
+        timeout=LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        refill_landing_random_clans_queue_task.delay()
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY)
+        logger.warning(
+            "Skipping random landing clan queue refill enqueue because broker dispatch failed: %s",
+            error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
 
 
 def touch_clan_crawl_heartbeat(timestamp: float | None = None) -> float:
@@ -500,6 +544,45 @@ def warm_landing_page_content_task(self, include_recent=True):
         return result
     finally:
         cache.delete(LANDING_PAGE_WARM_LOCK_KEY)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def refill_landing_random_players_queue_task(self):
+    from warships.landing import refill_random_landing_player_queue
+
+    logger.info("Starting refill_landing_random_players_queue_task")
+    try:
+        result = refill_random_landing_player_queue()
+        logger.info(
+            "Finished refill_landing_random_players_queue_task: %s",
+            result,
+        )
+        return result
+    finally:
+        cache.delete(LANDING_RANDOM_PLAYER_QUEUE_REFILL_DISPATCH_KEY)
+
+
+@app.task(bind=True, **TASK_OPTS)
+def refill_landing_random_clans_queue_task(self):
+    from warships.landing import refill_random_landing_clan_queue, warm_random_landing_clan_queue_preview
+
+    logger.info("Starting refill_landing_random_clans_queue_task")
+    try:
+        result = refill_random_landing_clan_queue()
+        if result.get("status") == "completed":
+            preview_payload, preview_metadata = warm_random_landing_clan_queue_preview()
+            result = {
+                **result,
+                "preview_count": len(preview_payload),
+                "preview_queue_remaining": int(preview_metadata.get("queue_remaining", 0)),
+            }
+        logger.info(
+            "Finished refill_landing_random_clans_queue_task: %s",
+            result,
+        )
+        return result
+    finally:
+        cache.delete(LANDING_RANDOM_CLAN_QUEUE_REFILL_DISPATCH_KEY)
 
 
 @app.task(bind=True, **CRAWL_TASK_OPTS)

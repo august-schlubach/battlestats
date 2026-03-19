@@ -86,7 +86,7 @@ export const useClanMembers = (clanId: number | null | undefined, enabled = true
             activeController = controller;
 
             try {
-                const response = await fetch(`/api/fetch/clan_members/${clanId}/`, {
+                const response = await fetch(`/api/fetch/clan_members/${clanId}`, {
                     signal: controller.signal,
                 });
                 const data = await readJsonOrThrow<ClanMemberData[]>(response, `Clan members ${clanId}`);

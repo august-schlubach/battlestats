@@ -63,6 +63,7 @@ services:
       dockerfile: Dockerfile
     container_name: battlestats-react
     environment:
+      - BATTLESTATS_API_ORIGIN=http://server:8888
       - PORT=3001
       - HOSTNAME=0.0.0.0
     ports:

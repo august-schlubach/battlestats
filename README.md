@@ -210,6 +210,8 @@ BATTLESTATS_API_ORIGIN=http://localhost:8888
 - the client now fetches relative `/api/...` paths and relies on a Next.js rewrite.
 - keep the default `http://localhost:8888` for local development outside Docker.
 - on a droplet, point it at the backend origin, for example `http://127.0.0.1:8888` when Django is on the same host.
+- keep `BATTLESTATS_API_ORIGIN` slashless. a trailing slash can trigger avoidable localhost proxy redirects on custom API routes, especially for POST requests such as `/api/analytics/entity-view`.
+- client-side shared API fetches now normalize same-origin `/api/.../` requests to slashless paths before issuing the request, but the local origin should still be configured without a trailing slash.
 
 ### local access
 

@@ -34,7 +34,7 @@ const PlayerSummaryCards: React.FC<PlayerSummaryCardsProps> = ({ playerId, isLoa
             setError(null);
 
             try {
-                const response = await fetch(`/api/fetch/player_summary/${playerId}/`);
+                const response = await fetch(`/api/fetch/player_summary/${playerId}`);
                 if (!response.ok) {
                     throw new Error(`Failed to load player summary for ${playerId}`);
                 }

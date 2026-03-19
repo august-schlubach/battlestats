@@ -7,12 +7,45 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
-from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key, warm_landing_page_content
+from warships.landing import LANDING_CLANS_BEST_CACHE_KEY, LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key, warm_landing_page_content
 from warships.models import Player, Clan, PlayerExplorerSummary
 from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
 class PlayerViewSetTests(TestCase):
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    def test_player_detail_accepts_no_trailing_slash(
+        self,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=952,
+            name="NoSlashClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        Player.objects.create(
+            name="NoSlashPlayer",
+            player_id=9052,
+            clan=clan,
+            last_fetch=now,
+            pvp_battles=0,
+            is_hidden=False,
+        )
+
+        response = self.client.get("/api/player/NoSlashPlayer")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["name"], "NoSlashPlayer")
+        mock_update_player_task.assert_not_called()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay", side_effect=KombuOperationalError("broker-down"))
@@ -473,6 +506,40 @@ class PlayerViewSetTests(TestCase):
         self.assertIsNotNone(clan.last_lookup)
         self.assertGreaterEqual(clan.last_lookup, request_started_at)
         self.assertLessEqual(clan.last_lookup, timezone.now())
+
+    def test_clan_members_accepts_no_trailing_slash(self):
+        clan = Clan.objects.create(
+            clan_id=953,
+            name="NoSlashClanMembers",
+            tag="NSCM",
+            members_count=1,
+        )
+        Player.objects.create(
+            name="NoSlashClanMate",
+            player_id=9053,
+            clan=clan,
+            pvp_ratio=54.2,
+            last_battle_date=timezone.now().date(),
+        )
+
+        response = self.client.get("/api/fetch/clan_members/953")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["name"], "NoSlashClanMate")
+
+    def test_clan_detail_accepts_no_trailing_slash(self):
+        clan = Clan.objects.create(
+            clan_id=1000067803,
+            name="NoSlashClanDetail",
+            tag="NSCD",
+        )
+
+        response = self.client.get("/api/clan/1000067803")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["clan_id"], clan.clan_id)
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -1891,22 +1958,56 @@ class ApiContractTests(TestCase):
 
     def test_landing_clans_expose_cache_expiry_headers(self):
         cache.clear()
-        Clan.objects.create(
+        clan = Clan.objects.create(
             clan_id=4390,
             name="LandingClanCacheHeaders",
             tag="LCH",
-            members_count=25,
+            members_count=4,
         )
+        for index in range(4):
+            Player.objects.create(
+                name=f"LandingClanCachePlayer{index}",
+                player_id=439000 + index,
+                clan=clan,
+                pvp_battles=30000,
+                pvp_wins=16000,
+                days_since_last_battle=2,
+            )
 
-        response = self.client.get("/api/landing/clans/")
+        response = self.client.get("/api/landing/clans/?mode=best")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Landing-Clans-Cache-Mode"], "best")
         self.assertEqual(
             response["X-Landing-Clans-Cache-TTL-Seconds"],
             "3600",
         )
         self.assertTrue(response["X-Landing-Clans-Cache-Cached-At"])
         self.assertTrue(response["X-Landing-Clans-Cache-Expires-At"])
+
+    @patch("warships.views.get_random_landing_clan_queue_payload")
+    def test_landing_random_clans_expose_queue_headers(self, mock_queue_payload):
+        mock_queue_payload.return_value = (
+            [{"name": "QueueClan"}],
+            {
+                "ttl_seconds": 0,
+                "cached_at": "now",
+                "expires_at": "now",
+                "served_count": 1,
+                "queue_remaining": 59,
+                "refill_scheduled": True,
+            },
+        )
+
+        response = self.client.get("/api/landing/clans/?mode=random&limit=40")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Landing-Clans-Cache-Mode"], "random")
+        self.assertEqual(response["X-Landing-Clans-Cache-TTL-Seconds"], "0")
+        self.assertEqual(response["X-Landing-Queue-Type"], "clans-random")
+        self.assertEqual(response["X-Landing-Queue-Served-Count"], "1")
+        self.assertEqual(response["X-Landing-Queue-Remaining"], "59")
+        self.assertEqual(response["X-Landing-Queue-Refill-Scheduled"], "true")
 
     def test_landing_clans_support_gzip_for_large_json_payloads(self):
         cache.clear()
@@ -1915,19 +2016,19 @@ class ApiContractTests(TestCase):
                 clan_id=5000 + index,
                 name=f"LandingGzipClan{index}",
                 tag=f"G{index}",
-                members_count=30,
+                members_count=1,
             )
             Player.objects.create(
                 name=f"LandingGzipPlayer{index}",
                 player_id=700000 + index,
                 clan=clan,
-                pvp_battles=5000,
-                pvp_wins=2600,
+                pvp_battles=120000,
+                pvp_wins=62000,
                 days_since_last_battle=3,
             )
 
         response = self.client.get(
-            "/api/landing/clans/",
+            "/api/landing/clans/?mode=best",
             HTTP_ACCEPT_ENCODING="gzip",
         )
 
@@ -2479,9 +2580,9 @@ class ApiContractTests(TestCase):
         result = warm_landing_page_content()
 
         self.assertEqual(result['status'], 'completed')
-        self.assertIsNotNone(cache.get(LANDING_CLANS_CACHE_KEY))
+        self.assertIsNotNone(cache.get(LANDING_CLANS_BEST_CACHE_KEY))
+        self.assertIsNotNone(cache.get(LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY))
         self.assertIsNotNone(cache.get(LANDING_RECENT_CLANS_CACHE_KEY))
-        self.assertIsNotNone(cache.get(landing_player_cache_key('random', 40)))
         self.assertIsNotNone(cache.get(landing_player_cache_key('best', 40)))
         self.assertIsNotNone(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY))
 
@@ -3541,6 +3642,33 @@ class ApiThrottleTests(TestCase):
         self.assertEqual(payload[0]["season_label"], "S32")
         self.assertEqual(payload[0]["battles"], 48)
         self.assertEqual(payload[0]["win_rate"], 56.3)
+
+    @patch("warships.views.fetch_player_clan_battle_seasons")
+    def test_player_clan_battle_seasons_accepts_no_trailing_slash(self, mock_fetch):
+        mock_fetch.return_value = [
+            {
+                "season_id": 33,
+                "season_name": "Storm Front",
+                "season_label": "S33",
+                "start_date": "2026-01-01",
+                "end_date": "2026-02-15",
+                "ship_tier_min": 10,
+                "ship_tier_max": 10,
+                "battles": 12,
+                "wins": 7,
+                "losses": 5,
+                "win_rate": 58.3,
+            }
+        ]
+
+        response = self.client.get(
+            "/api/fetch/player_clan_battle_seasons/777")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]["season_label"], "S33")
+        mock_fetch.assert_called_once_with("777")
 
     @patch("warships.views.fetch_ranked_data")
     def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):

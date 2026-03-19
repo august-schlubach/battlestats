@@ -14,7 +14,7 @@ interface TrackEntityDetailViewInput {
     entitySlug: string;
 }
 
-const ANALYTICS_ENDPOINT = '/api/analytics/entity-view/';
+const ANALYTICS_ENDPOINT = '/api/analytics/entity-view';
 const VISITOR_COOKIE_NAME = 'battlestats_visitor_key';
 const SESSION_STORAGE_KEY = 'battlestats_session_key';
 const VISITOR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;

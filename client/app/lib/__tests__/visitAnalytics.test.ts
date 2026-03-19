@@ -39,6 +39,9 @@ describe('visitAnalytics', () => {
         });
 
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith('/api/analytics/entity-view', expect.objectContaining({
+            method: 'POST',
+        }));
         expect(gtagMock).not.toHaveBeenCalled();
     });
 

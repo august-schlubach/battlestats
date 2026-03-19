@@ -1,4 +1,6 @@
+import logging
 import random
+import time
 from datetime import timedelta
 import math
 
@@ -11,16 +13,23 @@ from warships.data import _calculate_tier_filtered_pvp_record, _get_published_ef
 from warships.models import Clan, Player
 
 
+logger = logging.getLogger(__name__)
+
+
 LANDING_CACHE_TTL = 60
 LANDING_CLAN_CACHE_TTL = 60 * 60
 LANDING_PLAYER_CACHE_TTL = 60 * 60
-LANDING_CLANS_CACHE_KEY = 'landing:clans:v3'
-LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v3:meta'
+LANDING_CLANS_CACHE_KEY = 'landing:clans:v4'
+LANDING_CLANS_CACHE_METADATA_KEY = 'landing:clans:v4:meta'
+LANDING_CLANS_BEST_CACHE_KEY = 'landing:clans:best:v1'
+LANDING_CLANS_BEST_CACHE_METADATA_KEY = 'landing:clans:best:v1:meta'
 LANDING_RECENT_CLANS_CACHE_KEY = 'landing:recent_clans:last_lookup:v2'
 LANDING_RECENT_PLAYERS_CACHE_KEY = 'landing:recent_players:last_lookup:v6'
 LANDING_PLAYERS_CACHE_NAMESPACE_KEY = 'landing:players:v12:namespace'
 LANDING_CLAN_FEATURED_COUNT = 40
 LANDING_CLAN_MIN_TOTAL_BATTLES = 100000
+LANDING_CLAN_BEST_MIN_ACTIVE_SHARE = 0.30
+LANDING_CLAN_MODES = ('random', 'best')
 LANDING_PLAYER_LIMIT = 40
 LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
@@ -37,6 +46,23 @@ LANDING_PLAYER_BEST_RANKED_WEIGHT = 0.06
 LANDING_PLAYER_BEST_CLAN_WEIGHT = 0.04
 LANDING_PLAYER_BEST_EFFICIENCY_NEUTRAL = 0.35
 LANDING_PLAYER_BEST_COMPETITIVE_SHARE_FLOOR = 0.55
+LANDING_RANDOM_PLAYER_QUEUE_KEY = 'landing:queue:players:random:v1'
+LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY = 'landing:queue:players:random:eligible:v1'
+LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY = 'landing:queue:players:random:lock:v1'
+LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE = 100
+LANDING_RANDOM_PLAYER_QUEUE_REFILL_SIZE = 40
+LANDING_RANDOM_PLAYER_QUEUE_REFILL_THRESHOLD = 60
+LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT = 30
+LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_TTL = 10 * 60
+LANDING_RANDOM_CLAN_QUEUE_KEY = 'landing:queue:clans:random:v1'
+LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_KEY = 'landing:queue:clans:random:eligible:v1'
+LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY = 'landing:queue:clans:random:lock:v1'
+LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY = 'landing:queue:clans:random:preview:v1'
+LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE = 100
+LANDING_RANDOM_CLAN_QUEUE_REFILL_SIZE = 40
+LANDING_RANDOM_CLAN_QUEUE_REFILL_THRESHOLD = 60
+LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT = 30
+LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_TTL = 10 * 60
 
 
 def _player_score_ordering(secondary_field: str):
@@ -271,6 +297,13 @@ def normalize_landing_player_mode(mode: str | None) -> str:
     return normalized_mode
 
 
+def normalize_landing_clan_mode(mode: str | None) -> str:
+    normalized_mode = (mode or 'random').strip().lower()
+    if normalized_mode not in LANDING_CLAN_MODES:
+        raise ValueError('mode must be one of: random, best')
+    return normalized_mode
+
+
 def normalize_landing_player_limit(requested_limit: int | None) -> int:
     try:
         parsed_limit = int(requested_limit or LANDING_PLAYER_LIMIT)
@@ -282,7 +315,14 @@ def normalize_landing_player_limit(requested_limit: int | None) -> int:
 
 def invalidate_landing_clan_caches() -> None:
     cache.delete_many(
-        [LANDING_CLANS_CACHE_KEY, LANDING_CLANS_CACHE_METADATA_KEY, LANDING_RECENT_CLANS_CACHE_KEY])
+        [
+            LANDING_CLANS_CACHE_KEY,
+            LANDING_CLANS_CACHE_METADATA_KEY,
+            LANDING_CLANS_BEST_CACHE_KEY,
+            LANDING_CLANS_BEST_CACHE_METADATA_KEY,
+            LANDING_RECENT_CLANS_CACHE_KEY,
+            LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY,
+        ])
 
 
 def invalidate_landing_recent_player_cache() -> None:
@@ -293,6 +333,615 @@ def invalidate_landing_player_caches(include_recent: bool = False) -> None:
     _bump_landing_players_cache_namespace()
     if include_recent:
         invalidate_landing_recent_player_cache()
+
+
+def _normalize_cached_id_list(raw_value) -> list[int]:
+    if not isinstance(raw_value, list):
+        return []
+
+    normalized_ids: list[int] = []
+    seen_ids: set[int] = set()
+    for value in raw_value:
+        try:
+            parsed_value = int(value)
+        except (TypeError, ValueError):
+            continue
+
+        if parsed_value in seen_ids:
+            continue
+
+        seen_ids.add(parsed_value)
+        normalized_ids.append(parsed_value)
+
+    return normalized_ids
+
+
+def _get_random_landing_player_queue() -> list[int]:
+    return _normalize_cached_id_list(cache.get(LANDING_RANDOM_PLAYER_QUEUE_KEY))
+
+
+def _set_random_landing_player_queue(player_ids: list[int]) -> None:
+    cache.set(
+        LANDING_RANDOM_PLAYER_QUEUE_KEY,
+        _normalize_cached_id_list(player_ids),
+        timeout=None,
+    )
+
+
+def _build_random_landing_player_eligible_ids() -> list[int]:
+    return list(
+        Player.objects.exclude(name='').filter(
+            is_hidden=False,
+            days_since_last_battle__lte=180,
+            pvp_battles__gt=LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES,
+        ).exclude(
+            last_battle_date__isnull=True,
+        ).values_list('player_id', flat=True)
+    )
+
+
+def _get_cached_random_landing_player_eligible_ids(force_refresh: bool = False) -> list[int]:
+    cached_ids = None if force_refresh else cache.get(
+        LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY)
+    normalized_ids = _normalize_cached_id_list(cached_ids)
+    if normalized_ids:
+        return normalized_ids
+
+    eligible_ids = _build_random_landing_player_eligible_ids()
+    cache.set(
+        LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_KEY,
+        eligible_ids,
+        LANDING_RANDOM_PLAYER_QUEUE_ELIGIBLE_TTL,
+    )
+    return eligible_ids
+
+
+def _acquire_random_landing_player_queue_lock(attempts: int = 5, sleep_seconds: float = 0.02) -> bool:
+    for attempt in range(attempts):
+        if cache.add(LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY, 'locked', timeout=LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT):
+            return True
+        if attempt < attempts - 1:
+            time.sleep(sleep_seconds)
+    return False
+
+
+def _release_random_landing_player_queue_lock() -> None:
+    cache.delete(LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY)
+
+
+def _get_random_landing_clan_queue() -> list[int]:
+    return _normalize_cached_id_list(cache.get(LANDING_RANDOM_CLAN_QUEUE_KEY))
+
+
+def _set_random_landing_clan_queue(clan_ids: list[int]) -> None:
+    cache.set(
+        LANDING_RANDOM_CLAN_QUEUE_KEY,
+        _normalize_cached_id_list(clan_ids),
+        timeout=None,
+    )
+
+
+def _build_random_landing_clan_eligible_ids() -> list[int]:
+    return list(
+        Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
+            total_wins=Sum('player__pvp_wins'),
+            total_battles=Sum('player__pvp_battles'),
+            active_members=Count('player', filter=Q(
+                player__days_since_last_battle__lte=30)),
+        ).annotate(
+            clan_wr=Case(
+                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
+                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
+                default=None,
+                output_field=FloatField(),
+            ),
+        ).filter(
+            total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
+            clan_wr__isnull=False,
+        ).values_list('clan_id', flat=True)
+    )
+
+
+def _get_cached_random_landing_clan_eligible_ids(force_refresh: bool = False) -> list[int]:
+    cached_ids = None if force_refresh else cache.get(
+        LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_KEY)
+    normalized_ids = _normalize_cached_id_list(cached_ids)
+    if normalized_ids:
+        return normalized_ids
+
+    eligible_ids = _build_random_landing_clan_eligible_ids()
+    cache.set(
+        LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_KEY,
+        eligible_ids,
+        LANDING_RANDOM_CLAN_QUEUE_ELIGIBLE_TTL,
+    )
+    return eligible_ids
+
+
+def _acquire_random_landing_clan_queue_lock(attempts: int = 5, sleep_seconds: float = 0.02) -> bool:
+    for attempt in range(attempts):
+        if cache.add(LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY, 'locked', timeout=LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT):
+            return True
+        if attempt < attempts - 1:
+            time.sleep(sleep_seconds)
+    return False
+
+
+def _release_random_landing_clan_queue_lock() -> None:
+    cache.delete(LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY)
+
+
+def _extend_random_landing_clan_queue(
+    queue_ids: list[int],
+    *,
+    batch_size: int,
+    target_size: int,
+    force_eligible_refresh: bool = False,
+) -> tuple[list[int], int]:
+    normalized_queue = _normalize_cached_id_list(queue_ids)
+    max_additions = min(batch_size, max(
+        target_size - len(normalized_queue), 0))
+    if max_additions <= 0:
+        return normalized_queue, 0
+
+    eligible_ids = _get_cached_random_landing_clan_eligible_ids(
+        force_refresh=force_eligible_refresh)
+    queued_ids = set(normalized_queue)
+    available_ids = [
+        clan_id for clan_id in eligible_ids if clan_id not in queued_ids]
+
+    if not available_ids and not force_eligible_refresh:
+        eligible_ids = _get_cached_random_landing_clan_eligible_ids(
+            force_refresh=True)
+        available_ids = [
+            clan_id for clan_id in eligible_ids if clan_id not in queued_ids]
+
+    if not available_ids:
+        return normalized_queue, 0
+
+    random.shuffle(available_ids)
+    additions = available_ids[:max_additions]
+    normalized_queue.extend(additions)
+    return normalized_queue, len(additions)
+
+
+def ensure_random_landing_clan_queue_ready(
+    minimum_size: int = LANDING_CLAN_FEATURED_COUNT,
+    target_size: int = LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
+) -> int:
+    current_queue = _get_random_landing_clan_queue()
+    if len(current_queue) >= minimum_size:
+        return len(current_queue)
+
+    if not _acquire_random_landing_clan_queue_lock():
+        return len(_get_random_landing_clan_queue())
+
+    try:
+        current_queue = _get_random_landing_clan_queue()
+        if len(current_queue) < minimum_size:
+            current_queue, _ = _extend_random_landing_clan_queue(
+                current_queue,
+                batch_size=target_size,
+                target_size=target_size,
+                force_eligible_refresh=not current_queue,
+            )
+            _set_random_landing_clan_queue(current_queue)
+        return len(current_queue)
+    finally:
+        _release_random_landing_clan_queue_lock()
+
+
+def peek_random_landing_clan_ids(limit: int = LANDING_CLAN_FEATURED_COUNT) -> tuple[list[int], int]:
+    normalized_limit = normalize_landing_player_limit(limit)
+    ensure_random_landing_clan_queue_ready(minimum_size=normalized_limit)
+    queue_ids = _get_random_landing_clan_queue()
+    return queue_ids[:normalized_limit], len(queue_ids)
+
+
+def pop_random_landing_clan_ids(limit: int = LANDING_CLAN_FEATURED_COUNT) -> tuple[list[int], int]:
+    normalized_limit = normalize_landing_player_limit(limit)
+    ensure_random_landing_clan_queue_ready(minimum_size=normalized_limit)
+
+    if not _acquire_random_landing_clan_queue_lock():
+        queue_ids = _get_random_landing_clan_queue()
+        served_ids = queue_ids[:normalized_limit]
+        remaining_count = max(len(queue_ids) - len(served_ids), 0)
+        return served_ids, remaining_count
+
+    try:
+        queue_ids = _get_random_landing_clan_queue()
+        if len(queue_ids) < normalized_limit:
+            queue_ids, _ = _extend_random_landing_clan_queue(
+                queue_ids,
+                batch_size=LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
+                target_size=LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
+                force_eligible_refresh=not queue_ids,
+            )
+
+        served_ids = queue_ids[:normalized_limit]
+        remaining_ids = queue_ids[normalized_limit:]
+        _set_random_landing_clan_queue(remaining_ids)
+        return served_ids, len(remaining_ids)
+    finally:
+        _release_random_landing_clan_queue_lock()
+
+
+def refill_random_landing_clan_queue(
+    batch_size: int = LANDING_RANDOM_CLAN_QUEUE_REFILL_SIZE,
+    target_size: int = LANDING_RANDOM_CLAN_QUEUE_TARGET_SIZE,
+) -> dict[str, int | str]:
+    if not cache.add(LANDING_RANDOM_CLAN_QUEUE_LOCK_KEY, 'locked', timeout=LANDING_RANDOM_CLAN_QUEUE_LOCK_TIMEOUT):
+        return {
+            'status': 'skipped',
+            'reason': 'already-running',
+            'added': 0,
+            'queue_depth': len(_get_random_landing_clan_queue()),
+        }
+
+    try:
+        queue_ids = _get_random_landing_clan_queue()
+        queue_ids, added_count = _extend_random_landing_clan_queue(
+            queue_ids,
+            batch_size=batch_size,
+            target_size=target_size,
+        )
+        _set_random_landing_clan_queue(queue_ids)
+        return {
+            'status': 'completed',
+            'added': added_count,
+            'queue_depth': len(queue_ids),
+        }
+    finally:
+        _release_random_landing_clan_queue_lock()
+
+
+def resolve_landing_clans_by_id_order(clan_ids: list[int]) -> list[dict]:
+    normalized_ids = _normalize_cached_id_list(clan_ids)
+    if not normalized_ids:
+        return []
+
+    selected_order = {
+        clan_id: index for index, clan_id in enumerate(normalized_ids)
+    }
+    rows = list(
+        Clan.objects.exclude(name__isnull=True).exclude(name='').filter(
+            clan_id__in=normalized_ids,
+        ).annotate(
+            total_wins=Sum('player__pvp_wins'),
+            total_battles=Sum('player__pvp_battles'),
+            active_members=Count('player', filter=Q(
+                player__days_since_last_battle__lte=30)),
+        ).annotate(
+            clan_wr=Case(
+                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
+                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
+                default=None,
+                output_field=FloatField(),
+            ),
+        ).filter(
+            total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
+            clan_wr__isnull=False,
+        ).values(
+            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
+        )
+    )
+    rows.sort(key=lambda row: selected_order.get(
+        int(row.get('clan_id') or 0), len(selected_order)))
+    return rows
+
+
+def _build_best_landing_clans(limit: int = LANDING_CLAN_FEATURED_COUNT) -> list[dict]:
+    rows = list(
+        Clan.objects.exclude(name__isnull=True).exclude(name='').annotate(
+            total_wins=Sum('player__pvp_wins'),
+            total_battles=Sum('player__pvp_battles'),
+            active_members=Count('player', filter=Q(
+                player__days_since_last_battle__lte=30)),
+        ).annotate(
+            clan_wr=Case(
+                When(total_battles__gt=0, then=Cast(F('total_wins'), FloatField(
+                )) / Cast(F('total_battles'), FloatField()) * Value(100.0)),
+                default=None,
+                output_field=FloatField(),
+            ),
+        ).filter(
+            total_battles__gte=LANDING_CLAN_MIN_TOTAL_BATTLES,
+            clan_wr__isnull=False,
+        ).values(
+            'clan_id', 'name', 'tag', 'members_count', 'clan_wr', 'total_battles', 'active_members'
+        )
+    )
+
+    rows = [
+        row for row in rows
+        if (int(row.get('active_members') or 0) / max(int(row.get('members_count') or 0), 1)) >= LANDING_CLAN_BEST_MIN_ACTIVE_SHARE
+    ]
+    rows.sort(key=lambda row: (
+        -(row.get('clan_wr') if row.get('clan_wr') is not None else float('-inf')),
+        -(row.get('total_battles') if row.get('total_battles')
+          is not None else float('-inf')),
+        (row.get('name') or '').lower(),
+    ))
+    return rows[:limit]
+
+
+def get_landing_best_clans_payload_with_cache_metadata(force_refresh: bool = False) -> tuple[list[dict], dict[str, str | int]]:
+    ttl_seconds = LANDING_CLAN_CACHE_TTL
+    cache_key = LANDING_CLANS_BEST_CACHE_KEY
+    metadata_key = LANDING_CLANS_BEST_CACHE_METADATA_KEY
+
+    payload = None if force_refresh else cache.get(cache_key)
+    metadata = _normalize_landing_player_cache_metadata(
+        None if force_refresh else cache.get(metadata_key), ttl_seconds)
+
+    if payload is None:
+        payload = _build_best_landing_clans(LANDING_CLAN_FEATURED_COUNT)
+        metadata = _build_landing_player_cache_metadata(ttl_seconds)
+        cache.set(cache_key, payload, ttl_seconds)
+        cache.set(metadata_key, metadata, ttl_seconds)
+    elif cache.get(metadata_key) is None:
+        cache.set(metadata_key, metadata, ttl_seconds)
+
+    return payload, metadata
+
+
+def _get_random_landing_clan_preview() -> dict | None:
+    preview = cache.get(LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY)
+    if not isinstance(preview, dict):
+        return None
+    return preview
+
+
+def warm_random_landing_clan_queue_preview(limit: int = LANDING_CLAN_FEATURED_COUNT) -> tuple[list[dict], dict[str, str | int | bool]]:
+    clan_ids, queue_remaining = peek_random_landing_clan_ids(limit)
+    payload = resolve_landing_clans_by_id_order(clan_ids)
+    metadata = _build_landing_player_cache_metadata(0)
+    metadata.update({
+        'queue_remaining': queue_remaining,
+        'served_count': len(payload),
+        'refill_scheduled': False,
+    })
+    cache.set(
+        LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY,
+        {
+            'ids': clan_ids,
+            'payload': payload,
+            'metadata': metadata,
+        },
+        LANDING_CACHE_TTL,
+    )
+    return payload, metadata
+
+
+def get_random_landing_clan_queue_payload(
+    limit: int = LANDING_CLAN_FEATURED_COUNT,
+    *,
+    pop: bool,
+    schedule_refill: bool = True,
+    warm_preview: bool = False,
+) -> tuple[list[dict], dict[str, str | int | bool]]:
+    normalized_limit = normalize_landing_player_limit(limit)
+    if pop:
+        clan_ids, queue_remaining = pop_random_landing_clan_ids(
+            normalized_limit)
+    else:
+        clan_ids, queue_remaining = peek_random_landing_clan_ids(
+            normalized_limit)
+
+    refill_scheduled = False
+    if schedule_refill and queue_remaining < LANDING_RANDOM_CLAN_QUEUE_REFILL_THRESHOLD:
+        from warships.tasks import queue_random_landing_clan_queue_refill
+
+        refill_result = queue_random_landing_clan_queue_refill()
+        refill_scheduled = refill_result.get('status') == 'queued'
+
+    payload = None
+    preview = _get_random_landing_clan_preview()
+    if preview and _normalize_cached_id_list(preview.get('ids')) == clan_ids:
+        payload = preview.get('payload')
+
+    if not isinstance(payload, list):
+        payload = resolve_landing_clans_by_id_order(clan_ids)
+
+    metadata = _build_landing_player_cache_metadata(0)
+    metadata.update({
+        'queue_remaining': queue_remaining,
+        'served_count': len(payload),
+        'refill_scheduled': refill_scheduled,
+    })
+
+    if warm_preview and not pop:
+        cache.set(
+            LANDING_RANDOM_CLAN_QUEUE_PREVIEW_KEY,
+            {
+                'ids': clan_ids,
+                'payload': payload,
+                'metadata': metadata,
+            },
+            LANDING_CACHE_TTL,
+        )
+
+    return payload, metadata
+
+
+def _extend_random_landing_player_queue(
+    queue_ids: list[int],
+    *,
+    batch_size: int,
+    target_size: int,
+    force_eligible_refresh: bool = False,
+) -> tuple[list[int], int]:
+    normalized_queue = _normalize_cached_id_list(queue_ids)
+    max_additions = min(batch_size, max(
+        target_size - len(normalized_queue), 0))
+    if max_additions <= 0:
+        return normalized_queue, 0
+
+    eligible_ids = _get_cached_random_landing_player_eligible_ids(
+        force_refresh=force_eligible_refresh)
+    queued_ids = set(normalized_queue)
+    available_ids = [
+        player_id for player_id in eligible_ids if player_id not in queued_ids]
+
+    if not available_ids and not force_eligible_refresh:
+        eligible_ids = _get_cached_random_landing_player_eligible_ids(
+            force_refresh=True)
+        available_ids = [
+            player_id for player_id in eligible_ids if player_id not in queued_ids]
+
+    if not available_ids:
+        return normalized_queue, 0
+
+    random.shuffle(available_ids)
+    additions = available_ids[:max_additions]
+    normalized_queue.extend(additions)
+    return normalized_queue, len(additions)
+
+
+def ensure_random_landing_player_queue_ready(
+    minimum_size: int = LANDING_PLAYER_LIMIT,
+    target_size: int = LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
+) -> int:
+    current_queue = _get_random_landing_player_queue()
+    if len(current_queue) >= minimum_size:
+        return len(current_queue)
+
+    if not _acquire_random_landing_player_queue_lock():
+        return len(_get_random_landing_player_queue())
+
+    try:
+        current_queue = _get_random_landing_player_queue()
+        if len(current_queue) < minimum_size:
+            current_queue, _ = _extend_random_landing_player_queue(
+                current_queue,
+                batch_size=target_size,
+                target_size=target_size,
+                force_eligible_refresh=not current_queue,
+            )
+            _set_random_landing_player_queue(current_queue)
+        return len(current_queue)
+    finally:
+        _release_random_landing_player_queue_lock()
+
+
+def peek_random_landing_player_ids(limit: int = LANDING_PLAYER_LIMIT) -> tuple[list[int], int]:
+    normalized_limit = normalize_landing_player_limit(limit)
+    ensure_random_landing_player_queue_ready(minimum_size=normalized_limit)
+    queue_ids = _get_random_landing_player_queue()
+    return queue_ids[:normalized_limit], len(queue_ids)
+
+
+def pop_random_landing_player_ids(limit: int = LANDING_PLAYER_LIMIT) -> tuple[list[int], int]:
+    normalized_limit = normalize_landing_player_limit(limit)
+    ensure_random_landing_player_queue_ready(minimum_size=normalized_limit)
+
+    if not _acquire_random_landing_player_queue_lock():
+        queue_ids = _get_random_landing_player_queue()
+        served_ids = queue_ids[:normalized_limit]
+        remaining_count = max(len(queue_ids) - len(served_ids), 0)
+        return served_ids, remaining_count
+
+    try:
+        queue_ids = _get_random_landing_player_queue()
+        if len(queue_ids) < normalized_limit:
+            queue_ids, _ = _extend_random_landing_player_queue(
+                queue_ids,
+                batch_size=LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
+                target_size=LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
+                force_eligible_refresh=not queue_ids,
+            )
+
+        served_ids = queue_ids[:normalized_limit]
+        remaining_ids = queue_ids[normalized_limit:]
+        _set_random_landing_player_queue(remaining_ids)
+        return served_ids, len(remaining_ids)
+    finally:
+        _release_random_landing_player_queue_lock()
+
+
+def refill_random_landing_player_queue(
+    batch_size: int = LANDING_RANDOM_PLAYER_QUEUE_REFILL_SIZE,
+    target_size: int = LANDING_RANDOM_PLAYER_QUEUE_TARGET_SIZE,
+) -> dict[str, int | str]:
+    if not cache.add(LANDING_RANDOM_PLAYER_QUEUE_LOCK_KEY, 'locked', timeout=LANDING_RANDOM_PLAYER_QUEUE_LOCK_TIMEOUT):
+        return {
+            'status': 'skipped',
+            'reason': 'already-running',
+            'added': 0,
+            'queue_depth': len(_get_random_landing_player_queue()),
+        }
+
+    try:
+        queue_ids = _get_random_landing_player_queue()
+        queue_ids, added_count = _extend_random_landing_player_queue(
+            queue_ids,
+            batch_size=batch_size,
+            target_size=target_size,
+        )
+        _set_random_landing_player_queue(queue_ids)
+        return {
+            'status': 'completed',
+            'added': added_count,
+            'queue_depth': len(queue_ids),
+        }
+    finally:
+        _release_random_landing_player_queue_lock()
+
+
+def resolve_landing_players_by_id_order(player_ids: list[int]) -> list[dict]:
+    normalized_ids = _normalize_cached_id_list(player_ids)
+    if not normalized_ids:
+        return []
+
+    selected_order = {
+        player_id: index for index, player_id in enumerate(normalized_ids)
+    }
+    rows = list(
+        Player.objects.exclude(name='').filter(
+            player_id__in=normalized_ids,
+            is_hidden=False,
+            days_since_last_battle__lte=180,
+            pvp_battles__gt=LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES,
+        ).exclude(
+            last_battle_date__isnull=True,
+        ).values(
+            'name', 'player_id', 'pvp_ratio', 'is_hidden', 'days_since_last_battle', 'total_battles', 'pvp_battles', 'battles_json', 'ranked_json'
+        )
+    )
+    rows.sort(key=lambda row: selected_order.get(
+        int(row.get('player_id') or 0), len(selected_order)))
+    return _serialize_landing_player_rows(rows)
+
+
+def get_random_landing_player_queue_payload(
+    limit: int = LANDING_PLAYER_LIMIT,
+    *,
+    pop: bool,
+    schedule_refill: bool = True,
+) -> tuple[list[dict], dict[str, str | int | bool]]:
+    normalized_limit = normalize_landing_player_limit(limit)
+    if pop:
+        player_ids, queue_remaining = pop_random_landing_player_ids(
+            normalized_limit)
+    else:
+        player_ids, queue_remaining = peek_random_landing_player_ids(
+            normalized_limit)
+
+    refill_scheduled = False
+    if schedule_refill and queue_remaining < LANDING_RANDOM_PLAYER_QUEUE_REFILL_THRESHOLD:
+        from warships.tasks import queue_random_landing_player_queue_refill
+
+        refill_result = queue_random_landing_player_queue_refill()
+        refill_scheduled = refill_result.get('status') == 'queued'
+
+    payload = resolve_landing_players_by_id_order(player_ids)
+    metadata = _build_landing_player_cache_metadata(0)
+    metadata.update({
+        'queue_remaining': queue_remaining,
+        'served_count': len(payload),
+        'refill_scheduled': refill_scheduled,
+    })
+    return payload, metadata
 
 
 def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
@@ -375,6 +1024,12 @@ def _build_landing_clans() -> list[dict]:
 
 def get_landing_clans_payload(force_refresh: bool = False) -> list[dict]:
     payload, _ = get_landing_clans_payload_with_cache_metadata(
+        force_refresh=force_refresh)
+    return payload
+
+
+def get_landing_best_clans_payload(force_refresh: bool = False) -> list[dict]:
+    payload, _ = get_landing_best_clans_payload_with_cache_metadata(
         force_refresh=force_refresh)
     return payload
 
@@ -662,10 +1317,22 @@ def get_landing_recent_players_payload() -> list[dict]:
 
 
 def warm_landing_page_content(force_refresh: bool = False) -> dict:
+    random_players_payload, _ = get_random_landing_player_queue_payload(
+        LANDING_PLAYER_LIMIT,
+        pop=False,
+        schedule_refill=True,
+    )
+    random_clans_payload, _ = get_random_landing_clan_queue_payload(
+        LANDING_CLAN_FEATURED_COUNT,
+        pop=False,
+        schedule_refill=True,
+        warm_preview=True,
+    )
     warmed = {
-        'clans': len(get_landing_clans_payload(force_refresh=force_refresh)),
+        'clans': len(random_clans_payload),
+        'clans_best': len(get_landing_best_clans_payload(force_refresh=force_refresh)),
         'recent_clans': len(get_landing_recent_clans_payload()),
-        'players_random': len(get_landing_players_payload('random', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
+        'players_random': len(random_players_payload),
         'players_best': len(get_landing_players_payload('best', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
         'players_sigma': len(get_landing_players_payload('sigma', LANDING_PLAYER_LIMIT, force_refresh=force_refresh)),
         'recent_players': len(get_landing_recent_players_payload()),

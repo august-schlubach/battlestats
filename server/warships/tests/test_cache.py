@@ -23,54 +23,43 @@ class LandingPlayersCacheTests(TestCase):
     def tearDown(self):
         cache.clear()
 
-    def test_landing_players_cache_miss_then_hit(self):
-        Player.objects.create(
-            name="CachePlayer", player_id=1001,
-            pvp_battles=600,
-            total_battles=700,
+    def _create_best_player(self, player_id: int, name: str):
+        return Player.objects.create(
+            name=name,
+            player_id=player_id,
+            pvp_battles=3200,
+            total_battles=3300,
             days_since_last_battle=0,
             last_battle_date=timezone.now().date(),
+            battles_json=[
+                {"ship_tier": 10, "pvp_battles": 3200, "wins": 1760},
+            ],
         )
 
+    def test_landing_players_cache_miss_then_hit(self):
+        self._create_best_player(1001, "CachePlayer")
+
         # First request: cache miss → hits DB
-        resp1 = self.client.get("/api/landing/players/")
+        resp1 = self.client.get("/api/landing/players/?mode=best")
         self.assertEqual(resp1.status_code, 200)
         self.assertEqual(len(resp1.json()), 1)
 
         # Add another player — but cache should still return stale data
-        Player.objects.create(
-            name="NewPlayer", player_id=1002,
-            pvp_battles=650,
-            total_battles=750,
-            days_since_last_battle=0,
-            last_battle_date=timezone.now().date(),
-        )
+        self._create_best_player(1002, "NewPlayer")
 
-        resp2 = self.client.get("/api/landing/players/")
+        resp2 = self.client.get("/api/landing/players/?mode=best")
         self.assertEqual(resp2.status_code, 200)
         # Still 1 because the cached result is served
         self.assertEqual(len(resp2.json()), 1)
 
     def test_landing_players_cache_clear_returns_fresh_data(self):
-        Player.objects.create(
-            name="CachePlayer", player_id=1001,
-            pvp_battles=600,
-            total_battles=700,
-            days_since_last_battle=0,
-            last_battle_date=timezone.now().date(),
-        )
-        self.client.get("/api/landing/players/")
+        self._create_best_player(1001, "CachePlayer")
+        self.client.get("/api/landing/players/?mode=best")
 
-        Player.objects.create(
-            name="NewPlayer", player_id=1002,
-            pvp_battles=650,
-            total_battles=750,
-            days_since_last_battle=0,
-            last_battle_date=timezone.now().date(),
-        )
+        self._create_best_player(1002, "NewPlayer")
         cache.clear()
 
-        resp = self.client.get("/api/landing/players/")
+        resp = self.client.get("/api/landing/players/?mode=best")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()), 2)
 
@@ -83,31 +72,45 @@ class LandingClansCacheTests(TestCase):
     def tearDown(self):
         cache.clear()
 
-    def test_landing_clans_cache_miss_then_hit(self):
-        Clan.objects.create(clan_id=100, name="TestClan",
-                            tag="TC", members_count=5)
+    def _create_best_clan(self, clan_id: int, name: str, tag: str):
+        clan = Clan.objects.create(
+            clan_id=clan_id,
+            name=name,
+            tag=tag,
+            members_count=4,
+        )
+        for index in range(4):
+            Player.objects.create(
+                name=f"{name}Player{index}",
+                player_id=(clan_id * 100) + index,
+                clan=clan,
+                pvp_battles=30000,
+                pvp_wins=16000,
+                days_since_last_battle=3,
+            )
+        return clan
 
-        resp1 = self.client.get("/api/landing/clans/")
+    def test_landing_clans_cache_miss_then_hit(self):
+        self._create_best_clan(100, "TestClan", "TC")
+
+        resp1 = self.client.get("/api/landing/clans/?mode=best")
         self.assertEqual(resp1.status_code, 200)
         self.assertEqual(len(resp1.json()), 1)
 
-        Clan.objects.create(clan_id=101, name="AnotherClan",
-                            tag="AC", members_count=3)
+        self._create_best_clan(101, "AnotherClan", "AC")
 
-        resp2 = self.client.get("/api/landing/clans/")
+        resp2 = self.client.get("/api/landing/clans/?mode=best")
         self.assertEqual(resp2.status_code, 200)
         self.assertEqual(len(resp2.json()), 1)  # cached
 
     def test_landing_clans_cache_clear_returns_fresh_data(self):
-        Clan.objects.create(clan_id=100, name="TestClan",
-                            tag="TC", members_count=5)
-        self.client.get("/api/landing/clans/")
+        self._create_best_clan(100, "TestClan", "TC")
+        self.client.get("/api/landing/clans/?mode=best")
 
-        Clan.objects.create(clan_id=101, name="AnotherClan",
-                            tag="AC", members_count=3)
+        self._create_best_clan(101, "AnotherClan", "AC")
         cache.clear()
 
-        resp = self.client.get("/api/landing/clans/")
+        resp = self.client.get("/api/landing/clans/?mode=best")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.json()), 2)
 

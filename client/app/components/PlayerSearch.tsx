@@ -268,11 +268,11 @@ const PlayerSearch: React.FC = () => {
     const clanHydrationAttemptsRef = useRef<Record<string, number>>({});
     const lastSubmittedSearchRef = useRef<string>('');
 
-    const fetchLandingClans = useCallback(async () => {
+    const fetchLandingClans = useCallback(async (mode: LandingClanMode) => {
         const { data: payload } = await fetchSharedJson<LandingClan[]>(
-            '/api/landing/clans/',
+            `/api/landing/clans/?mode=${mode}&limit=${LANDING_LIMIT}`,
             {
-                label: 'Landing clans',
+                label: `Landing clans (${mode})`,
                 ttlMs: LANDING_FETCH_TTL_MS,
             },
         );
@@ -296,12 +296,7 @@ const PlayerSearch: React.FC = () => {
         } catch (err) {
             console.error('Error fetching landing data:', err);
         }
-        try {
-            await fetchLandingClans();
-        } catch (err) {
-            console.error('Error fetching landing clans:', err);
-        }
-    }, [fetchLandingClans]);
+    }, []);
 
     const fetchLandingPlayers = useCallback(async (mode: LandingPlayerMode) => {
         try {
@@ -338,16 +333,23 @@ const PlayerSearch: React.FC = () => {
     }, [fetchLandingData]);
 
     useEffect(() => {
+        void fetchLandingClans(clanMode).catch((err) => {
+            console.error('Error fetching landing clans:', err);
+            setClans([]);
+        });
+    }, [clanMode, fetchLandingClans]);
+
+    useEffect(() => {
         void fetchLandingPlayers(playerMode);
     }, [fetchLandingPlayers, playerMode]);
 
     useEffect(() => {
         const interval = window.setInterval(() => {
-            void fetchLandingClans();
+            void fetchLandingClans(clanMode);
         }, LANDING_PLAYER_REFRESH_INTERVAL_MS);
 
         return () => window.clearInterval(interval);
-    }, [fetchLandingClans]);
+    }, [clanMode, fetchLandingClans]);
 
     useEffect(() => {
         const interval = window.setInterval(() => {

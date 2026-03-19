@@ -43,6 +43,21 @@ class EntityVisitAnalyticsTests(TestCase):
         self.assertEqual(daily.unique_visitors, 1)
         self.assertEqual(daily.unique_sessions, 1)
 
+    def test_entity_view_ingest_accepts_no_trailing_slash(self):
+        Player.objects.create(name='Player One', player_id=1001)
+
+        response = self.client.post(
+            '/api/analytics/entity-view',
+            data=self._payload(),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(EntityVisitEvent.objects.count(), 1)
+        daily = EntityVisitDaily.objects.get(
+            entity_type='player', entity_id=1001)
+        self.assertEqual(daily.views_raw, 1)
+
     def test_entity_view_ingest_applies_cooldown_dedupe(self):
         Player.objects.create(name='Player One', player_id=1001)
         now = timezone.now()
@@ -207,3 +222,26 @@ class EntityVisitAnalyticsTests(TestCase):
         self.assertEqual(payload[0]['entity_id'], 2002)
         self.assertEqual(payload[0]['entity_name'], 'Clan Two')
         self.assertEqual(payload[1]['entity_id'], 2001)
+
+    def test_top_entities_accepts_no_trailing_slash(self):
+        Player.objects.create(name='Player One', player_id=1001)
+        today = timezone.now().date()
+        EntityVisitDaily.objects.create(
+            date=today,
+            entity_type='player',
+            entity_id=1001,
+            entity_name_snapshot='Player One',
+            views_raw=4,
+            views_deduped=4,
+            unique_visitors=4,
+            unique_sessions=4,
+            source_first_party_views=4,
+        )
+
+        response = self.client.get(
+            '/api/analytics/top-entities?entity_type=player&period=7d&metric=views_deduped&limit=1')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertEqual(payload[0]['entity_id'], 1001)
