@@ -599,7 +599,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 <div className="flex min-h-[108px] flex-col rounded-md bg-[#eff3ff] p-3">
                                     <p className="text-xs uppercase tracking-wide text-[#4292c6]">KDR</p>
                                     <div className="flex flex-1 items-center justify-center">
-                                        <p className="text-center text-2xl font-semibold text-[#084594]">{formatKillRatio(player.actual_kdr)}</p>
+                                        <p className="text-center text-2xl font-semibold text-[#084594]">{formatKillRatio(player.actual_kdr ?? null)}</p>
                                     </div>
                                 </div>
                             </div>

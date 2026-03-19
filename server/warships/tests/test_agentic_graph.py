@@ -9,6 +9,22 @@ from langgraph.checkpoint.memory import MemorySaver
 
 
 class AgenticGraphTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        self._checkpoint_env = patch.dict(
+            os.environ,
+            {
+                "DB_ENGINE": "sqlite3",
+                "LANGGRAPH_CHECKPOINT_POSTGRES_URL": "",
+            },
+            clear=False,
+        )
+        self._checkpoint_env.start()
+
+    def tearDown(self):
+        self._checkpoint_env.stop()
+        super().tearDown()
+
     def test_checkpoint_url_derived_from_db_environment(self):
         with patch.dict(
             os.environ,

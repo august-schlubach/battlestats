@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from warships.landing import LANDING_CLANS_CACHE_KEY, LANDING_RECENT_CLANS_CACHE_KEY, LANDING_RECENT_PLAYERS_CACHE_KEY, landing_player_cache_key, warm_landing_page_content
 from warships.models import Player, Clan, PlayerExplorerSummary
-from warships.views import PUBLIC_API_THROTTLES, landing_players
+from warships.views import PUBLIC_API_THROTTLES, landing_players, _missing_player_lookup_cache_key
 
 
 class PlayerViewSetTests(TestCase):
@@ -568,7 +568,7 @@ class PlayerViewSetTests(TestCase):
     @patch("warships.views.update_player_data_task.delay")
     @patch("warships.data.update_clan_data")
     @patch("warships.data.update_player_data")
-    def test_player_lookup_without_clan_hydrates_clan_details_before_serializing(
+    def test_player_lookup_without_clan_serves_stored_payload_and_enqueues_refresh(
         self,
         mock_update_player_data,
         mock_update_clan_data,
@@ -583,36 +583,21 @@ class PlayerViewSetTests(TestCase):
             last_fetch=timezone.now(),
         )
 
-        def hydrate_player(player, force_refresh=False):
-            clan, _ = Clan.objects.get_or_create(clan_id=70010)
-            player.clan = clan
-            player.save(update_fields=["clan"])
-
-        def hydrate_clan(clan_id):
-            clan = Clan.objects.get(clan_id=clan_id)
-            clan.name = "Hydrated Clan"
-            clan.tag = "HC"
-            clan.members_count = 5
-            clan.last_fetch = timezone.now()
-            clan.save(update_fields=["name", "tag",
-                      "members_count", "last_fetch"])
-
-        mock_update_player_data.side_effect = hydrate_player
-        mock_update_clan_data.side_effect = hydrate_clan
-
         response = self.client.get("/api/player/NoClanYet/")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["clan_id"], 70010)
-        self.assertEqual(payload["clan_name"], "Hydrated Clan")
-        self.assertEqual(payload["clan_tag"], "HC")
-        mock_update_player_data.assert_called_once_with(
-            player=player, force_refresh=True)
-        mock_update_clan_data.assert_called_once_with(70010)
-        mock_update_player_task.assert_not_called()
+        self.assertIsNone(payload["clan_id"])
+        self.assertIsNone(payload["clan_name"])
+        self.assertIsNone(payload["clan_tag"])
+        mock_update_player_data.assert_not_called()
+        mock_update_clan_data.assert_not_called()
+        mock_update_player_task.assert_called_once_with(
+            player_id=player.player_id,
+            force_refresh=True,
+        )
         mock_update_clan_task.assert_not_called()
-        mock_update_clan_members_task.assert_called_once_with(clan_id=70010)
+        mock_update_clan_members_task.assert_not_called()
 
     @patch("warships.views.update_clan_members_task.delay")
     @patch("warships.views.update_clan_data_task.delay")
@@ -683,6 +668,48 @@ class PlayerViewSetTests(TestCase):
         mock_update_player_data.assert_called_once_with(
             player=player, force_refresh=True)
         mock_update_player_task.assert_not_called()
+        mock_update_clan_task.assert_not_called()
+        mock_update_clan_members_task.assert_not_called()
+
+    @patch("warships.views.update_clan_members_task.delay")
+    @patch("warships.views.update_clan_data_task.delay")
+    @patch("warships.views.update_player_data_task.delay")
+    @patch("warships.data.update_player_data")
+    def test_player_lookup_enqueues_refresh_for_efficiency_gap_when_actual_kdr_present(
+        self,
+        mock_update_player_data,
+        mock_update_player_task,
+        mock_update_clan_task,
+        mock_update_clan_members_task,
+    ):
+        now = timezone.now()
+        clan = Clan.objects.create(
+            clan_id=904,
+            name="EfficiencyAsyncClan",
+            members_count=1,
+            last_fetch=now,
+        )
+        Player.objects.create(
+            name="EfficiencyAsyncPlayer",
+            player_id=9005,
+            clan=clan,
+            last_fetch=now,
+            pvp_battles=25,
+            pvp_ratio=52.0,
+            pvp_survival_rate=38.0,
+            battles_json=[{"ship_name": "Stub Ship", "pvp_battles": 25}],
+            efficiency_json=None,
+            actual_kdr=1.8,
+        )
+
+        response = self.client.get("/api/player/EfficiencyAsyncPlayer/")
+
+        self.assertEqual(response.status_code, 200)
+        mock_update_player_data.assert_not_called()
+        mock_update_player_task.assert_called_once_with(
+            player_id=9005,
+            force_refresh=True,
+        )
         mock_update_clan_task.assert_not_called()
         mock_update_clan_members_task.assert_not_called()
 
@@ -3555,3 +3582,19 @@ class ApiThrottleTests(TestCase):
         payload = response.json()
         self.assertIn("detail", payload)
         self.assertEqual(payload.get("status_code"), 404)
+
+    @patch("warships.views._fetch_player_id_by_name", return_value=None)
+    def test_missing_player_lookup_uses_negative_cache_after_first_miss(self, mock_lookup):
+        cache_key = _missing_player_lookup_cache_key(
+            "PlayerThatWillNeverExist")
+        cache.delete(cache_key)
+
+        first_response = self.client.get(
+            "/api/player/PlayerThatWillNeverExist/")
+        second_response = self.client.get(
+            "/api/player/PlayerThatWillNeverExist/")
+
+        self.assertEqual(first_response.status_code, 404)
+        self.assertEqual(second_response.status_code, 404)
+        self.assertTrue(cache.get(cache_key))
+        mock_lookup.assert_called_once_with("PlayerThatWillNeverExist")

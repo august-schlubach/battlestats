@@ -15,6 +15,7 @@ Aye, the bones are sound — 14 steps, clear sequencing, test coverage spec'd ou
 ### F-1 — `player_id` Semantics Collision in Step 8 (HIGH)
 
 Step 8 proposes:
+
 ```python
 es = PlayerExplorerSummary.objects.filter(player_id=player.player_id).only(
     'clan_battle_summary_updated_at').first()
@@ -28,10 +29,12 @@ es = PlayerExplorerSummary.objects.filter(player_id=player.player_id).only(
 These are **not** the same value. The query would either return the wrong player's explorer summary or (more likely) return `None` for every lookup.
 
 **Required fix:**
+
 ```python
 es = PlayerExplorerSummary.objects.filter(player=player).only(
     'clan_battle_summary_updated_at').first()
 ```
+
 Or: `filter(player_id=player.id)` — using `player.id` (PK), not `player.player_id` (WG account ID).
 
 Alternatively: after `player.refresh_from_db()` (which already runs on [line 187](server/warships/management/commands/incremental_player_refresh.py#L187)), just access `player.explorer_summary` directly — it's a OneToOneField reverse relation. No separate query needed:
@@ -48,6 +51,7 @@ except PlayerExplorerSummary.DoesNotExist:
 ### F-2 — Same `player_id` Collision in Step 7a (HIGH)
 
 Step 7a proposes:
+
 ```python
 explorer_map = {
     es.player_id: es
@@ -66,6 +70,7 @@ Same bug: `player_ids` in landing.py are WG account IDs (extracted via `row.get(
 The runbook proposes a **separate** `PlayerExplorerSummary` bulk query in Step 7a. But both landing functions already load full Player objects with `select_related('explorer_summary')`:
 
 `_serialize_landing_player_rows()` (~L305):
+
 ```python
 players_by_id = {
     player.player_id: player
@@ -74,6 +79,7 @@ players_by_id = {
 ```
 
 `_build_recent_players()` (~L617):
+
 ```python
 players_by_id = {
     player.player_id: player
@@ -98,7 +104,9 @@ No extra query, no `player_id` collision risk, reuses existing data.
 ### F-4 — Step 9 Leaves Option A/B Undecided (MEDIUM)
 
 Step 9 says:
+
 > Also update `get_player_clan_battle_summaries()` — either:
+>
 > - **Option A:** Rewrite to read from `PlayerExplorerSummary`
 > - **Option B:** Remove entirely if landing.py was updated to query explorer summaries directly
 
@@ -107,6 +115,7 @@ A runbook should commit to a decision. Given F-3 (landing.py already has explore
 ### F-5 — Step 3f Double-Checks Staleness Redundantly (MEDIUM)
 
 Step 3f:
+
 ```python
 stale_members = [m for m in members if clan_battle_summary_is_stale(m)]
 for member in stale_members[:CLAN_BATTLE_PLAYER_HYDRATION_MAX_IN_FLIGHT]:

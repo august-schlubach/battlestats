@@ -329,7 +329,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
         )
         ranked_rows = row.pop('ranked_json', None)
         player_obj = players_by_id.get(player_id)
-        es = getattr(player_obj, 'explorer_summary', None) if player_obj else None
+        es = getattr(player_obj, 'explorer_summary',
+                     None) if player_obj else None
         row['high_tier_pvp_battles'] = high_tier_battles
         row['high_tier_pvp_ratio'] = high_tier_ratio
         row['is_pve_player'] = is_pve_player(
@@ -341,7 +342,8 @@ def _serialize_landing_player_rows(rows: list[dict]) -> list[dict]:
             getattr(es, 'clan_battle_total_battles', None),
             getattr(es, 'clan_battle_seasons_participated', None),
         )
-        row['clan_battle_win_rate'] = getattr(es, 'clan_battle_overall_win_rate', None)
+        row['clan_battle_win_rate'] = getattr(
+            es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
         row.update(_get_published_efficiency_rank_payload(
@@ -610,7 +612,8 @@ def _build_recent_players() -> list[dict]:
         player_id = int(row.get('player_id') or 0)
         ranked_rows = row.pop('ranked_json', None)
         player_obj = players_by_id.get(player_id)
-        es = getattr(player_obj, 'explorer_summary', None) if player_obj else None
+        es = getattr(player_obj, 'explorer_summary',
+                     None) if player_obj else None
         row['is_pve_player'] = is_pve_player(
             row.get('total_battles'), row.get('pvp_battles'))
         row['is_sleepy_player'] = is_sleepy_player(
@@ -620,7 +623,8 @@ def _build_recent_players() -> list[dict]:
             getattr(es, 'clan_battle_total_battles', None),
             getattr(es, 'clan_battle_seasons_participated', None),
         )
-        row['clan_battle_win_rate'] = getattr(es, 'clan_battle_overall_win_rate', None)
+        row['clan_battle_win_rate'] = getattr(
+            es, 'clan_battle_overall_win_rate', None)
         row['highest_ranked_league'] = get_highest_ranked_league_name(
             ranked_rows)
         row.update(_get_published_efficiency_rank_payload(

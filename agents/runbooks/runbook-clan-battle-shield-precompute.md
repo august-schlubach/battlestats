@@ -76,6 +76,7 @@ docker compose exec -T server python manage.py test warships.tests --keepdb
 Remove the `fallback_summary` parameter. Read exclusively from `PlayerExplorerSummary`.
 
 **Before:**
+
 ```python
 def get_published_clan_battle_summary_payload(
     player: Optional[Player],
@@ -91,6 +92,7 @@ def get_published_clan_battle_summary_payload(
 ```
 
 **After:**
+
 ```python
 def get_published_clan_battle_summary_payload(
     player: Optional[Player],
@@ -116,11 +118,13 @@ All callers passing `fallback_summary=` must be updated (views.py list comprehen
 ### 3a. Add `select_related('explorer_summary')` to members queryset
 
 Find the members query (~L475):
+
 ```python
 members = clan.player_set.exclude(name='').order_by(...)
 ```
 
 Change to:
+
 ```python
 members = clan.player_set.select_related('explorer_summary').exclude(name='').order_by(...)
 ```
@@ -130,6 +134,7 @@ Do the same for the re-query after `update_clan_members()` (~L480).
 ### 3b. Remove `queue_clan_battle_hydration()` call
 
 Remove:
+
 ```python
 clan_battle_hydration_state = queue_clan_battle_hydration(members)
 pending_clan_battle_player_ids = clan_battle_hydration_state['pending_player_ids']
@@ -140,6 +145,7 @@ pending_clan_battle_player_ids = clan_battle_hydration_state['pending_player_ids
 Replace the `get_player_clan_battle_summary()` list comprehension pattern:
 
 **Before:**
+
 ```python
 for clan_battle_summary in [get_player_clan_battle_summary(member.player_id, allow_fetch=False)]
 ```
@@ -160,6 +166,7 @@ Remove the `for clan_battle_summary in [...]` generator from the list comprehens
 ### 3d. Remove `clan_battle_hydration_pending` from member row
 
 Remove:
+
 ```python
 'clan_battle_hydration_pending': member.player_id in pending_clan_battle_player_ids,
 ```
@@ -167,6 +174,7 @@ Remove:
 ### 3e. Remove `X-Clan-Battle-Hydration-*` response headers
 
 Remove all four headers:
+
 ```python
 response['X-Clan-Battle-Hydration-Queued'] = ...
 response['X-Clan-Battle-Hydration-Deferred'] = ...
@@ -196,31 +204,20 @@ Remove `queue_clan_battle_hydration` and `get_player_clan_battle_summary` import
 
 ---
 
-## Step 4: Update Player Detail View in `views.py`
+## Step 4: Update Player Detail Read Path in `views.py`
 
-**File:** `server/warships/views.py` — `PlayerDetail` class (~L193)
+**File:** `server/warships/views.py` — `PlayerViewSet.get_object()`
 
-The `PlayerDetail` view already uses `select_related('explorer_summary')` in its queryset.
+The routed player detail endpoint is served by `PlayerViewSet`, not the unused `PlayerDetail` class.
 
-After the serializer returns the response, add a stale-check dispatch:
-
-```python
-# In the retrieve method or via a custom get_object/retrieve override:
-player = self.get_object()
-maybe_refresh_clan_battle_data(player)
-```
-
-If `PlayerDetail` uses the default `RetrieveUpdateDestroyAPIView`, override `retrieve()`:
+Add the clan-battle stale-check dispatch at the end of `get_object()` so the returned player instance is already available and no second view-level lookup is required:
 
 ```python
-def retrieve(self, request, *args, **kwargs):
-    response = super().retrieve(request, *args, **kwargs)
-    player = self.get_object()
-    maybe_refresh_clan_battle_data(player)
-    return response
+from warships.data import maybe_refresh_clan_battle_data
+maybe_refresh_clan_battle_data(obj)
 ```
 
-**Note:** `self.get_object()` is cached by DRF after the first call, so this does not cause a second DB query.
+This keeps the behavior attached to the actual `/api/player/<name>/` route.
 
 ---
 
@@ -231,6 +228,7 @@ def retrieve(self, request, *args, **kwargs):
 Remove the `fallback_summary=get_player_clan_battle_summary(...)` call:
 
 **Before:**
+
 ```python
 summary = get_published_clan_battle_summary_payload(
     obj,
@@ -242,6 +240,7 @@ summary = get_published_clan_battle_summary_payload(
 ```
 
 **After:**
+
 ```python
 summary = get_published_clan_battle_summary_payload(obj)
 ```
@@ -255,6 +254,7 @@ Remove the `get_player_clan_battle_summary` import if no longer used.
 **File:** `server/warships/serializers.py` (~L299)
 
 Remove:
+
 ```python
 clan_battle_hydration_pending = serializers.BooleanField()
 ```
@@ -342,6 +342,7 @@ docker compose exec -T server python manage.py test warships.tests.test_incremen
 **File:** `server/warships/data.py`
 
 Remove the following functions:
+
 - `clan_battle_player_hydration_needs_refresh()` (~L468)
 - `queue_clan_battle_hydration()` (~L476)
 
@@ -379,6 +380,7 @@ grep -rn "is_clan_battle_data_refresh_pending" server/warships/ --include="*.py"
 **File:** `client/app/components/clanMembersShared.ts` (~L16)
 
 Remove:
+
 ```typescript
 clan_battle_hydration_pending: boolean;
 ```
@@ -438,6 +440,7 @@ docker compose exec -T server python manage.py test warships.tests.test_clan_bat
 ## Step 13: Integration Smoke Test
 
 1. Restart the Docker stack:
+
    ```bash
    docker compose restart server task-runner
    ```
@@ -465,21 +468,25 @@ docker compose exec -T server python manage.py test warships.tests.test_clan_bat
 ## Step 14: Clean Up and Commit
 
 1. Run full test suite one final time:
+
    ```bash
    docker compose exec -T server python manage.py test warships.tests --keepdb
    ```
 
 2. Run client type check:
+
    ```bash
    cd client && npx tsc --noEmit
    ```
 
 3. Grep for any remaining references to removed functions:
+
    ```bash
    grep -rn "queue_clan_battle_hydration\|clan_battle_player_hydration_needs_refresh\|clan_battle_hydration_pending\|is_clan_battle_data_refresh_pending" server/ client/ --include="*.py" --include="*.ts" --include="*.tsx" | grep -v node_modules | grep -v __pycache__
    ```
 
 4. Commit with a descriptive message:
+
    ```bash
    git add -A
    git commit -m "Precompute clan battle shield data: DB-only read path, lazy refresh on invocation
@@ -511,13 +518,13 @@ If something goes wrong after deployment:
 
 ## Files Changed (Summary)
 
-| File | Action |
-|---|---|
-| `server/warships/data.py` | Add `clan_battle_summary_is_stale()`, `maybe_refresh_clan_battle_data()`, `CLAN_BATTLE_SUMMARY_STALE_DAYS`. Simplify `get_published_clan_battle_summary_payload()`. Remove `queue_clan_battle_hydration()`, `clan_battle_player_hydration_needs_refresh()`, `get_player_clan_battle_summaries()`. |
-| `server/warships/views.py` | `clan_members()`: add `select_related`, remove hydration call/headers/pending, add stale dispatch. `PlayerDetail`: add stale dispatch. |
-| `server/warships/serializers.py` | `PlayerSerializer`: remove cache fallback. `ClanMemberSerializer`: remove `clan_battle_hydration_pending`. |
-| `server/warships/landing.py` | Replace cache reads with `PlayerExplorerSummary` DB reads. |
-| `server/warships/tasks.py` | Remove `is_clan_battle_data_refresh_pending()`. |
-| `server/warships/management/commands/incremental_player_refresh.py` | Add passive CB backfill in `_refresh_player()`. |
-| `client/app/components/clanMembersShared.ts` | Remove `clan_battle_hydration_pending` from type. |
-| `server/warships/tests/test_clan_battle_shield_precompute.py` | New test file (13 test cases). |
+| File                                                                | Action                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server/warships/data.py`                                           | Add `clan_battle_summary_is_stale()`, `maybe_refresh_clan_battle_data()`, `CLAN_BATTLE_SUMMARY_STALE_DAYS`. Simplify `get_published_clan_battle_summary_payload()`. Remove `queue_clan_battle_hydration()`, `clan_battle_player_hydration_needs_refresh()`, `get_player_clan_battle_summaries()`. |
+| `server/warships/views.py`                                          | `clan_members()`: add `select_related`, remove hydration call/headers/pending, add stale dispatch. `PlayerViewSet.get_object()`: add stale dispatch and keep the routed player detail flow aligned with DB-backed clan-battle data.                                                               |
+| `server/warships/serializers.py`                                    | `PlayerSerializer`: remove cache fallback. `ClanMemberSerializer`: remove `clan_battle_hydration_pending`.                                                                                                                                                                                        |
+| `server/warships/landing.py`                                        | Replace cache reads with `PlayerExplorerSummary` DB reads.                                                                                                                                                                                                                                        |
+| `server/warships/tasks.py`                                          | Remove `is_clan_battle_data_refresh_pending()`.                                                                                                                                                                                                                                                   |
+| `server/warships/management/commands/incremental_player_refresh.py` | Add passive CB backfill in `_refresh_player()`.                                                                                                                                                                                                                                                   |
+| `client/app/components/clanMembersShared.ts`                        | Remove `clan_battle_hydration_pending` from type.                                                                                                                                                                                                                                                 |
+| `server/warships/tests/test_clan_battle_shield_precompute.py`       | New test file (13 test cases).                                                                                                                                                                                                                                                                    |

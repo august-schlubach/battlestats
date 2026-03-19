@@ -616,6 +616,21 @@ class RankedDataRefreshTests(TestCase):
         self.assertEqual(result, player.ranked_json)
         mock_update_ranked_data.assert_not_called()
 
+    @patch("warships.data.update_ranked_data")
+    def test_fetch_ranked_data_uses_fresh_empty_cache(self, mock_update_ranked_data):
+        now = timezone.now()
+        player = Player.objects.create(
+            name="FreshEmptyRankedCache",
+            player_id=7011,
+            ranked_updated_at=now,
+            ranked_json=[],
+        )
+
+        result = fetch_ranked_data(str(player.player_id))
+
+        self.assertEqual(result, [])
+        mock_update_ranked_data.assert_not_called()
+
     @patch("warships.data._fetch_ranked_ship_stats_for_player")
     @patch("warships.data._fetch_ship_info")
     @patch("warships.data._fetch_ranked_account_info")

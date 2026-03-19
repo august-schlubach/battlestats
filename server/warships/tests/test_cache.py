@@ -26,6 +26,9 @@ class LandingPlayersCacheTests(TestCase):
     def test_landing_players_cache_miss_then_hit(self):
         Player.objects.create(
             name="CachePlayer", player_id=1001,
+            pvp_battles=600,
+            total_battles=700,
+            days_since_last_battle=0,
             last_battle_date=timezone.now().date(),
         )
 
@@ -37,6 +40,9 @@ class LandingPlayersCacheTests(TestCase):
         # Add another player — but cache should still return stale data
         Player.objects.create(
             name="NewPlayer", player_id=1002,
+            pvp_battles=650,
+            total_battles=750,
+            days_since_last_battle=0,
             last_battle_date=timezone.now().date(),
         )
 
@@ -48,12 +54,18 @@ class LandingPlayersCacheTests(TestCase):
     def test_landing_players_cache_clear_returns_fresh_data(self):
         Player.objects.create(
             name="CachePlayer", player_id=1001,
+            pvp_battles=600,
+            total_battles=700,
+            days_since_last_battle=0,
             last_battle_date=timezone.now().date(),
         )
         self.client.get("/api/landing/players/")
 
         Player.objects.create(
             name="NewPlayer", player_id=1002,
+            pvp_battles=650,
+            total_battles=750,
+            days_since_last_battle=0,
             last_battle_date=timezone.now().date(),
         )
         cache.clear()

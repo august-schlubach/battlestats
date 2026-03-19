@@ -63,11 +63,16 @@ def _guidance_documents() -> list[dict[str, Any]]:
     for pattern in GUIDANCE_GLOBS:
         for path in sorted(root.glob(pattern)):
             content = path.read_text(encoding="utf-8")
+            title = _extract_title(content, path)
+            excerpt = _extract_excerpt(content)
             docs.append({
                 "path": str(path.relative_to(root)),
-                "title": _extract_title(content, path),
-                "excerpt": _extract_excerpt(content),
-                "tokens": _tokenize(path.name + "\n" + content[:6000]),
+                "title": title,
+                "excerpt": excerpt,
+                "tokens": _tokenize(
+                    str(path.relative_to(root)) + "\n" + title +
+                    "\n" + excerpt + "\n" + content[:6000]
+                ),
             })
     return docs
 
@@ -77,18 +82,25 @@ def retrieve_doctrine_guidance(task: str, limit: int = 3) -> list[dict[str, Any]
     if not task_tokens:
         return []
 
-    scored: list[dict[str, Any]] = []
-    for doc in _guidance_documents():
-        overlap = sorted(task_tokens & set(doc["tokens"]))
-        if not overlap:
-            continue
-        scored.append({
-            "path": doc["path"],
-            "title": doc["title"],
-            "excerpt": doc["excerpt"],
-            "matched_terms": overlap[:8],
-            "score": len(overlap),
-        })
+    def _score_documents(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        scored: list[dict[str, Any]] = []
+        for doc in documents:
+            overlap = sorted(task_tokens & set(doc["tokens"]))
+            if not overlap:
+                continue
+            scored.append({
+                "path": doc["path"],
+                "title": doc["title"],
+                "excerpt": doc["excerpt"],
+                "matched_terms": overlap[:8],
+                "score": len(overlap),
+            })
+        return scored
+
+    scored = _score_documents(_guidance_documents())
+    if not scored:
+        _guidance_documents.cache_clear()
+        scored = _score_documents(_guidance_documents())
 
     scored.sort(key=lambda item: (-int(item["score"]), str(item["path"])))
     return scored[:limit]

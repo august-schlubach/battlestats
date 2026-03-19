@@ -103,7 +103,8 @@ class ClanMembersShieldTests(TestCase):
     @patch('warships.tasks.queue_clan_battle_data_refresh')
     def test_returns_shield_data_from_db(self, mock_cb_dispatch,
                                          mock_eff_hydration, mock_ranked):
-        response = self.client.get(f'/api/fetch/clan_members/{self.clan.clan_id}/')
+        response = self.client.get(
+            f'/api/fetch/clan_members/{self.clan.clan_id}/')
         self.assertEqual(response.status_code, 200)
         data = response.json()
         member = next(m for m in data if m['name'] == 'ShieldMember')
@@ -112,7 +113,8 @@ class ClanMembersShieldTests(TestCase):
         self.assertNotIn('clan_battle_hydration_pending', member)
         # No X-Clan-Battle-Hydration-* headers
         for header in response.headers:
-            self.assertFalse(header.lower().startswith('x-clan-battle-hydration'))
+            self.assertFalse(header.lower().startswith(
+                'x-clan-battle-hydration'))
 
     @patch('warships.data.queue_clan_ranked_hydration',
            return_value={'pending_player_ids': set(), 'queued_player_ids': set(),
@@ -122,12 +124,13 @@ class ClanMembersShieldTests(TestCase):
                          'deferred_player_ids': set(), 'max_in_flight': 5})
     @patch('warships.tasks.queue_clan_battle_data_refresh')
     def test_no_shield_when_never_hydrated(self, mock_cb_dispatch,
-                                            mock_eff_hydration, mock_ranked):
+                                           mock_eff_hydration, mock_ranked):
         bare = Player.objects.create(
             name='BareMember', player_id=88102, clan=self.clan,
             last_battle_date=self.now.date(), total_battles=50,
             pvp_battles=40, is_hidden=False)
-        response = self.client.get(f'/api/fetch/clan_members/{self.clan.clan_id}/')
+        response = self.client.get(
+            f'/api/fetch/clan_members/{self.clan.clan_id}/')
         self.assertEqual(response.status_code, 200)
         member = next(m for m in response.json()
                       if m['name'] == 'BareMember')
@@ -151,7 +154,8 @@ class ClanMembersShieldTests(TestCase):
             player=stale,
             clan_battle_summary_updated_at=self.now - timedelta(days=10),
         )
-        response = self.client.get(f'/api/fetch/clan_members/{self.clan.clan_id}/')
+        response = self.client.get(
+            f'/api/fetch/clan_members/{self.clan.clan_id}/')
         self.assertEqual(response.status_code, 200)
         mock_cb_dispatch.assert_called()
 
@@ -163,8 +167,9 @@ class ClanMembersShieldTests(TestCase):
                          'deferred_player_ids': set(), 'max_in_flight': 5})
     @patch('warships.tasks.queue_clan_battle_data_refresh')
     def test_no_dispatch_for_fresh(self, mock_cb_dispatch,
-                                    mock_eff_hydration, mock_ranked):
-        response = self.client.get(f'/api/fetch/clan_members/{self.clan.clan_id}/')
+                                   mock_eff_hydration, mock_ranked):
+        response = self.client.get(
+            f'/api/fetch/clan_members/{self.clan.clan_id}/')
         self.assertEqual(response.status_code, 200)
         # Only the fresh member exists → no dispatch
         mock_cb_dispatch.assert_not_called()
@@ -177,8 +182,8 @@ class PlayerDetailStaleDispatchTests(TestCase):
     @patch("warships.views.update_player_data_task.delay")
     @patch('warships.data.maybe_refresh_clan_battle_data')
     def test_dispatches_when_stale(self, mock_maybe_refresh,
-                                    mock_player_task, mock_clan_task,
-                                    mock_clan_members_task):
+                                   mock_player_task, mock_clan_task,
+                                   mock_clan_members_task):
         now = timezone.now()
         clan = Clan.objects.create(
             clan_id=88200, name='DetailClan', members_count=1,
@@ -196,8 +201,8 @@ class PlayerDetailStaleDispatchTests(TestCase):
     @patch("warships.views.update_player_data_task.delay")
     @patch('warships.data.maybe_refresh_clan_battle_data')
     def test_no_dispatch_when_fresh(self, mock_maybe_refresh,
-                                     mock_player_task, mock_clan_task,
-                                     mock_clan_members_task):
+                                    mock_player_task, mock_clan_task,
+                                    mock_clan_members_task):
         now = timezone.now()
         clan = Clan.objects.create(
             clan_id=88210, name='FreshDetailClan', members_count=1,
@@ -224,8 +229,8 @@ class SerializerReadsFromDbTests(TestCase):
     @patch("warships.views.update_clan_data_task.delay")
     @patch("warships.views.update_player_data_task.delay")
     def test_serializer_uses_db_not_cache(self, mock_player_task,
-                                           mock_clan_task,
-                                           mock_clan_members_task):
+                                          mock_clan_task,
+                                          mock_clan_members_task):
         now = timezone.now()
         clan = Clan.objects.create(
             clan_id=88300, name='SerClan', members_count=1, last_fetch=now)
@@ -245,7 +250,8 @@ class SerializerReadsFromDbTests(TestCase):
         data = response.json()
         self.assertEqual(data['clan_battle_header_seasons_played'], 5)
         self.assertEqual(data['clan_battle_header_total_battles'], 100)
-        self.assertAlmostEqual(data['clan_battle_header_overall_win_rate'], 58.3)
+        self.assertAlmostEqual(
+            data['clan_battle_header_overall_win_rate'], 58.3)
 
 
 class IncrementalRefreshCBBackfillTests(TestCase):
@@ -256,7 +262,7 @@ class IncrementalRefreshCBBackfillTests(TestCase):
     @patch('warships.management.commands.incremental_player_refresh.fetch_players_bulk')
     @patch('warships.management.commands.incremental_player_refresh.fetch_player_clan_battle_seasons')
     def test_backfills_when_cb_never_hydrated(self, mock_fetch_cb, mock_bulk,
-                                               mock_save, mock_eff, mock_ach):
+                                              mock_save, mock_eff, mock_ach):
         now = timezone.now()
         player = Player.objects.create(
             name='BackfillPlayer', player_id=88401, is_hidden=False,
@@ -276,7 +282,7 @@ class IncrementalRefreshCBBackfillTests(TestCase):
     @patch('warships.management.commands.incremental_player_refresh.fetch_players_bulk')
     @patch('warships.management.commands.incremental_player_refresh.fetch_player_clan_battle_seasons')
     def test_skips_when_cb_already_populated(self, mock_fetch_cb, mock_bulk,
-                                              mock_save, mock_eff, mock_ach):
+                                             mock_save, mock_eff, mock_ach):
         now = timezone.now()
         player = Player.objects.create(
             name='PopulatedPlayer', player_id=88402, is_hidden=False,

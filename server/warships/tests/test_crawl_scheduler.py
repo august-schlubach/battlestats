@@ -373,7 +373,8 @@ class RefreshTaskLockTests(TestCase):
             result = queue_clan_battle_data_refresh(2234)
 
         self.assertEqual(result, {"status": "queued"})
-        self.assertTrue(cache.get(f"warships:tasks:update_player_clan_battle_data_dispatch:2234"))
+        self.assertTrue(
+            cache.get(f"warships:tasks:update_player_clan_battle_data_dispatch:2234"))
         mock_delay.assert_called_once_with(player_id=2234)
 
     def test_queue_clan_battle_data_refresh_skips_during_broker_cooldown(self):

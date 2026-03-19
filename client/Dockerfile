@@ -5,8 +5,8 @@ FROM node:20.19.1
 WORKDIR /app
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends ripgrep \
-	&& rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends ripgrep \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and package-lock.json first to leverage Docker cache.
 COPY package*.json ./

@@ -27,7 +27,7 @@ describe('buildClanChartMemberActivitySignature', () => {
         ];
         const after = [
             makeMember({ name: 'Player Two', activity_bucket: 'active_30d', days_since_last_battle: 12, is_clan_battle_player: true, clan_battle_win_rate: 58.3 }),
-            makeMember({ name: 'Player One', is_ranked_player: true, highest_ranked_league: 'gold', ranked_hydration_pending: false }),
+            makeMember({ name: 'Player One', is_ranked_player: true, highest_ranked_league: 'Gold', ranked_hydration_pending: false }),
         ];
 
         expect(buildClanChartMemberActivitySignature(after)).toBe(buildClanChartMemberActivitySignature(before));

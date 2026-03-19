@@ -3,7 +3,7 @@
 **Reviewed:** `agents/runbooks/spec-clan-battle-shield-precompute.md`  
 **Date:** 2025-07-11  
 **Verdict:** CONDITIONAL GO — 80% confidence  
-**Blocking findings:** 0 critical, 2 high, 3 medium, 2 low  
+**Blocking findings:** 0 critical, 2 high, 3 medium, 2 low
 
 Aye, the bones of this spec are sound — kill the ephemeral cache dance, serve from the DB, refresh lazily. I'd rather be in me bed than point out what follows, but the devil's in the details ye skipped.
 
@@ -21,7 +21,7 @@ The spec says to "Query `PlayerExplorerSummary` for all members in a single pref
 
 ### F-2 — `landing.py` Missing from Changes by File (HIGH)
 
-The spec says "Landing page — Same — read from `PlayerExplorerSummary`, no cache fallback" but **does not list `landing.py` in the Changes by File section.** 
+The spec says "Landing page — Same — read from `PlayerExplorerSummary`, no cache fallback" but **does not list `landing.py` in the Changes by File section.**
 
 Verified: `landing.py` (~L301, L335, L623) calls `get_player_clan_battle_summaries()` which reads exclusively from Redis cache entries (`clan_battles:player:{account_id}`). It also calls `get_published_clan_battle_summary_payload()` with `fallback_summary` from that cache data.
 
@@ -38,6 +38,7 @@ The spec lists functions to remove (`queue_clan_battle_hydration`, `clan_battle_
 The spec removes the read-path callers of `get_player_clan_battle_summary()` (views.py list comprehension, serializers.py fallback) but does not explicitly say whether the function itself should be removed, kept for internal task use, or rewritten.
 
 The function currently:
+
 1. Reads from Redis cache
 2. Optionally fetches from WG API (`allow_fetch=True`)
 3. Calls `_persist_player_clan_battle_summary()` if fetched
@@ -47,8 +48,9 @@ Tasks still call `fetch_player_clan_battle_seasons()` → `_get_player_clan_batt
 ### F-5 — `clan_battle_hydration_pending` Is Already Dead UI Code (MEDIUM)
 
 Verified that `ClanMembers.tsx` never renders any loading/placeholder state for `clan_battle_hydration_pending`. The field is:
+
 - Computed in views.py and included in the response
-- Defined in `ClanMemberData` type (clanMembersShared.ts L16)  
+- Defined in `ClanMemberData` type (clanMembersShared.ts L16)
 - **Never read or displayed** in any component
 
 Compare with `efficiency_hydration_pending` which shows an "Updating Battlestats rank icons..." message.
@@ -60,6 +62,7 @@ This means removing `clan_battle_hydration_pending` is a pure cleanup with zero 
 The spec says to extend `_refresh_player()` to call `fetch_player_clan_battle_seasons()` when `clan_battle_summary_updated_at` is null. But `_refresh_player()` loads the player with `Player.objects.filter(id=player_id).select_related('clan').first()` — no `explorer_summary`. After `save_player()` runs, `refresh_player_explorer_summary()` creates/updates the explorer summary, but the local `player` object won't have it loaded.
 
 To check `clan_battle_summary_updated_at`, the code needs to either:
+
 - Add `select_related('explorer_summary')` to the initial query, or
 - Reload / query `PlayerExplorerSummary` separately after `save_player()`
 

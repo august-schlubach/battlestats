@@ -3694,7 +3694,7 @@ def fetch_ranked_data(player_id: str) -> list:
         return []
 
     # Return cached if fresh
-    if player.ranked_json and player.ranked_updated_at and \
+    if player.ranked_json is not None and player.ranked_updated_at and \
             datetime.now() - player.ranked_updated_at < timedelta(hours=1):
         logging.info(f'Ranked data cache fresh for {player.name}')
         return player.ranked_json

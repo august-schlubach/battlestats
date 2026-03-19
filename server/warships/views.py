@@ -61,6 +61,12 @@ LANDING_PLAYER_RANDOM_MIN_PVP_BATTLES = 500
 LANDING_PLAYER_BEST_MIN_PVP_BATTLES = 2500
 LANDING_PLAYER_BEST_CANDIDATE_LIMIT = 400
 PLAYER_EXPLORER_RESPONSE_CACHE_TTL = 60
+MISSING_PLAYER_LOOKUP_CACHE_TTL = 600
+
+
+def _missing_player_lookup_cache_key(player_name: str) -> str:
+    normalized_name = (player_name or '').strip().casefold()
+    return f'player:lookup:missing:v1:{normalized_name}'
 
 
 def _prioritize_landing_clans(rows, sample_size: int = LANDING_CLAN_FEATURED_COUNT, min_total_battles: int = LANDING_CLAN_MIN_TOTAL_BATTLES):
@@ -98,17 +104,22 @@ class PlayerViewSet(viewsets.ModelViewSet):
 
     def get_object(self):
         lookup_field_value = self.kwargs[self.lookup_field]
+        missing_lookup_cache_key = _missing_player_lookup_cache_key(
+            lookup_field_value)
         try:
             obj = self.queryset.get(name__iexact=lookup_field_value)
-            if not obj.clan:
-                from warships.data import update_player_data
-                update_player_data(player=obj, force_refresh=True)
-                obj.refresh_from_db()
+            cache.delete(missing_lookup_cache_key)
         except Player.DoesNotExist:
-            player_id = _fetch_player_id_by_name(lookup_field_value)
-            if not player_id:
+            if cache.get(missing_lookup_cache_key):
                 raise Http404("Player matching query does not exist.")
 
+            player_id = _fetch_player_id_by_name(lookup_field_value)
+            if not player_id:
+                cache.set(missing_lookup_cache_key, True,
+                          MISSING_PLAYER_LOOKUP_CACHE_TTL)
+                raise Http404("Player matching query does not exist.")
+
+            cache.delete(missing_lookup_cache_key)
             obj, _ = Player.objects.get_or_create(
                 player_id=int(player_id),
                 defaults={"name": lookup_field_value.strip()}
@@ -127,7 +138,14 @@ class PlayerViewSet(viewsets.ModelViewSet):
             update_battle_data(obj.player_id)
             obj.refresh_from_db()
 
-        if not obj.is_hidden and (obj.efficiency_json is None or obj.actual_kdr is None) and (obj.pvp_battles or 0) > 0:
+        needs_efficiency_refresh = (
+            not obj.is_hidden and
+            obj.efficiency_json is None and
+            obj.actual_kdr is not None and
+            (obj.pvp_battles or 0) > 0
+        )
+
+        if not obj.is_hidden and obj.actual_kdr is None and (obj.pvp_battles or 0) > 0:
             from warships.data import update_player_data
             update_player_data(player=obj, force_refresh=True)
             obj.refresh_from_db()
@@ -162,6 +180,12 @@ class PlayerViewSet(viewsets.ModelViewSet):
         # When clan is still missing, force a refresh task so we do not get
         # stuck on fresh-but-incomplete player records.
         if not obj.clan:
+            _delay_task_safely(
+                update_player_data_task,
+                player_id=obj.player_id,
+                force_refresh=True,
+            )
+        elif needs_efficiency_refresh:
             _delay_task_safely(
                 update_player_data_task,
                 player_id=obj.player_id,
@@ -514,8 +538,10 @@ def clan_members(request, clan_id: str) -> Response:
             'is_sleepy_player': is_sleepy_player(member.days_since_last_battle),
             'is_ranked_player': is_ranked_player(member.ranked_json),
             'is_clan_battle_player': is_clan_battle_enjoyer(
-                getattr(getattr(member, 'explorer_summary', None), 'clan_battle_total_battles', None),
-                getattr(getattr(member, 'explorer_summary', None), 'clan_battle_seasons_participated', None),
+                getattr(getattr(member, 'explorer_summary', None),
+                        'clan_battle_total_battles', None),
+                getattr(getattr(member, 'explorer_summary', None),
+                        'clan_battle_seasons_participated', None),
             ),
             'clan_battle_win_rate': getattr(getattr(member, 'explorer_summary', None), 'clan_battle_overall_win_rate', None),
             'efficiency_hydration_pending': member.player_id in pending_efficiency_player_ids,
