@@ -1076,11 +1076,15 @@ def _build_recent_clans() -> list[dict]:
 
 
 def get_landing_recent_clans_payload(force_refresh: bool = False) -> list[dict]:
-    payload = None if force_refresh else cache.get(
+    is_dirty = not force_refresh and cache.get(
+        LANDING_RECENT_CLANS_DIRTY_KEY) is not None
+    payload = None if force_refresh or is_dirty else cache.get(
         LANDING_RECENT_CLANS_CACHE_KEY)
     if payload is None:
         payload = _build_recent_clans()
         cache.set(LANDING_RECENT_CLANS_CACHE_KEY, payload, LANDING_CACHE_TTL)
+        if is_dirty:
+            cache.delete(LANDING_RECENT_CLANS_DIRTY_KEY)
     return payload
 
 
@@ -1340,11 +1344,15 @@ def _build_recent_players() -> list[dict]:
 
 
 def get_landing_recent_players_payload(force_refresh: bool = False) -> list[dict]:
-    payload = None if force_refresh else cache.get(
+    is_dirty = not force_refresh and cache.get(
+        LANDING_RECENT_PLAYERS_DIRTY_KEY) is not None
+    payload = None if force_refresh or is_dirty else cache.get(
         LANDING_RECENT_PLAYERS_CACHE_KEY)
     if payload is None:
         payload = _build_recent_players()
         cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, payload, LANDING_CACHE_TTL)
+        if is_dirty:
+            cache.delete(LANDING_RECENT_PLAYERS_DIRTY_KEY)
     return payload
 
 

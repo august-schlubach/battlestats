@@ -181,6 +181,38 @@ class LandingHelperTests(TestCase):
         self.assertIsNone(cache.get(LANDING_RECENT_CLANS_DIRTY_KEY))
         self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
 
+    def test_get_landing_recent_players_payload_rebuilds_when_dirty(self):
+        cache.set(LANDING_RECENT_PLAYERS_CACHE_KEY, [
+                  {'name': 'old-player'}], LANDING_CACHE_TTL)
+        cache.set(LANDING_RECENT_PLAYERS_DIRTY_KEY, 'dirty', timeout=None)
+
+        with patch('warships.landing._build_recent_players', return_value=[{'name': 'new-player'}]) as mock_build_recent_players:
+            from warships.landing import get_landing_recent_players_payload
+
+            payload = get_landing_recent_players_payload()
+
+        self.assertEqual(payload, [{'name': 'new-player'}])
+        self.assertEqual(cache.get(LANDING_RECENT_PLAYERS_CACHE_KEY), [
+                         {'name': 'new-player'}])
+        self.assertIsNone(cache.get(LANDING_RECENT_PLAYERS_DIRTY_KEY))
+        mock_build_recent_players.assert_called_once_with()
+
+    def test_get_landing_recent_clans_payload_rebuilds_when_dirty(self):
+        cache.set(LANDING_RECENT_CLANS_CACHE_KEY, [
+                  {'name': 'old-clan'}], LANDING_CACHE_TTL)
+        cache.set(LANDING_RECENT_CLANS_DIRTY_KEY, 'dirty', timeout=None)
+
+        with patch('warships.landing._build_recent_clans', return_value=[{'name': 'new-clan'}]) as mock_build_recent_clans:
+            from warships.landing import get_landing_recent_clans_payload
+
+            payload = get_landing_recent_clans_payload()
+
+        self.assertEqual(payload, [{'name': 'new-clan'}])
+        self.assertEqual(cache.get(LANDING_RECENT_CLANS_CACHE_KEY), [
+                         {'name': 'new-clan'}])
+        self.assertIsNone(cache.get(LANDING_RECENT_CLANS_DIRTY_KEY))
+        mock_build_recent_clans.assert_called_once_with()
+
     def test_normalize_landing_clan_mode_accepts_known_modes(self):
         self.assertEqual(normalize_landing_clan_mode('random'), 'random')
         self.assertEqual(normalize_landing_clan_mode(' BEST '), 'best')
