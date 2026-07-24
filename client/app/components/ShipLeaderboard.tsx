@@ -297,9 +297,13 @@ const SortButton: React.FC<{
 const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | 'none' =>
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
-const DATA_BASIS_HINT =
-    'Stats are aggregated from battle observations recorded during the rolling trailing 30-day window. ' +
-    'The WR filter narrows each ship’s stats to its top 50% or 25% of players by win rate (the ships listed never change).';
+// Derives the window length from the served payload's date bounds so the copy
+// always matches the actual standings window (30/45/60/90 as
+// SHIP_LEADERBOARD_WINDOW_DAYS advances) rather than a hardcoded number.
+const dataBasisHint = (windowDays: number | null): string =>
+    `Stats are aggregated from battle observations recorded during the ${
+        windowDays ? `rolling trailing ${windowDays}-day window` : 'rolling standings window'
+    }. The WR filter narrows each ship’s stats to its top 50% or 25% of players by win rate (the ships listed never change).`;
 
 // Info affordance with a hover/focus tooltip — styled to match the circle-info
 // buttons in the Players/Clans landing sections below (FontAwesomeIcon + the
@@ -648,8 +652,13 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                             ))}
                         </>
                     )}
-                    {/* Data-basis hint sits at the end of the row. */}
-                    <InfoHint text={DATA_BASIS_HINT} />
+                    {/* Data-basis hint sits at the end of the row. Window length
+                        is derived from the served payload's date bounds. */}
+                    <InfoHint text={dataBasisHint(
+                        listWindow.start && listWindow.end
+                            ? Math.round((Date.parse(listWindow.end) - Date.parse(listWindow.start)) / 86_400_000)
+                            : null,
+                    )} />
                 </div>
             </div>
 

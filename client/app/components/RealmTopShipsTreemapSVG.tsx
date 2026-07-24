@@ -182,6 +182,20 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
         return formatSeasonLabel(startMs, endMs);
     }, [windowStart, windowEnd]);
 
+    // Window length in days, derived from the payload's date bounds so the
+    // standings-window copy always matches the actual served window (30/45/60/90
+    // as SHIP_LEADERBOARD_WINDOW_DAYS advances) instead of a hardcoded number.
+    const windowDays = useMemo(() => {
+        if (!windowStart || !windowEnd) return null;
+        const startMs = Date.parse(windowStart);
+        const endMs = Date.parse(windowEnd);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
+        return Math.round((endMs - startMs) / 86_400_000);
+    }, [windowStart, windowEnd]);
+    const windowPhrase = windowDays
+        ? `rolling, trailing ${windowDays}-day ship-standings window`
+        : 'rolling ship-standings window';
+
     const bucketLabel = useMemo(() => {
         if (tier == null || type == null) return null;
         return `T${tier} ${pluralTypeLabel(type)}`;
@@ -401,7 +415,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                         <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                             <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Ship {view === 'plot' ? 'scatterplot' : 'treemap'}</p>
                             <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">The most-played ships of the tier &amp; type selected below. <span className="font-semibold text-[var(--accent-mid)]">Map</span> draws each as a tile sized by battles; <span className="font-semibold text-[var(--accent-mid)]">Plot</span> charts each by battles (x) and win rate (y). Both color by win rate and follow the filters (tier, type, WR) below; tap a ship to open its leaderboard.</p>
-                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a rolling, trailing 30-day ship-standings window recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
+                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a {windowPhrase} recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
                         </div>
                     </div>
                 </div>
@@ -438,7 +452,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                 <svg
                     ref={svgRef}
                     role="img"
-                    aria-label={`${displayRealm} most-played ${bucketLabel ?? 'ships'} over the rolling trailing 30-day ship-standings window, shown as a ${view === 'plot' ? 'battles-vs-win-rate scatterplot' : 'treemap'}`}
+                    aria-label={`${displayRealm} most-played ${bucketLabel ?? 'ships'} over the ${windowPhrase}, shown as a ${view === 'plot' ? 'battles-vs-win-rate scatterplot' : 'treemap'}`}
                     style={{ opacity: dim ? 0.55 : 1, transition: 'opacity 150ms ease' }}
                 />
                 {activeCount === 0 && (
