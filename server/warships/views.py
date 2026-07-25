@@ -667,10 +667,14 @@ BATTLE_HISTORY_PERIODS = {
 # hour-precise — bypasses the calendar-bucketed daily rollup so the
 # 24h window is true-rolling rather than "today's calendar date").
 BATTLE_HISTORY_WINDOWS = {
-    "day":   {"period": "daily", "windows": 1, "hours": 24},
-    "week":  {"period": "daily", "windows": 7},
-    "month": {"period": "daily", "windows": 30},
-    "year":  {"period": "daily", "windows": 365},
+    "day":    {"period": "daily", "windows": 1, "hours": 24},
+    "week":   {"period": "daily", "windows": 7},
+    "month":  {"period": "daily", "windows": 30},
+    # 60/90-day windows landed with the battle-history retention raise
+    # 32→92d (2026-07-20). Sits inside retention (45 < 92) and routes
+    # through the same daily-rollup path as `month`, just wider.
+    "fortyfive": {"period": "daily", "windows": 45},
+    "year":   {"period": "daily", "windows": 365},
 }
 BATTLE_HISTORY_DEFAULT_WINDOW = "week"
 

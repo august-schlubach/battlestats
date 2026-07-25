@@ -596,20 +596,27 @@ const InlineSparkline: React.FC<{
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+// `fortyfive` landed with the battle-history retention raise 32→92d
+// (2026-07-20); the live window backfills forward and reaches full depth
+// ~2026-09-18, so until then the pre-~32d region renders empty by design.
 // `year` is intentionally excluded from VISIBLE_WINDOWS — capture started
 // 2026-04-28 so a 365-day view won't carry meaningful additional context
 // for the next ~12 months. The backend still accepts ?window=year for
 // back-compat, but no pill exposes it. Re-add to VISIBLE_WINDOWS once
 // >180 days of capture have accumulated.
-type BattleHistoryWindow = 'day' | 'week' | 'month' | 'year';
-const VISIBLE_WINDOWS: ReadonlyArray<BattleHistoryWindow> = ['day', 'week', 'month'];
+type BattleHistoryWindow = 'day' | 'week' | 'month' | 'fortyfive' | 'year';
+const VISIBLE_WINDOWS: ReadonlyArray<BattleHistoryWindow> = [
+    'day', 'week', 'month', 'fortyfive',
+];
 const WINDOW_LABEL: Record<BattleHistoryWindow, string> = {
-    day: 'Day', week: 'Week', month: 'Month', year: 'Year',
+    day: 'Day', week: 'Week', month: 'Month',
+    fortyfive: '45d', year: 'Year',
 };
 const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
     day: 'Last 24 hours from now (rolling, not today\'s calendar date)',
     week: 'Last 7 days',
     month: 'Last 30 days',
+    fortyfive: 'Last 45 days',
     year: 'Last 365 days',
 };
 // Tooltip shown when a window pill is disabled for having no battles in its
@@ -619,13 +626,21 @@ const WINDOW_TITLE_EMPTY: Record<BattleHistoryWindow, string> = {
     day: 'No battles in the last 24 hours',
     week: 'No battles in the last 7 days',
     month: 'No battles in the last 30 days',
+    fortyfive: 'No battles in the last 45 days',
     year: 'No battles in the last 365 days',
 };
 const WINDOW_HEADER: Record<BattleHistoryWindow, string> = {
     day: 'Last 24 hours',
     week: 'Last 7 days',
     month: 'Last 30 days',
+    fortyfive: 'Last 45 days',
     year: 'Last 365 days',
+};
+// Sparkline domain in days per window. ≤ month stays pinned to 30 (the
+// trend strip does not change when toggling day/week/month); 45 widens
+// it to pack in the greater window's data.
+const WINDOW_SPARKLINE_DAYS: Record<BattleHistoryWindow, number> = {
+    day: 30, week: 30, month: 30, fortyfive: 45, year: 30,
 };
 
 const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
@@ -742,17 +757,22 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         setMonthLoaded(false);
     }, [playerName, realm, mode]);
 
-    // Separate fetch that always retrieves the month window for the sparkline,
-    // independent of whichever window the user has selected. fetchSharedJson
-    // deduplicates against the main fetch when window === 'month'.
+    // Separate fetch backing the sparkline's trend strip, independent of the
+    // window driving the bars/table. For day/week/month it always pulls the
+    // 30-day window (the strip stays stable across those toggles); for the
+    // wider 45-day window it pulls that window so the strip packs in the
+    // greater span. fetchSharedJson dedupes this against the main fetch
+    // whenever the two request the same window.
+    const sparklineWindow: BattleHistoryWindow =
+        window === 'fortyfive' ? window : 'month';
     useEffect(() => {
         let cancelled = false;
         fetchSharedJson<BattleHistoryPayload>(
-            battleHistoryFetchUrl(playerName, realm, 'month', mode),
+            battleHistoryFetchUrl(playerName, realm, sparklineWindow, mode),
             {
                 label: `BattleHistoryCard:sparkline`,
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
-                cacheKey: battleHistoryCacheKey(playerName, realm, 'month', mode, 0, refreshNonce),
+                cacheKey: battleHistoryCacheKey(playerName, realm, sparklineWindow, mode, 0, refreshNonce),
                 signal: requestSignal,
             },
         )
@@ -767,7 +787,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             })
             .catch(() => { /* sparkline stays empty on error */ });
         return () => { cancelled = true; };
-    }, [playerName, realm, mode, refreshNonce, requestSignal]);
+    }, [playerName, realm, sparklineWindow, mode, refreshNonce, requestSignal]);
 
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on
@@ -915,11 +935,16 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         return null;
     }
 
+    // Sparkline domain: pinned to 30 for day/week/month, widened for 60/90.
+    // buildWindowedDays zero-fills any span the data doesn't cover, so the
+    // pre-retention-fill region simply renders empty by design. monthDays (the
+    // trailing-30 slice) still backs the week/month empty-pill derivation below.
+    const sparklineDays = WINDOW_SPARKLINE_DAYS[window];
     const monthDays = buildWindowedDays(monthByDay, 30);
     const sparkline = (
         <InlineSparkline
-            days={monthDays}
-            ariaLabel="30-day battle activity"
+            days={buildWindowedDays(monthByDay, sparklineDays)}
+            ariaLabel={`${sparklineDays}-day battle activity`}
             lifetimeBattles={monthLifetime.battles}
             lifetimeWinRate={monthLifetime.winRate}
         />
