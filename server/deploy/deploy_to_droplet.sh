@@ -697,11 +697,23 @@ set_env_value WG_RATE_LIMIT_REQUEST_MAX_WAIT 0.5
 # timer maintains the rolling window twice a month (1st + 15th). Set to 0 to
 # pause — the timer still fires but the command no-ops.
 set_env_value BATTLE_HISTORY_ARCHIVE_ENABLED 1
-set_env_value BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS 92
+# Raised 92 -> 105 on 2026-07-24: prerequisite for a 90d rolling ship
+# leaderboard (at 92d retention a 90d window can't stabilize — its oldest day
+# prunes as fast as it fills). Zero disk cost at flip time (battle-history only
+# reached back to ~2026-06-13); the disk-headroom check (80 GiB, autoscale OFF)
+# falls due ~mid-Sept as data ages past 92d. See project_90d_window_ui_branch.
+set_env_value BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS 105
 set_env_value BATTLE_HISTORY_ARCHIVE_DIR "${APP_ROOT}/shared/archives/battle_history"
 set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
 set_env_value BATTLE_HISTORY_ARCHIVE_SLEEP 0.5
 set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
+# Ship-standings rolling window (the /ship boards, profile badges, landing
+# treemap + tier-type list). Raised 30 -> 45 on 2026-07-24 as the first
+# foothold toward a 90d rolling leaderboard; pinned here (not just .env.cloud)
+# so it survives a deploy from any checkout. Advancing it requires a snapshot
+# rebuild to take effect (caches are keyed on the snapshot date). Code default
+# stays 30. See project_90d_window_ui_branch.
+set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 45
 # BattleObservation row retention (DB audit F5, armed 2026-07-20): delete-only
 # tier riding the same archive command/timer. JSON-stripped skeletons past 32d
 # + fully-empty polls past 7d; never a JSON-carrying row (keep-latest-3
