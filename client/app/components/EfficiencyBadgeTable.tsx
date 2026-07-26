@@ -41,6 +41,12 @@ type SortDir = 'asc' | 'desc';
 const FILTER_CONTROLS = ['tier', 'type', 'nation', 'award'] as const;
 type FilterControl = (typeof FILTER_CONTROLS)[number];
 
+// Which control the visitor actually touched. The same filter change can come
+// from the bar or from a mini-treemap tile, and the two are indistinguishable
+// without this — so it can't be measured whether the charts earn their space.
+// 'button' is the Clear button (which also carries control:'clear').
+type FilterSource = 'dropdown' | 'treemap' | 'button';
+
 // Award grades, best → worst, for the summary line above the table.
 const GRADES: Array<{ badgeClass: number; label: string }> = [
     { badgeClass: 1, label: 'Expert' },
@@ -156,16 +162,19 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
     };
 
     // Single entry point for every filter change (dropdown, treemap click,
-    // clear) so the state update + umami event never drift apart.
-    const applyFilter = (control: FilterControl, value: string) => {
+    // clear) so the state update + umami event never drift apart. `source` is
+    // REQUIRED rather than defaulted: a default would silently label a missed
+    // call site as a dropdown, which is the exact reading this field exists to
+    // make trustworthy.
+    const applyFilter = (control: FilterControl, value: string, source: FilterSource) => {
         filterState[control].set(value);
-        trackEvent('efficiency-filter', { realm, control, value });
+        trackEvent('efficiency-filter', { realm, control, value, source });
     };
 
     // A treemap tile click sets that control's filter — or clears it (toggle
     // off) when the already-selected tile is clicked again.
     const onTreemapSelect = (control: FilterControl, value: string) => {
-        applyFilter(control, filterState[control].value === value ? 'all' : value);
+        applyFilter(control, filterState[control].value === value ? 'all' : value, 'treemap');
     };
 
     const hasActiveFilter = FILTER_CONTROLS.some((control) => filterState[control].value !== 'all');
@@ -179,7 +188,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
 
     const clearFilters = () => {
         resetFilters();
-        trackEvent('efficiency-filter', { realm, control: 'clear', value: 'all' });
+        trackEvent('efficiency-filter', { realm, control: 'clear', value: 'all', source: 'button' });
     };
 
     // A new player's badges arrive as a fresh `dots` array; clear any active
@@ -255,7 +264,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Tier</span>
                     <select
                         value={filterTier}
-                        onChange={(event) => applyFilter('tier', event.target.value)}
+                        onChange={(event) => applyFilter('tier', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -268,7 +277,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Type</span>
                     <select
                         value={filterType}
-                        onChange={(event) => applyFilter('type', event.target.value)}
+                        onChange={(event) => applyFilter('type', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -281,7 +290,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Nation</span>
                     <select
                         value={filterNation}
-                        onChange={(event) => applyFilter('nation', event.target.value)}
+                        onChange={(event) => applyFilter('nation', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
@@ -294,7 +303,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     <span className="text-xs font-semibold uppercase tracking-wide">Award</span>
                     <select
                         value={filterAward}
-                        onChange={(event) => applyFilter('award', event.target.value)}
+                        onChange={(event) => applyFilter('award', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
                         <option value="all">All</option>
