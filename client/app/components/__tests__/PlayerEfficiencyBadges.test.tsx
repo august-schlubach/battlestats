@@ -269,12 +269,46 @@ describe('PlayerEfficiencyBadges', () => {
         );
     });
 
-    it('renders the tier/type/award small-multiples treemaps', () => {
+    it('renders the tier/type/nation/award small-multiples treemaps', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
         expect(screen.getByRole('img', { name: 'Badged ships by tier' })).toBeInTheDocument();
         expect(screen.getByRole('img', { name: 'Badged ships by class' })).toBeInTheDocument();
+        expect(screen.getByRole('img', { name: 'Badged ships by nation' })).toBeInTheDocument();
         expect(screen.getByRole('img', { name: 'Badged ships by award grade' })).toBeInTheDocument();
+    });
+
+    it('filters the table by nation', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        // The dropdown carries readable labels but filters on the WG code.
+        fireEvent.change(screen.getByLabelText('Nation'), { target: { value: 'usa' } });
+        expect(rowNames()).toEqual(['Des Moines', 'Gato']);
+
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-filter',
+            expect.objectContaining({ control: 'nation', value: 'usa' }),
+        );
+    });
+
+    it('offers only the nations the player actually has, alphabetically', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        const options = within(screen.getByLabelText('Nation')).getAllByRole('option');
+        expect(options.map((option) => option.textContent)).toEqual(['All', 'Germany', 'Japan', 'USA']);
+    });
+
+    it('combines the nation filter with the other facets', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        fireEvent.change(screen.getByLabelText('Nation'), { target: { value: 'usa' } });
+        fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'CA' } });
+        // Of the two USA ships only Des Moines is a cruiser.
+        expect(rowNames()).toEqual(['Des Moines']);
+
+        // Clear resets the nation filter along with the rest.
+        fireEvent.click(screen.getByRole('button', { name: /Clear/i }));
+        expect(rowNames()).toHaveLength(sampleRows.length);
     });
 
     it('caps the table scroll container at the provided height', () => {

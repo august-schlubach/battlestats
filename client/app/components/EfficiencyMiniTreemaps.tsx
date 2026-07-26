@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } from '../lib/chartTheme';
+import { nationLabel } from '../lib/shipIdentity';
 import type { EfficiencyBadgeDot } from './EfficiencyBadgeTable';
 
-type FilterControl = 'tier' | 'type' | 'award';
+type FilterControl = 'tier' | 'type' | 'nation' | 'award';
 
 // One tile of a mini-treemap, already aggregated by the parent: a bucket of
-// badged ships (a tier, a class, or an award grade) sized by its count.
+// badged ships (a tier, a class, a nation, or an award grade) sized by its count.
 // filterValue is what a click sets the matching filter dropdown to.
 interface TreemapDatum {
     key: string;
@@ -169,7 +170,7 @@ interface EfficiencyMiniTreemapsProps {
     rows: EfficiencyBadgeDot[];
     theme: ChartTheme;
     // Current filter selections ('all' = none) so the active tile is outlined.
-    selected: { tier: string; type: string; award: string };
+    selected: { tier: string; type: string; nation: string; award: string };
     // Fired when a tile is clicked; the parent toggles the matching filter.
     onSelect: (control: FilterControl, filterValue: string) => void;
 }
@@ -191,20 +192,40 @@ const tierBlue = (tier: number, minTier: number, maxTier: number): string => {
     return COLORBREWER_BLUES[idx];
 };
 
-// Three small-multiples treemaps — Tier, Type, Award — each partitioning the
-// (filtered) badged ships by that dimension, sized by ship count. Type reuses
-// the table's class palette; Award the quality colors; Tier a neutral fill.
+// The nation treemap borrows the tier map's Blues ramp. Nation is nominal — it
+// has no tier-like ordinal value to shade by — so the ramp is spent on the one
+// ordering the map already has: most-badged nation deepest, tapering to the
+// palest. That matches the treemap's own biggest-tile-first layout, so the row
+// reads as a single dark→light gradient. Continuous (interpolated across the
+// same 2..8 slice tierBlue uses) rather than stepped, so a player with more
+// nations than the ramp has steps still gets a distinct shade per tile.
+const NATION_RAMP = d3.interpolateRgbBasis(COLORBREWER_BLUES.slice(2));
+const nationBlue = (rank: number, total: number): string => (
+    // One lone nation gets the same mid-deep fill tierBlue falls back to.
+    d3.color(NATION_RAMP(total <= 1 ? 0.6 : 1 - rank / (total - 1)))?.formatHex() ?? COLORBREWER_BLUES[5]
+);
+
+// Four small-multiples treemaps — Tier, Type / Nation, Award — each partitioning
+// the (filtered) badged ships by that dimension, sized by ship count. Type
+// reuses the table's class palette; Award the quality colors; Tier and Nation
+// the Blues ramp.
 const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, theme, selected, onSelect }) => {
     const colors = chartColors[theme];
 
-    const { tierData, typeData, awardData } = useMemo(() => {
+    const { tierData, typeData, nationData, awardData } = useMemo(() => {
         const tierCounts = new Map<number, number>();
         const typeCounts = new Map<string, number>();
+        const nationCounts = new Map<string, number>();
         const awardCounts = new Map<number, number>();
         for (const row of rows) {
             tierCounts.set(row.shipTier, (tierCounts.get(row.shipTier) ?? 0) + 1);
             typeCounts.set(row.shipType, (typeCounts.get(row.shipType) ?? 0) + 1);
             awardCounts.set(row.badgeClass, (awardCounts.get(row.badgeClass) ?? 0) + 1);
+            // Ships with no known nation get no tile — an "Unknown" bucket would
+            // be a filter value the dropdown can't express.
+            if (row.nation) {
+                nationCounts.set(row.nation, (nationCounts.get(row.nation) ?? 0) + 1);
+            }
         }
 
         const tierValues = Array.from(tierCounts.keys());
@@ -229,6 +250,18 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
                 filterValue: shipType,
             }));
 
+        // Sorted most-badged first (ties broken by label) so the color rank is
+        // deterministic, then shaded by that rank.
+        const nationEntries = Array.from(nationCounts.entries())
+            .sort((a, b) => b[1] - a[1] || (nationLabel(a[0]) ?? a[0]).localeCompare(nationLabel(b[0]) ?? b[0]));
+        const nation: TreemapDatum[] = nationEntries.map(([code, count], index) => ({
+            key: `nation-${code}`,
+            label: nationLabel(code) ?? code,
+            count,
+            color: nationBlue(index, nationEntries.length),
+            filterValue: code,
+        }));
+
         const award: TreemapDatum[] = Array.from(awardCounts.entries())
             .sort((a, b) => a[0] - b[0])
             .map(([badgeClass, count]) => ({
@@ -239,13 +272,15 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
                 filterValue: String(badgeClass),
             }));
 
-        return { tierData: tier, typeData: type, awardData: award };
+        return { tierData: tier, typeData: type, nationData: nation, awardData: award };
     }, [rows, colors]);
 
+    // 2x2: Tier / Type on the first line, Nation / Award on the second.
     return (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
             <EfficiencyMiniTreemap title="Tier" ariaLabel="Badged ships by tier" data={tierData} control="tier" selectedValue={selected.tier} onSelect={onSelect} />
             <EfficiencyMiniTreemap title="Type" ariaLabel="Badged ships by class" data={typeData} control="type" selectedValue={selected.type} onSelect={onSelect} />
+            <EfficiencyMiniTreemap title="Nation" ariaLabel="Badged ships by nation" data={nationData} control="nation" selectedValue={selected.nation} onSelect={onSelect} />
             <EfficiencyMiniTreemap title="Award" ariaLabel="Badged ships by award grade" data={awardData} control="award" selectedValue={selected.award} onSelect={onSelect} />
         </div>
     );
