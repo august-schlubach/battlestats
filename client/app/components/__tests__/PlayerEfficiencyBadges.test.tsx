@@ -248,6 +248,41 @@ describe('PlayerEfficiencyBadges', () => {
         );
     });
 
+    it('tracks a umami event on a Nation column sort, both directions', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        const nationButton = screen.getByRole('button', { name: /Nation/i });
+        fireEvent.click(nationButton);
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-sort',
+            expect.objectContaining({ column: 'nation', direction: 'asc' }),
+        );
+
+        fireEvent.click(nationButton);
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-sort',
+            expect.objectContaining({ column: 'nation', direction: 'desc' }),
+        );
+    });
+
+    // `source` is what separates a treemap tile click from the same filter set
+    // via the bar — without it neither can be measured against the other.
+    it('attributes dropdown and Clear filter changes to their own source', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        fireEvent.change(screen.getByLabelText('Nation'), { target: { value: 'usa' } });
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-filter',
+            expect.objectContaining({ control: 'nation', value: 'usa', source: 'dropdown' }),
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: /Clear/i }));
+        expect(mockTrackEvent).toHaveBeenLastCalledWith(
+            'efficiency-filter',
+            expect.objectContaining({ control: 'clear', value: 'all', source: 'button' }),
+        );
+    });
+
     it('clears all filters via the Clear button (disabled until a filter is active)', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
@@ -316,6 +351,85 @@ describe('PlayerEfficiencyBadges', () => {
 
         const table = screen.getByRole('table');
         expect(table.parentElement).toHaveStyle({ maxHeight: '1057px' });
+    });
+
+    // The treemaps size themselves off a ResizeObserver; jest.setup's stub
+    // reports no width, so d3 draws no tiles and a tile click can't be
+    // exercised. Swap in a width-reporting shim (same pattern as
+    // BattleHistoryTreemaps.test) for just these tests, so the other tests keep
+    // running against the default stub.
+    describe('treemap tile clicks', () => {
+        const RealResizeObserver = globalThis.ResizeObserver;
+
+        beforeAll(() => {
+            globalThis.ResizeObserver = class {
+                private cb: ResizeObserverCallback;
+                constructor(cb: ResizeObserverCallback) { this.cb = cb; }
+                observe() {
+                    this.cb(
+                        [{ contentRect: { width: 400 } } as ResizeObserverEntry],
+                        this as unknown as ResizeObserver,
+                    );
+                }
+                unobserve() {}
+                disconnect() {}
+            } as unknown as typeof ResizeObserver;
+        });
+
+        afterAll(() => { globalThis.ResizeObserver = RealResizeObserver; });
+
+        // Tiles are laid out biggest-bucket first, so the first rect of the
+        // nation map is USA (Des Moines + Gato).
+        const firstNationTile = (): Element => {
+            const map = screen.getByRole('img', { name: 'Badged ships by nation' });
+            const tiles = map.querySelectorAll('rect');
+            expect(tiles.length).toBeGreaterThan(0);
+            return tiles[0];
+        };
+
+        it('filters the table from a nation tile and attributes it to the treemap', () => {
+            render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            fireEvent.click(firstNationTile());
+
+            expect(rowNames()).toEqual(['Des Moines', 'Gato']);
+            expect(screen.getByLabelText('Nation')).toHaveValue('usa');
+            expect(mockTrackEvent).toHaveBeenLastCalledWith(
+                'efficiency-filter',
+                expect.objectContaining({ control: 'nation', value: 'usa', source: 'treemap' }),
+            );
+        });
+
+        it('toggles the filter back off when the selected tile is clicked again', () => {
+            render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            fireEvent.click(firstNationTile());
+            expect(rowNames()).toHaveLength(2);
+
+            fireEvent.click(firstNationTile());
+            expect(rowNames()).toHaveLength(sampleRows.length);
+            expect(mockTrackEvent).toHaveBeenLastCalledWith(
+                'efficiency-filter',
+                expect.objectContaining({ control: 'nation', value: 'all', source: 'treemap' }),
+            );
+        });
+
+        it('attributes tier/type/award tile clicks to the treemap too', () => {
+            render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+            for (const [label, control] of [
+                ['Badged ships by tier', 'tier'],
+                ['Badged ships by class', 'type'],
+                ['Badged ships by award grade', 'award'],
+            ] as const) {
+                const tile = screen.getByRole('img', { name: label }).querySelectorAll('rect')[0];
+                fireEvent.click(tile);
+                expect(mockTrackEvent).toHaveBeenLastCalledWith(
+                    'efficiency-filter',
+                    expect.objectContaining({ control, source: 'treemap' }),
+                );
+            }
+        });
     });
 
     it('drops rows without a tier so they never reach the table', () => {
