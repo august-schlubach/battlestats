@@ -74,6 +74,7 @@ const normalizeBadgeDots = (
         }
 
         const shipName = (row.ship_name || '').trim();
+        const nation = (row.nation || '').trim().toLowerCase() || null;
         const battles = row.pvp_battles == null ? null : Number(row.pvp_battles);
         const winRatio = row.win_ratio == null ? null : Number(row.win_ratio);
 
@@ -82,6 +83,7 @@ const normalizeBadgeDots = (
             shipName: shipName || `Ship ${shipId}`,
             shipType: getShipTypeLabel(row.ship_type || null),
             shipTier,
+            nation,
             badgeClass,
             badgeLabel: BADGE_LABELS[badgeClass] || row.top_grade_label || row.badge_label || `Class ${badgeClass}`,
             battles: battles != null && Number.isFinite(battles) ? battles : null,
@@ -114,7 +116,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Efficiency Badges</h3>
                 <InfoTooltip
                     label="Efficiency Badges"
-                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This table lists each badged ship with its tier, class, and award grade (Expert, I, II, III). Click any column header to sort."
+                    description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This table lists each badged ship with its tier, nation, class, and award grade (Expert, I, II, III). Click any column header to sort."
                     align="right"
                     className="ml-auto"
                 />
