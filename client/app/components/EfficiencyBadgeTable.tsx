@@ -37,6 +37,10 @@ interface EfficiencyBadgeTableProps {
 type SortKey = 'name' | 'tier' | 'nation' | 'type' | 'award' | 'battles' | 'wr';
 type SortDir = 'asc' | 'desc';
 
+// The filterable facets, in filter-bar order.
+const FILTER_CONTROLS = ['tier', 'type', 'nation', 'award'] as const;
+type FilterControl = (typeof FILTER_CONTROLS)[number];
+
 // Award grades, best → worst, for the summary line above the table.
 const GRADES: Array<{ badgeClass: number; label: string }> = [
     { badgeClass: 1, label: 'Expert' },
@@ -130,6 +134,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
     // 'all' = no filter on that facet.
     const [filterTier, setFilterTier] = useState<string>('all');
     const [filterType, setFilterType] = useState<string>('all');
+    const [filterNation, setFilterNation] = useState<string>('all');
     const [filterAward, setFilterAward] = useState<string>('all');
 
     const onSort = (key: SortKey) => {
@@ -141,37 +146,46 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
         trackEvent('efficiency-sort', { realm, column: key, direction: nextDir });
     };
 
+    // One table of the facet controls, so adding a facet can't leave the setter,
+    // the current value, and the reset out of step with each other.
+    const filterState: Record<FilterControl, { value: string; set: (next: string) => void }> = {
+        tier: { value: filterTier, set: setFilterTier },
+        type: { value: filterType, set: setFilterType },
+        nation: { value: filterNation, set: setFilterNation },
+        award: { value: filterAward, set: setFilterAward },
+    };
+
     // Single entry point for every filter change (dropdown, treemap click,
     // clear) so the state update + umami event never drift apart.
-    const applyFilter = (control: 'tier' | 'type' | 'award', value: string) => {
-        if (control === 'tier') setFilterTier(value);
-        else if (control === 'type') setFilterType(value);
-        else setFilterAward(value);
+    const applyFilter = (control: FilterControl, value: string) => {
+        filterState[control].set(value);
         trackEvent('efficiency-filter', { realm, control, value });
     };
 
     // A treemap tile click sets that control's filter — or clears it (toggle
     // off) when the already-selected tile is clicked again.
-    const onTreemapSelect = (control: 'tier' | 'type' | 'award', value: string) => {
-        const current = control === 'tier' ? filterTier : control === 'type' ? filterType : filterAward;
-        applyFilter(control, current === value ? 'all' : value);
+    const onTreemapSelect = (control: FilterControl, value: string) => {
+        applyFilter(control, filterState[control].value === value ? 'all' : value);
     };
 
-    const hasActiveFilter = filterTier !== 'all' || filterType !== 'all' || filterAward !== 'all';
+    const hasActiveFilter = FILTER_CONTROLS.some((control) => filterState[control].value !== 'all');
 
-    const clearFilters = () => {
+    const resetFilters = () => {
         setFilterTier('all');
         setFilterType('all');
+        setFilterNation('all');
         setFilterAward('all');
+    };
+
+    const clearFilters = () => {
+        resetFilters();
         trackEvent('efficiency-filter', { realm, control: 'clear', value: 'all' });
     };
 
     // A new player's badges arrive as a fresh `dots` array; clear any active
-    // filter so a prior player's tier/type/award choice never hides the new set.
+    // filter so a prior player's facet choice never hides the new set.
     useEffect(() => {
-        setFilterTier('all');
-        setFilterType('all');
-        setFilterAward('all');
+        resetFilters();
     }, [dots]);
 
     // The rows surviving the tier/type/award filters. Both the summary counts
@@ -180,9 +194,10 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
         dots.filter((dot) => (
             (filterTier === 'all' || dot.shipTier === Number(filterTier))
             && (filterType === 'all' || dot.shipType === filterType)
+            && (filterNation === 'all' || dot.nation === filterNation)
             && (filterAward === 'all' || dot.badgeClass === Number(filterAward))
         ))
-    ), [dots, filterTier, filterType, filterAward]);
+    ), [dots, filterTier, filterType, filterNation, filterAward]);
 
     const gradeCounts = useMemo(() => {
         const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
@@ -194,18 +209,26 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
 
     // Filter dropdowns only offer facet values the player actually has, so a
     // choice can never empty the table by accident.
-    const { tierOptions, typeOptions, awardOptions } = useMemo(() => {
+    const { tierOptions, typeOptions, nationOptions, awardOptions } = useMemo(() => {
         const tiers = new Set<number>();
         const types = new Set<string>();
+        const nations = new Set<string>();
         const awards = new Set<number>();
         for (const dot of dots) {
             tiers.add(dot.shipTier);
             types.add(dot.shipType);
             awards.add(dot.badgeClass);
+            if (dot.nation) {
+                nations.add(dot.nation);
+            }
         }
         return {
             tierOptions: Array.from(tiers).sort((a, b) => b - a),
             typeOptions: Array.from(types).sort((a, b) => typeRank(a) - typeRank(b) || a.localeCompare(b)),
+            // Alphabetical by the readable label — the order a reader scans for.
+            nationOptions: Array.from(nations)
+                .map((code) => ({ code, label: nationLabel(code) ?? code }))
+                .sort((a, b) => a.label.localeCompare(b.label)),
             awardOptions: Array.from(awards).sort((a, b) => a - b),
         };
     }, [dots]);
@@ -255,6 +278,19 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
+                    <span className="text-xs font-semibold uppercase tracking-wide">Nation</span>
+                    <select
+                        value={filterNation}
+                        onChange={(event) => applyFilter('nation', event.target.value)}
+                        className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
+                    >
+                        <option value="all">All</option>
+                        {nationOptions.map((option) => (
+                            <option key={option.code} value={option.code}>{option.label}</option>
+                        ))}
+                    </select>
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
                     <span className="text-xs font-semibold uppercase tracking-wide">Award</span>
                     <select
                         value={filterAward}
@@ -279,13 +315,13 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                 </button>
             </div>
             {/* Small-multiples treemaps of the (filtered) badge set by tier,
-                type, and award — a composition overview between the filters and
-                the award-count summary. */}
+                type, nation, and award — a 2x2 composition overview between the
+                filters and the award-count summary. */}
             <div className="mb-4">
                 <EfficiencyMiniTreemaps
                     rows={filteredRows}
                     theme={theme}
-                    selected={{ tier: filterTier, type: filterType, award: filterAward }}
+                    selected={{ tier: filterTier, type: filterType, nation: filterNation, award: filterAward }}
                     onSelect={onTreemapSelect}
                 />
             </div>
