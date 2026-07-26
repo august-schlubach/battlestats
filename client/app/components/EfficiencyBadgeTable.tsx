@@ -3,7 +3,9 @@ import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } fro
 import wrColor from '../lib/wrColor';
 import { trackEvent } from '../lib/umami';
 import { useRealm } from '../context/RealmContext';
+import { nationLabel } from '../lib/shipIdentity';
 import EfficiencyMiniTreemaps from './EfficiencyMiniTreemaps';
+import NationFlag from './NationFlag';
 
 // One badged ship, normalized from an efficiency row (see normalizeBadgeDots in
 // PlayerEfficiencyBadges). shipType is the short class label (BB/CA/DD/CV/Sub);
@@ -13,6 +15,9 @@ export interface EfficiencyBadgeDot {
     shipName: string;
     shipType: string;
     shipTier: number;
+    // WG lowercase nation code (usa, pan_asia, …); null when the catalog row
+    // carries no nation. Renders as a flag, sorts by its readable label.
+    nation: string | null;
     badgeClass: number;
     badgeLabel: string;
     // Career random battles + win ratio (0..1) the player logged in this ship,
@@ -29,7 +34,7 @@ interface EfficiencyBadgeTableProps {
     maxTableHeightPx?: number;
 }
 
-type SortKey = 'name' | 'tier' | 'type' | 'award' | 'battles' | 'wr';
+type SortKey = 'name' | 'tier' | 'nation' | 'type' | 'award' | 'battles' | 'wr';
 type SortDir = 'asc' | 'desc';
 
 // Award grades, best → worst, for the summary line above the table.
@@ -51,6 +56,7 @@ const typeRank = (type: string): number => {
 const COLUMNS: Array<{ key: SortKey; label: string; align: 'left' | 'center' }> = [
     { key: 'name', label: 'Name', align: 'left' },
     { key: 'tier', label: 'Tier', align: 'center' },
+    { key: 'nation', label: 'Nation', align: 'center' },
     { key: 'type', label: 'Type', align: 'center' },
     { key: 'award', label: 'Award', align: 'center' },
     { key: 'battles', label: 'Battles', align: 'center' },
@@ -62,15 +68,18 @@ const COLUMNS: Array<{ key: SortKey; label: string; align: 'left' | 'center' }> 
 const DEFAULT_DIR: Record<SortKey, SortDir> = {
     name: 'asc',
     tier: 'desc',
+    nation: 'asc',
     award: 'asc',
     type: 'asc',
     battles: 'desc',
     wr: 'desc',
 };
 
-// Missing battles/WR (ship absent from battles_json) always sort to the bottom,
-// regardless of direction, so a dash never outranks a real number.
-const nullsLast = (av: number | null, bv: number | null): number | null => {
+// Missing values — battles/WR (ship absent from battles_json) or an unknown
+// nation — always sort to the bottom regardless of direction, so a dash never
+// outranks a real value. Returns null when both sides are present, meaning
+// "no verdict; compare them normally".
+const nullsLast = <T,>(av: T | null, bv: T | null): number | null => {
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
@@ -86,6 +95,15 @@ const compareRows = (a: EfficiencyBadgeDot, b: EfficiencyBadgeDot, key: SortKey,
             return a.badgeClass - b.badgeClass;
         case 'type':
             return a.shipType.localeCompare(b.shipType);
+        case 'nation': {
+            // Sort on the readable label (what the flag's hover shows), not the
+            // raw WG code, so "U.K." and "USA" order as a reader expects.
+            const al = nationLabel(a.nation);
+            const bl = nationLabel(b.nation);
+            const sink = nullsLast(al, bl);
+            if (sink !== null) return dir === 'asc' ? sink : -sink;
+            return (al as string).localeCompare(bl as string);
+        }
         case 'battles': {
             const sink = nullsLast(a.battles, b.battles);
             // Un-negate the sink offset so nulls stay last after the caller flips
@@ -320,6 +338,19 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                         <tr key={row.shipId} className="border-b border-[var(--border)]">
                             <td className="px-3 py-1.5 text-left">{row.shipName}</td>
                             <td className="px-3 py-1.5 text-center tabular-nums">{row.shipTier}</td>
+                            {/* Flag only; NationFlag's own `title` is the hover
+                                label, and the sr-only span carries it for screen
+                                readers (the image itself is decorative). */}
+                            <td className="px-3 py-1.5 text-center">
+                                {nationLabel(row.nation) == null ? (
+                                    <span className="text-[var(--text-muted)]">—</span>
+                                ) : (
+                                    <span className="inline-flex items-center justify-center align-middle">
+                                        <NationFlag nation={row.nation} />
+                                        <span className="sr-only">{nationLabel(row.nation)}</span>
+                                    </span>
+                                )}
+                            </td>
                             <td className="px-3 py-1.5 text-center font-semibold" style={{ color: shipTypeShortColor(colors, row.shipType) }}>{row.shipType}</td>
                             <td className="px-3 py-1.5 text-center">{row.badgeLabel}</td>
                             <td className="px-3 py-1.5 text-center tabular-nums">

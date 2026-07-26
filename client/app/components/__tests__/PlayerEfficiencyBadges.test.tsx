@@ -8,10 +8,10 @@ const mockTrackEvent = trackEvent as jest.Mock;
 beforeEach(() => mockTrackEvent.mockClear());
 
 const sampleRows = [
-    { ship_id: 1, top_grade_class: 2, ship_name: 'Bismarck', ship_type: 'battleship', ship_tier: 8, pvp_battles: 300, win_ratio: 0.52 },
-    { ship_id: 2, top_grade_class: 1, ship_name: 'Des Moines', ship_type: 'cruiser', ship_tier: 10, pvp_battles: 1200, win_ratio: 0.58 },
-    { ship_id: 3, top_grade_class: 3, ship_name: 'Shimakaze', ship_type: 'destroyer', ship_tier: 10, pvp_battles: 800, win_ratio: 0.49 },
-    { ship_id: 4, top_grade_class: 4, ship_name: 'Gato', ship_type: 'submarine', ship_tier: 10, pvp_battles: 150, win_ratio: 0.61 },
+    { ship_id: 1, top_grade_class: 2, ship_name: 'Bismarck', ship_type: 'battleship', ship_tier: 8, nation: 'germany', pvp_battles: 300, win_ratio: 0.52 },
+    { ship_id: 2, top_grade_class: 1, ship_name: 'Des Moines', ship_type: 'cruiser', ship_tier: 10, nation: 'usa', pvp_battles: 1200, win_ratio: 0.58 },
+    { ship_id: 3, top_grade_class: 3, ship_name: 'Shimakaze', ship_type: 'destroyer', ship_tier: 10, nation: 'japan', pvp_battles: 800, win_ratio: 0.49 },
+    { ship_id: 4, top_grade_class: 4, ship_name: 'Gato', ship_type: 'submarine', ship_tier: 10, nation: 'usa', pvp_battles: 150, win_ratio: 0.61 },
 ];
 
 // The data-row ship names, top to bottom, so a test can assert sort order.
@@ -33,11 +33,11 @@ describe('PlayerEfficiencyBadges', () => {
         expect(screen.queryByRole('table')).toBeNull();
     });
 
-    it('renders a sortable table with name/tier/type/award/battles/WR columns', () => {
+    it('renders a sortable table with name/tier/nation/type/award/battles/WR columns', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
         const table = screen.getByRole('table');
-        ['Name', 'Tier', 'Type', 'Award', 'Battles', 'WR%'].forEach((header) => {
+        ['Name', 'Tier', 'Nation', 'Type', 'Award', 'Battles', 'WR%'].forEach((header) => {
             expect(within(table).getByRole('columnheader', { name: new RegExp(header, 'i') })).toBeInTheDocument();
         });
         // One data row per badged ship.
@@ -62,7 +62,7 @@ describe('PlayerEfficiencyBadges', () => {
         expect(summary).toHaveTextContent('III: 1');
     });
 
-    it('lists each ship with its tier, class label, and award grade', () => {
+    it('lists each ship with its tier, nation, class label, and award grade', () => {
         render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
 
         const table = screen.getByRole('table');
@@ -70,10 +70,48 @@ describe('PlayerEfficiencyBadges', () => {
         const cells = within(desMoinesRow).getAllByRole('cell');
         expect(cells[0]).toHaveTextContent('Des Moines');
         expect(cells[1]).toHaveTextContent('10');
-        expect(cells[2]).toHaveTextContent('CA');
-        expect(cells[3]).toHaveTextContent('Expert');
-        expect(cells[4]).toHaveTextContent('1,200');
-        expect(cells[5]).toHaveTextContent('58.0%');
+        // The nation cell is flag-only; the label rides along for screen readers
+        // and as the flag's hover title.
+        expect(cells[2]).toHaveTextContent('USA');
+        expect(cells[2].querySelector('img')).toHaveAttribute('title', 'USA');
+        expect(cells[3]).toHaveTextContent('CA');
+        expect(cells[4]).toHaveTextContent('Expert');
+        expect(cells[5]).toHaveTextContent('1,200');
+        expect(cells[6]).toHaveTextContent('58.0%');
+    });
+
+    it('sorts by nation label ascending, then reverses', () => {
+        render(<PlayerEfficiencyBadges efficiencyRows={sampleRows} />);
+
+        const nationButton = screen.getByRole('button', { name: /Nation/i });
+        fireEvent.click(nationButton);
+        // Germany → Japan → USA (name-tiebroken within USA).
+        expect(rowNames()).toEqual(['Bismarck', 'Shimakaze', 'Des Moines', 'Gato']);
+
+        fireEvent.click(nationButton);
+        // Reversed nation order; the ship-name tiebreaker stays ascending, so
+        // the USA pair keeps its Des Moines → Gato reading order.
+        expect(rowNames()).toEqual(['Des Moines', 'Gato', 'Shimakaze', 'Bismarck']);
+    });
+
+    it('renders a dash for a ship with no nation and sorts it last in both directions', () => {
+        render(
+            <PlayerEfficiencyBadges
+                efficiencyRows={[
+                    ...sampleRows,
+                    { ship_id: 11, top_grade_class: 2, ship_name: 'Nowhere', ship_type: 'cruiser', ship_tier: 10, nation: null },
+                ]}
+            />,
+        );
+
+        const nowhereRow = screen.getByText('Nowhere').closest('tr')!;
+        expect(within(nowhereRow).getAllByRole('cell')[2]).toHaveTextContent('—');
+
+        const nationButton = screen.getByRole('button', { name: /Nation/i });
+        fireEvent.click(nationButton);
+        expect(rowNames()[rowNames().length - 1]).toBe('Nowhere');
+        fireEvent.click(nationButton);
+        expect(rowNames()[rowNames().length - 1]).toBe('Nowhere');
     });
 
     it('sorts by battles highest-first, then reverses', () => {
@@ -106,7 +144,7 @@ describe('PlayerEfficiencyBadges', () => {
         );
 
         const yamatoRow = screen.getByText('Yamato').closest('tr')!;
-        expect(within(yamatoRow).getAllByRole('cell')[4]).toHaveTextContent('—');
+        expect(within(yamatoRow).getAllByRole('cell')[5]).toHaveTextContent('—');
 
         // Highest-first battles: real numbers first, the null (Yamato) last.
         fireEvent.click(screen.getByRole('button', { name: /Battles/i }));
