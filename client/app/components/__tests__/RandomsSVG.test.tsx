@@ -322,6 +322,44 @@ describe('RandomsSVG min-battles slider + window filter', () => {
         });
     });
 
+    it('Clear returns every filter on the tab to its default', async () => {
+        // Window payload is non-empty so Window Only is selectable — Clear has
+        // to put the activity mode back too, not just the pills.
+        mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, [
+            { ship_id: 1, ship_name: 'Grind Ship', battles: 12, wins: 7 },
+        ]));
+
+        render(<RandomsSVG playerId={777} playerName="TesterClear" />);
+        await screen.findByRole('button', { name: 'T8' });
+
+        // Narrow everything: one type, one tier, both cutoffs raised.
+        fireEvent.click(screen.getByRole('button', { name: 'Cruiser' }));
+        fireEvent.click(screen.getByRole('button', { name: 'T8' }));
+        fireEvent.change(screen.getByLabelText('Minimum lifetime random battles to show a ship'), { target: { value: '50' } });
+        fireEvent.change(screen.getByLabelText('Minimum win rate to show a ship'), { target: { value: '40' } });
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Destroyer' })).toHaveAttribute('aria-pressed', 'false');
+        });
+        expect(screen.getByRole('button', { name: 'T7' })).toHaveAttribute('aria-pressed', 'false');
+        expect(screen.getByText(/≥\s*50$/)).toBeInTheDocument();
+        expect(screen.getByText(/≥\s*40%/)).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+        // Every control is back where the tab opens: all types, all tiers,
+        // both cutoffs at zero, activity mode All.
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Destroyer' })).toHaveAttribute('aria-pressed', 'true');
+        });
+        expect(screen.getByRole('button', { name: 'Cruiser' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'T7' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'T8' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByText(/≥\s*0$/)).toBeInTheDocument();
+        expect(screen.getByText(/≥\s*0%/)).toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: 'All' })).toHaveAttribute('aria-checked', 'true');
+    });
+
     it('locks the Activity filter to All when no ships were played in the window', async () => {
         // Empty 30d window payload: neither ship was played recently.
         mockFetch.mockImplementation(buildUrlRoutedFetch(RANDOMS_ROWS, []));
