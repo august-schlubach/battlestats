@@ -472,13 +472,13 @@ describe('PlayerDetailInsightsTabs', () => {
 
         fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
         expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
-        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
         expect(screen.getByText('Clan Battles vs Win Rate')).toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
-        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
-        expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
     });
 
     it('shows the compact ranked empty state when the heatmap says the player has no ranked history', async () => {
@@ -564,7 +564,7 @@ describe('PlayerDetailInsightsTabs', () => {
 
         expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
-        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
     });
 
     it('darks out the Ranked tab when the player has no known ranked games', () => {
@@ -875,11 +875,9 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            expect(screen.getByText(/Tier vs Type Profile/)).toBeInTheDocument();
+            expect(screen.getByText(/Random Battles by Tier/)).toBeInTheDocument();
         });
 
-        expect(screen.getByText('Performance by Ship Type')).toBeInTheDocument();
-        expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
         expect(screen.queryByText('Profile charts are still warming. Try again in a moment.')).not.toBeInTheDocument();
         expect(tierTypeRequestCount).toBeGreaterThanOrEqual(3);
     });
@@ -951,7 +949,7 @@ describe('PlayerDetailInsightsTabs', () => {
         });
 
         await waitFor(() => {
-            expect(screen.getByText(/Tier vs Type Profile/)).toBeInTheDocument();
+            expect(screen.getByText(/Random Battles by Tier/)).toBeInTheDocument();
         });
     });
 });
