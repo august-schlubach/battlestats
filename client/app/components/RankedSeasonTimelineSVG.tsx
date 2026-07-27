@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { drawSeasonLattice, type LatticeSlot } from '../lib/seasonLattice';
+import { setHighlightedSeason } from '../lib/rankedSeasonHighlight';
 import { leagueOrderFrom } from '../lib/rankedLeagueGlyph';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
@@ -104,6 +105,7 @@ const toSlots = (
         .map((season): LatticeSlot => {
             const record = playedById.get(season.season_id);
             return {
+                seasonId: season.season_id,
                 label: season.season_label || `S${season.season_id - 1000}`,
                 year: seasonYear(season.start_date),
                 played: record != null,
@@ -240,6 +242,9 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
         window.addEventListener('resize', onResize);
         return () => {
             window.removeEventListener('resize', onResize);
+            // Unmounting mid-hover (tab switch, nav) must not leave the scatter
+            // pulsing a season nothing is pointing at any more.
+            setHighlightedSeason(null);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
     }, [seasons, catalog, pending, theme, svgHeight, svgWidth]);

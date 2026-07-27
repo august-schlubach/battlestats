@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { fractionalYear } from '../../lib/seasonTimeline';
 import ClanBattleSeasonTimelineSVG from '../ClanBattleSeasonTimelineSVG';
 import RankedSeasonTimelineSVG from '../RankedSeasonTimelineSVG';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+import { getHighlightedSeason, setHighlightedSeason } from '../../lib/rankedSeasonHighlight';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -27,7 +28,10 @@ describe('fractionalYear', () => {
 });
 
 describe('season timeline components', () => {
-    beforeEach(() => mockFetch.mockReset());
+    beforeEach(() => {
+        mockFetch.mockReset();
+        setHighlightedSeason(null);
+    });
 
     it('draws the clan-battle timeline across the season span (percent WR)', async () => {
         mockFetch.mockReturnValue(resolved([
@@ -97,6 +101,36 @@ describe('season timeline components', () => {
         expect(centers[1]).toMatch(/rotate\(0\)$/);    // Gold+: star
         // Awards are decorative; the box title carries the league.
         expect(awards[0].getAttribute('pointer-events')).not.toBe('auto');
+    });
+
+    it('publishes the hovered season so the scatter above can pulse its point', async () => {
+        mockRankedFetches(CATALOG, [
+            { season_id: 1002, season_label: 'S2', total_battles: 120, win_rate: 0.51, start_date: '2021-02-17' },
+        ]);
+
+        const { unmount } = render(<RankedSeasonTimelineSVG playerId={3} theme="dark" />);
+        const region = screen.getByRole('img', { name: /ranked season activity timeline/i });
+        await waitFor(() => expect(region.querySelectorAll('rect')).toHaveLength(4));
+        const boxes = Array.from(region.querySelectorAll('rect'));
+
+        expect(getHighlightedSeason()).toBeNull();
+
+        // A played box publishes its season id...
+        fireEvent.mouseOver(boxes[1]);
+        expect(getHighlightedSeason()).toBe(1002);
+        fireEvent.mouseOut(boxes[1]);
+        expect(getHighlightedSeason()).toBeNull();
+
+        // ...an UNPLAYED one publishes nothing: there is no point to pulse.
+        fireEvent.mouseOver(boxes[0]);
+        expect(getHighlightedSeason()).toBeNull();
+        fireEvent.mouseOut(boxes[0]);
+
+        // Unmounting mid-hover must not strand a highlight on the scatter.
+        fireEvent.mouseOver(boxes[1]);
+        expect(getHighlightedSeason()).toBe(1002);
+        unmount();
+        expect(getHighlightedSeason()).toBeNull();
     });
 
     it('keeps a played season that the catalog has not published yet', async () => {
