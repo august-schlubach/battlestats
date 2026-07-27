@@ -14,6 +14,7 @@ import RankedLeagueLegend from './RankedLeagueLegend';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import type { TierTypePayload } from './playerProfileChartData';
+import type { RandomsFilterRequest } from './RandomsSVG';
 import { dispatchPlayerRouteSectionRendered } from './usePlayerRouteDiagnostics';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { decrementChartFetches, fetchSharedJson, incrementChartFetches, isAbortError } from '../lib/sharedJsonFetch';
@@ -209,6 +210,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [activeTab, setActiveTab] = useState<InsightsTabId>('activity');
+    // Drill-down from the Profile tab's tier figure into the Ships tab. The
+    // nonce is what lets a second click re-apply while Ships is already open.
+    const [shipsFilterRequest, setShipsFilterRequest] = useState<RandomsFilterRequest | null>(null);
     // null = unknown (still resolving); true/false once the Activity card's first
     // payload lands. Drives the default-tab choice and the dark Activity tab.
     const [activityAvailable, setActivityAvailable] = useState<boolean | null>(null);
@@ -537,6 +541,29 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
         return () => clearTimeout(timeoutId);
     }, [profileChartState]);
 
+    // Drill-down handlers for the tier figure. Both switch to Ships and hand it
+    // a filter; `source` separates a tier×class cell click from a class-total
+    // click so the two can be measured independently, the way the efficiency
+    // filter's `source` already does.
+    const openShipsFiltered = useCallback((shipTypes: string[], tiers: number[], source: 'cell' | 'class') => {
+        setShipsFilterRequest((current) => ({
+            shipTypes,
+            tiers,
+            nonce: (current?.nonce ?? 0) + 1,
+        }));
+        setActiveTab('ships');
+        trackEvent('player-tier-chart-drilldown', { realm, source });
+    }, [realm]);
+
+    const handleDietCellSelect = useCallback(
+        (shipType: string, shipTier: number) => openShipsFiltered([shipType], [shipTier], 'cell'),
+        [openShipsFiltered],
+    );
+    const handleDietClassSelect = useCallback(
+        (shipType: string) => openShipsFiltered([shipType], [], 'class'),
+        [openShipsFiltered],
+    );
+
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
     // Computed once (not per-tab inside the strip map): whether the player has any
     // plottable efficiency badge, gating the Efficiency tab's enabled state.
@@ -667,7 +694,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 ) : null}
 
                 {activeTab === 'ships' ? (
-                    <RandomsSVG playerId={playerId} playerName={playerName} isLoading={isLoading} theme={theme} />
+                    <RandomsSVG
+                        playerId={playerId}
+                        playerName={playerName}
+                        isLoading={isLoading}
+                        theme={theme}
+                        filterRequest={shipsFilterRequest}
+                    />
                 ) : null}
 
                 {activeTab === 'ranked' ? (
@@ -822,7 +855,12 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     className="mb-2 pt-2.5 pl-[15px]"
                                 />
                                 <div className="pl-[15px]">
-                                    <TierTypeDietSVG data={profileChartPayload} theme={theme} />
+                                    <TierTypeDietSVG
+                                        data={profileChartPayload}
+                                        theme={theme}
+                                        onCellSelect={handleDietCellSelect}
+                                        onClassSelect={handleDietClassSelect}
+                                    />
                                 </div>
                             </>
                         ) : (

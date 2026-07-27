@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import RandomsSVG from '../RandomsSVG';
 
 jest.mock('d3', () => {
@@ -125,6 +125,76 @@ describe('RandomsSVG tier filters', () => {
         expect(screen.getByRole('button', { name: 'T6' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getByRole('button', { name: 'T5' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.queryByRole('button', { name: 'T4' })).not.toBeInTheDocument();
+    });
+
+    it('re-applies a drill-down filter after tabbing away and back', async () => {
+        // The wedge this guards. RandomsSVG re-seeds the pills to defaults on
+        // every fetch resolve, and `ttlMs: 0` means a fetch resolves on every
+        // mount. On the FIRST drill-down `allShips` starts empty, so the filter
+        // happens to land after the defaults. On a RETURN visit the
+        // module-cache seed makes `allShips` non-empty at mount, the filter
+        // applies first, and the arriving payload used to wipe it — so the
+        // first drill-down worked and every one after it arrived unfiltered.
+        mockFetch.mockResolvedValue({
+            ok: true,
+            headers: {
+                get: (name: string) => {
+                    if (name.toLowerCase() === 'content-type') return 'application/json';
+                    if (name === 'X-Randoms-Updated-At') return '2026-03-19T00:00:00Z';
+                    return null;
+                },
+            },
+            json: async () => ([
+                { ship_id: 1, ship_name: 'Rodney', ship_chart_name: 'Rodney', ship_tier: 7, ship_type: 'Battleship', pvp_battles: 58, wins: 33, win_ratio: 0.57 },
+                { ship_id: 2, ship_name: 'Nakhimov', ship_chart_name: 'Nakhimov', ship_tier: 10, ship_type: 'AirCarrier', pvp_battles: 267, wins: 134, win_ratio: 0.5 },
+                { ship_id: 3, ship_name: 'Tier Six Ship', ship_chart_name: 'Tier Six Ship', ship_tier: 6, ship_type: 'Cruiser', pvp_battles: 40, wins: 23, win_ratio: 0.575 },
+            ]),
+        });
+
+        // First drill-down. Also primes the module-scope repaint cache.
+        const first = render(
+            <RandomsSVG
+                playerId={909}
+                playerName="Tester"
+                filterRequest={{ shipTypes: ['Battleship'], tiers: [7], nonce: 1 }}
+            />,
+        );
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: 'Battleship' })).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        // Tab away to Profile: the Ships panel unmounts.
+        first.unmount();
+
+        // Click a different cell and come back. This mount is seeded, which is
+        // what made the ordering flip.
+        const callsBefore = mockFetch.mock.calls.length;
+        render(
+            <RandomsSVG
+                playerId={909}
+                playerName="Tester"
+                filterRequest={{ shipTypes: ['Aircraft Carrier'], tiers: [10], nonce: 2 }}
+            />,
+        );
+
+        // Wait for the remount's own refetch to RESOLVE before asserting. The
+        // filter lands immediately off the seed, so asserting any earlier
+        // passes even when the arriving payload then wipes it.
+        await waitFor(() => {
+            expect(mockFetch.mock.calls.length).toBeGreaterThan(callsBefore);
+        });
+        await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+        });
+
+        await waitFor(() => {
+            // "Aircraft Carrier" (tier/type payload) must resolve to
+            // "AirCarrier" (randoms payload).
+            expect(screen.getByRole('button', { name: 'AirCarrier' })).toHaveAttribute('aria-pressed', 'true');
+        });
+        expect(screen.getByRole('button', { name: 'T10' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Battleship' })).toHaveAttribute('aria-pressed', 'false');
     });
 
     it('repaints the prior result instantly on remount (tab-switch return), without waiting on a fetch', async () => {

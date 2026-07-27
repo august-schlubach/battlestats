@@ -80,12 +80,17 @@ interface HoverState {
 interface DrawHandlers {
     onCellEnter: (state: HoverState) => void;
     onCellLeave: () => void;
+    /** Drill down to the Ships tab filtered to one tier x class. */
+    onCellSelect?: (shipType: string, shipTier: number) => void;
+    /** Drill down to the Ships tab filtered to one class, all tiers. */
+    onClassSelect?: (shipType: string) => void;
 }
 
 const cellTooltipLines = (
     row: TierTypePlayerCell,
     model: TierTypeDietModel,
     theme: ChartTheme,
+    drillable = false,
 ): TooltipLine[] => {
     const confidence = confidenceFromBattles(row.pvp_battles);
     const lines: TooltipLine[] = [
@@ -100,6 +105,9 @@ const cellTooltipLines = (
     ];
     if (confidence < THIN_EVIDENCE_CONFIDENCE) {
         lines.push('Too few battles here to read the win rate.');
+    }
+    if (drillable) {
+        lines.push('Click to see these ships');
     }
     return lines;
 };
@@ -290,28 +298,99 @@ const drawChart = (
     // ends at its own data. Per-cell numbers stay reachable through the hover
     // overlay and each bar's native <title>.
 
-    // --- hover layer --------------------------------------------------------
+    // --- hover + drill-down layer -------------------------------------------
     // Hit target is the whole cell, so a 2px bar is still comfortably
-    // reachable.
+    // reachable. Every plotted cell has a destination: the Ships tab reads the
+    // same battles (`randoms_data?all=true` returns the identical battle total,
+    // down to tier 1 and single-battle ships), so none of these are dead ends.
+    const drillable = typeof handlers.onCellSelect === 'function';
     const hit = grid.append('g');
     model.cells.forEach((row) => {
+        const cellX = x(row.ship_type) ?? 0;
+        const cellY = y(String(row.ship_tier)) ?? 0;
+        // Sits under the hit rect: a faint wash marking the row you are about
+        // to drill into, so the click target is visible before you commit.
+        const highlight = hit.append('rect')
+            .attr('x', cellX)
+            .attr('y', cellY + 1)
+            .attr('width', x.bandwidth())
+            .attr('height', y.bandwidth() - 2)
+            .attr('rx', 3)
+            .attr('fill', colors.gridLineBlue)
+            .attr('fill-opacity', 0);
+
         hit.append('rect')
-            .attr('x', x(row.ship_type) ?? 0)
-            .attr('y', y(String(row.ship_tier)) ?? 0)
+            .attr('x', cellX)
+            .attr('y', cellY)
             .attr('width', x.bandwidth())
             .attr('height', y.bandwidth())
             .attr('fill', 'transparent')
-            .style('cursor', 'crosshair')
+            .style('cursor', drillable ? 'pointer' : 'crosshair')
             .on('mousemove', (event: MouseEvent) => {
                 const bounds = containerElement.getBoundingClientRect();
+                highlight.attr('fill-opacity', drillable ? 0.55 : 0);
                 handlers.onCellEnter({
-                    lines: cellTooltipLines(row, model, theme),
+                    lines: cellTooltipLines(row, model, theme, drillable),
                     x: event.clientX - bounds.left,
                     y: event.clientY - bounds.top,
                 });
             })
-            .on('mouseleave', () => handlers.onCellLeave());
+            .on('mouseleave', () => {
+                highlight.attr('fill-opacity', 0);
+                handlers.onCellLeave();
+            })
+            .on('click', () => {
+                handlers.onCellSelect?.(row.ship_type, row.ship_tier);
+            });
     });
+
+    // Class-total column: same drill-down, tier left unfiltered.
+    if (typeof handlers.onClassSelect === 'function') {
+        model.byType.filter((total) => total.battles > 0).forEach((total) => {
+            const bandX = x(total.key) ?? 0;
+            const classHighlight = grid.append('rect')
+                .attr('x', bandX)
+                .attr('y', colBase + 1)
+                .attr('width', x.bandwidth())
+                .attr('height', COL_BAR_MAX + 29)
+                .attr('rx', 3)
+                .attr('fill', colors.gridLineBlue)
+                .attr('fill-opacity', 0);
+
+            grid.append('rect')
+                .attr('x', bandX)
+                .attr('y', colBase)
+                .attr('width', x.bandwidth())
+                .attr('height', COL_BAR_MAX + 30)
+                .attr('fill', 'transparent')
+                .style('cursor', 'pointer')
+                .on('mousemove', (event: MouseEvent) => {
+                    const bounds = containerElement.getBoundingClientRect();
+                    classHighlight.attr('fill-opacity', 0.55);
+                    handlers.onCellEnter({
+                        lines: [
+                            `All ${SHIP_TYPE_ABBREV[total.key] ?? total.key}`,
+                            { value: formatCompactCount(total.battles), label: 'battles' },
+                            {
+                                value: formatWinPercent(total.winRatio),
+                                label: 'win rate',
+                                color: confidenceFadedWrColor(total.winRatio, total.battles, theme),
+                            },
+                            'Click to see these ships',
+                        ],
+                        x: event.clientX - bounds.left,
+                        y: event.clientY - bounds.top,
+                    });
+                })
+                .on('mouseleave', () => {
+                    classHighlight.attr('fill-opacity', 0);
+                    handlers.onCellLeave();
+                })
+                .on('click', () => {
+                    handlers.onClassSelect?.(total.key);
+                });
+        });
+    }
 };
 
 interface TierTypeDietSVGProps {
@@ -319,17 +398,31 @@ interface TierTypeDietSVGProps {
     data: TierTypePayload;
     svgWidth?: number;
     theme?: ChartTheme;
+    /** Drill down to the Ships tab filtered to this tier x class. */
+    onCellSelect?: (shipType: string, shipTier: number) => void;
+    /** Drill down to the Ships tab filtered to this class, all tiers. */
+    onClassSelect?: (shipType: string) => void;
 }
 
 const TierTypeDietSVG: React.FC<TierTypeDietSVGProps> = ({
     data,
     svgWidth = 570,
     theme = 'light',
+    onCellSelect,
+    onClassSelect,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const svgRef = useRef<SVGSVGElement>(null);
     const [hover, setHover] = useState<HoverState | null>(null);
     const [measuredWidth, setMeasuredWidth] = useState(svgWidth);
+    // Held in a ref so a parent re-render that hands down fresh callback
+    // identities does not force a full D3 redraw of the figure. Synced in an
+    // effect (not during render) and declared before the draw effect, so the
+    // handlers are in place by the time the figure is first drawn.
+    const selectHandlersRef = useRef({ onCellSelect, onClassSelect });
+    useEffect(() => {
+        selectHandlersRef.current = { onCellSelect, onClassSelect };
+    }, [onCellSelect, onClassSelect]);
 
     useEffect(() => {
         const containerElement = containerRef.current;
@@ -349,6 +442,12 @@ const TierTypeDietSVG: React.FC<TierTypeDietSVGProps> = ({
             drawChart(svgElement, containerElement, data, width, colors, theme, {
                 onCellEnter: setHover,
                 onCellLeave: () => setHover(null),
+                onCellSelect: selectHandlersRef.current.onCellSelect
+                    ? (shipType, shipTier) => selectHandlersRef.current.onCellSelect?.(shipType, shipTier)
+                    : undefined,
+                onClassSelect: selectHandlersRef.current.onClassSelect
+                    ? (shipType) => selectHandlersRef.current.onClassSelect?.(shipType)
+                    : undefined,
             });
         };
 
