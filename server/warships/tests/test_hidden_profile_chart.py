@@ -37,25 +37,6 @@ VISIBLE_RESPONSE = {
     "meta": {"count": 1, "hidden": []},
 }
 
-# A ready population heatmap. The discriminator lives in
-# ``fetch_player_tier_type_correlation`` *after* the population payload is
-# resolved, so the tests patch the population helper to a warm payload and
-# focus purely on the None-vs-[] branch (sidestepping the Postgres-only
-# jsonb aggregation SQL, which has no sqlite equivalent).
-_POPULATION_PAYLOAD = {
-    "metric": "tier_type",
-    "label": "Tier vs Ship Type",
-    "x_label": "Ship Type",
-    "y_label": "Tier",
-    "tracked_population": 5,
-    "x_labels": ["Destroyer", "Cruiser", "Battleship",
-                 "Aircraft Carrier", "Submarine"],
-    "y_values": [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-    "tiles": [{"x_index": 0, "y_index": 1, "count": 55}],
-    "trend": [{"x_index": 0, "avg_tier": 9.5, "count": 55}],
-}
-
-
 class FetchShipStatsWithHiddenTests(TestCase):
     """The reliable hidden signal comes from WG's response ``meta.hidden``."""
 
@@ -133,10 +114,8 @@ class TierTypePendingDiscriminatorTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    @patch("warships.data._fetch_player_tier_type_population_correlation",
-           return_value=dict(_POPULATION_PAYLOAD))
     @patch("warships.data.update_battle_data_task.delay")
-    def test_never_fetched_battles_json_none_is_pending(self, mock_task, _pop):
+    def test_never_fetched_battles_json_none_is_pending(self, mock_task):
         cache.clear()
         Player.objects.create(
             name="ColdNA", player_id=8811, realm="na",
@@ -149,10 +128,8 @@ class TierTypePendingDiscriminatorTests(TestCase):
         self.assertEqual(resp.json()["player_cells"], [])
         mock_task.assert_called_once_with(player_id="8811", realm="na")
 
-    @patch("warships.data._fetch_player_tier_type_population_correlation",
-           return_value=dict(_POPULATION_PAYLOAD))
     @patch("warships.data.update_battle_data_task.delay")
-    def test_empty_battles_json_is_terminal_not_pending(self, mock_task, _pop):
+    def test_empty_battles_json_is_terminal_not_pending(self, mock_task):
         cache.clear()
         Player.objects.create(
             name="HiddenNA", player_id=8813, realm="na",
@@ -162,5 +139,17 @@ class TierTypePendingDiscriminatorTests(TestCase):
 
         self.assertEqual(resp.status_code, 200)
         self.assertNotIn("X-Tier-Type-Pending", resp)
-        self.assertEqual(resp.json()["player_cells"], [])
+        body = resp.json()
+        self.assertEqual(body["player_cells"], [])
         mock_task.assert_not_called()
+
+        # The population half was removed in 4.5.5 — the payload is per-player
+        # only now.
+        for dropped in ("tiles", "trend", "tracked_population"):
+            self.assertNotIn(dropped, body)
+        # The canonical class columns must survive without the population that
+        # used to supply them, or a captain who sails one class would render a
+        # one-column grid.
+        self.assertEqual(
+            body["x_labels"][:5],
+            ["Destroyer", "Cruiser", "Battleship", "Aircraft Carrier", "Submarine"])

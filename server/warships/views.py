@@ -1729,14 +1729,16 @@ def player_correlation_distribution(request, metric: str, player_id: str | None 
         except Player.DoesNotExist:
             return Response({'detail': 'Player not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        is_population_pending = data.pop('_population_pending', False)
         response = _validated_single_response(
             data, PlayerTierTypeCorrelationSerializer)
         # Pending only when the player's battle data was never fetched
         # (battles_json is None). An empty list (== []) means the fetch ran and
         # returned nothing (hidden profile / no ships) — a terminal state, not a
         # warm-up — so it must NOT set pending, else the client polls forever.
-        if is_population_pending or (player.battles_json is None and not data.get('player_cells')):
+        # (The former population-warming half of this condition went with the
+        # population aggregation in 4.5.5; the payload is per-player and always
+        # computed inline now.)
+        if player.battles_json is None and not data.get('player_cells'):
             response['X-Tier-Type-Pending'] = 'true'
         return response
 

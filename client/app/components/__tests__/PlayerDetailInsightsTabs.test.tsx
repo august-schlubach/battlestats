@@ -29,17 +29,8 @@ const readyTierTypePayload = {
     label: 'Tier vs Ship Type',
     x_label: 'Ship Type',
     y_label: 'Tier',
-    tracked_population: 739,
     x_labels: ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'],
     y_values: [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-    tiles: [
-        { x_index: 2, y_index: 1, count: 320000 },
-        { x_index: 1, y_index: 1, count: 410000 },
-    ],
-    trend: [
-        { x_index: 2, avg_tier: 9.3, count: 320000 },
-        { x_index: 1, avg_tier: 9.1, count: 410000 },
-    ],
     player_cells: [
         { ship_type: 'Battleship', ship_tier: 10, pvp_battles: 420, wins: 239, win_ratio: 0.569 },
         { ship_type: 'Cruiser', ship_tier: 10, pvp_battles: 320, wins: 176, win_ratio: 0.551 },

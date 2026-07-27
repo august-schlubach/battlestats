@@ -29,13 +29,8 @@ const payloadWith = (cells: TierTypePlayerCell[]): TierTypePayload => ({
     label: 'Tier vs Ship Type',
     x_label: 'Ship Type',
     y_label: 'Tier',
-    tracked_population: 1000,
     x_labels: SHIP_TYPES,
     y_values: TIERS,
-    // The figure reads none of the population layers; they are here so the
-    // fixture matches the real payload contract.
-    tiles: [{ x_index: 1, y_index: 1, count: 500000 }],
-    trend: [{ x_index: 1, avg_tier: 7.4, count: 500000 }],
     player_cells: cells,
 });
 
