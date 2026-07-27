@@ -1,6 +1,7 @@
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, type ChartTheme } from './chartTheme';
 import { LEAGUE_AWARD_MIN_ORDER, leagueAwardLabel, leagueAwardSymbol } from './rankedLeagueGlyph';
+import { setHighlightedSeason } from './rankedSeasonHighlight';
 import wrColor from './wrColor';
 
 // One slot in the season lattice: a season that EXISTS, whether or not this
@@ -10,6 +11,9 @@ import wrColor from './wrColor';
 // `leagueOrder` is the highest league reached that season (0 Bronze/unknown,
 // 2 Silver, 3+ Gold and above) and earns the award mark above the box.
 export interface LatticeSlot {
+    // WG's season id — the join key the scatter above uses to pulse the same
+    // season's point while this box is hovered.
+    seasonId: number;
     label: string;
     year: number | null;
     played: boolean;
@@ -199,12 +203,16 @@ export const drawSeasonLattice = (
         .style('pointer-events', 'none');
 
     boxes
-        .on('mouseover', function onOver(this: SVGRectElement) {
+        .on('mouseover', function onOver(this: SVGRectElement, _event: MouseEvent, slot: LatticeSlot) {
             d3.select(this).raise().attr('stroke', colors.labelText).attr('stroke-width', 2);
+            // Publish only for seasons the player actually played: an unplayed
+            // box has no point on the scatter to answer it.
+            setHighlightedSeason(slot.played ? slot.seasonId : null);
         })
         .on('mouseout', function onOut(this: SVGRectElement, _event: MouseEvent, slot: LatticeSlot) {
             d3.select(this)
                 .attr('stroke', slot.played ? colors.barBg : colors.gridLine)
                 .attr('stroke-width', 1);
+            setHighlightedSeason(null);
         });
 };
