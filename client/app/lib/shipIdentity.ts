@@ -4,8 +4,8 @@
  *
  * The leaderboard payload carries `ship.ship_type` (the full WG class string,
  * e.g. "Destroyer") and `ship.nation` (a lowercase WG code, e.g. "japan").
- * `TypeSVG` renders the raw class string as a chart label and has no glyph
- * vocabulary, so this is a net-new shared map rather than an extension of it.
+ * No chart renders a glyph vocabulary for those class strings, so this is a
+ * net-new shared map rather than an extension of an existing one.
  *
  * Both lookups are null-safe: an absent/unknown class returns `null` (caller
  * omits the glyph cleanly — no placeholder), and an unknown nation falls back

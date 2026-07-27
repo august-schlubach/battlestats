@@ -339,8 +339,8 @@ const drawDistribution = (
     const c = chartColors[theme];
     const compact = svgWidth < 480;
     // Symmetric left/right margins center the plot within the canvas. (These
-    // distributions only appear on the Population tab, standalone, so they no
-    // longer align their data-right edge to the Profile-tab bar charts.)
+    // distributions stand alone at the bottom of the Profile tab, so they carry
+    // no data-right-edge alignment contract with the chart above them.)
     const margin = compact
         ? { top: 22, right: 30, bottom: 40, left: 30 }
         : { top: 22, right: 42, bottom: 44, left: 42 };

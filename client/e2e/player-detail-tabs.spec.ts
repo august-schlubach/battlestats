@@ -333,16 +333,16 @@ test('player detail tabs settle without error across all insights panels', async
 
     await expect(page.getByRole('heading', { name: 'Player One' })).toBeVisible();
     await expect.poll(async () => page.locator('#clan_plot_container svg').count()).toBeGreaterThan(0);
-    await expect(page.getByText('Tier vs Type Profile', { exact: true })).toBeVisible();
-    await expect(page.getByText('Battleship T10', { exact: true })).toBeVisible();
-    await expect(page.getByText('This captain does not have enough tier and ship-type variety yet to draw a useful heatmap.', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Random Battles by Tier', { exact: true })).toBeVisible();
+    await expect(page.getByText('Totals by class', { exact: true })).toBeVisible();
+    await expect(page.getByText('This captain does not have enough tier and ship-type variety yet to draw a useful chart.', { exact: true })).toHaveCount(0);
 
     for (const text of FAILURE_TEXTS) {
         await expect(page.getByText(text, { exact: true })).toHaveCount(0);
     }
 
     const tabChecks = [
-        { tab: 'Profile', title: 'Tier vs Type Profile', dataText: 'Battleship T10', minSvgCount: 3 },
+        { tab: 'Profile', title: 'Random Battles by Tier', dataText: 'Totals by class', minSvgCount: 3 },
         { tab: 'Population', title: 'Win Rate vs Survival', dataText: 'Battles Played Distribution', minSvgCount: 2 },
         { tab: 'Ships', title: 'Top Ships (Random Battles)', dataText: 'Montana', minSvgCount: 1 },
         { tab: 'Ranked', title: 'Ranked Seasons', dataText: 'S32', minSvgCount: 1 },

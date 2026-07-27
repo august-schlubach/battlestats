@@ -4,6 +4,26 @@ _Created: 2026-07-01_
 _Context: With the `score_best_clans` bulk-loader prewarm gated off (2026-07-01, `BULK_CACHE_BEST_PREWARM_ENABLED=0`), the tier-type population correlation warmer is now the single largest remaining scheduled DB event on the shared 2-vCPU managed PG: a measured **324.7s/realm** (na, 2026-07-01 18:0x UTC) full `CROSS JOIN LATERAL` over every qualifying player's `battles_json`. This scopes an incremental replacement that keeps the payload byte-identical._
 _QA: scope only — no code written. Current-state facts traced in `data.py` / `views.py` / `serializers.py` / the frontend, 2026-07-01. Not yet implemented._
 
+> **Premise changed (2026-07-27, v4.5.3) — re-scope before implementing.** The
+> frontend consumer this rework exists to keep fast **no longer reads the
+> population layers at all**. The Profile tab's tier×type heatmap was replaced by
+> `TierTypeDietSVG` ("Random Battles by Tier"), which plots only the per-player
+> `player_cells`; `tiles`, `trend` and `tracked_population` are now fetched,
+> serialized, and discarded. Nothing else in the client reads them.
+>
+> So the ~325s/realm `CROSS JOIN LATERAL` this runbook proposes to make
+> incremental is currently **pure waste**, and the cheapest fix is no longer the
+> incremental aggregate described below — it is to stop computing the population
+> half and drop it from the payload (`_fetch_player_tier_type_population_correlation`
+> and `PlayerTierTypeCorrelationSerializer`), keeping `player_cells`. That is a
+> contract change (gate 5: contract docs + API tests) and a separate slice, not
+> done here. Re-read the parity boundary below with that in mind: it may be that
+> nothing needs parity because nothing needs the numbers.
+>
+> The "Frontend" line under *The contract to preserve* is stale as written: the
+> tab is "Random Battles by Tier", `TierTypePayload` no longer feeds a heatmap,
+> and `client/e2e/tier-type-heatmap.spec.ts` was deleted with the component.
+
 ## Purpose
 
 Design a rework of the tier-type population correlation aggregation so it stops re-exploding the whole population's `battles_json` on every warm. Read this before implementing; it fixes the approach (incremental normalized aggregate + watermark-delta maintainer), the parity boundary, and the rollout, and records the two alternatives that were rejected and why. **This is a real slice (new table + migration + maintainer + parity), not a toggle** — bigger than the prewarm gate that preceded it.

@@ -14,7 +14,7 @@ import RankedLeagueLegend from './RankedLeagueLegend';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import type { TierTypePayload } from './playerProfileChartData';
-import { deriveTierRowsFromTierTypePayload, deriveTypeRowsFromTierTypePayload } from './playerProfileChartData';
+import type { RandomsFilterRequest } from './RandomsSVG';
 import { dispatchPlayerRouteSectionRendered } from './usePlayerRouteDiagnostics';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { decrementChartFetches, fetchSharedJson, incrementChartFetches, isAbortError } from '../lib/sharedJsonFetch';
@@ -101,19 +101,14 @@ const PlayerClanBattleSeasons = dynamic(() => resilientDynamicImport(() => impor
     loading: () => <LoadingPanel label="Loading clan battle seasons..." minHeight={220} />,
 });
 
-const TierSVG = dynamic(() => resilientDynamicImport(() => import('./TierSVG'), 'PlayerDetailInsightsTabs-TierSVG'), {
+// One figure replaces three. The old tier x type heatmap plus the standalone
+// "Performance by Ship Type" and "Performance by Tier" bar charts were all
+// views of a single contingency table — the heatmap held the joint
+// distribution, the two bar charts its column and row margins, replotted. The
+// margins are attached to the grid now.
+const TierTypeDietSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeDietSVG'), 'PlayerDetailInsightsTabs-TierTypeDietSVG'), {
     ssr: false,
-    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={300} />,
-});
-
-const TypeSVG = dynamic(() => resilientDynamicImport(() => import('./TypeSVG'), 'PlayerDetailInsightsTabs-TypeSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading ship type chart..." minHeight={192} />,
-});
-
-const TierTypeHeatmapSVG = dynamic(() => resilientDynamicImport(() => import('./TierTypeHeatmapSVG'), 'PlayerDetailInsightsTabs-TierTypeHeatmapSVG'), {
-    ssr: false,
-    loading: () => <LoadingPanel label="Loading tier vs type heatmap..." minHeight={286} />,
+    loading: () => <LoadingPanel label="Loading tier chart..." minHeight={420} />,
 });
 
 const WRDistributionSVG = dynamic(() => resilientDynamicImport(() => import('./WRDistributionSVG'), 'PlayerDetailInsightsTabs-WRDistributionSVG'), {
@@ -150,12 +145,6 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
 // height with the 825px chart scroll viewport (RANDOMS_CHART_MAX_VIEWPORT_PX)
 // at the desktop insights column: ≈ 1057px.
 const LOCKED_PANEL_HEIGHT_PX = 1057;
-
-// Per-row step (px) of the Profile "Performance by Ship Type" horizontal bar
-// chart. Fixed (formerly derived from the stacked tier chart so the two
-// charts' bar thicknesses matched — moot now that the tier chart is vertical);
-// preserves the historical ~28px step so type bars keep their thickness.
-const PROFILE_TYPE_CHART_ROW_STEP = 28;
 
 // Shared SVG height (px) for the Profile tab's population row — the WR-vs-Survival
 // heatmap and the two distribution histograms sit side by side on lg+, so one
@@ -221,6 +210,9 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [activeTab, setActiveTab] = useState<InsightsTabId>('activity');
+    // Drill-down from the Profile tab's tier figure into the Ships tab. The
+    // nonce is what lets a second click re-apply while Ships is already open.
+    const [shipsFilterRequest, setShipsFilterRequest] = useState<RandomsFilterRequest | null>(null);
     // null = unknown (still resolving); true/false once the Activity card's first
     // payload lands. Drives the default-tab choice and the dark Activity tab.
     const [activityAvailable, setActivityAvailable] = useState<boolean | null>(null);
@@ -549,17 +541,28 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
         return () => clearTimeout(timeoutId);
     }, [profileChartState]);
 
-    const derivedTypeRows = profileChartPayload ? deriveTypeRowsFromTierTypePayload(profileChartPayload) : [];
-    // TierSVG renders vertical columns, so its x-axis order is the row order:
-    // the derive helper emits 11→1 (the old top-to-bottom row order); reverse
-    // so tiers ascend left→right.
-    const derivedTierRows = profileChartPayload ? deriveTierRowsFromTierTypePayload(profileChartPayload).reverse() : [];
-    // TypeSVG (Performance by Ship Type) has few, data-dependent rows; size its
-    // height from a fixed per-row step (shipBarPlot y padding 0.18, non-compact
-    // top=8/bottom=48) so bars keep a constant thickness instead of stretching
-    // to fill a fixed panel height. The tier column chart beside it reuses the
-    // same height so the side-by-side pair shares one bottom edge.
-    const typeChartHeight = Math.round(PROFILE_TYPE_CHART_ROW_STEP * (Math.max(derivedTypeRows.length, 1) + 0.18)) + 8 + 48;
+    // Drill-down handlers for the tier figure. Both switch to Ships and hand it
+    // a filter; `source` separates a tier×class cell click from a class-total
+    // click so the two can be measured independently, the way the efficiency
+    // filter's `source` already does.
+    const openShipsFiltered = useCallback((shipTypes: string[], tiers: number[], source: 'cell' | 'class') => {
+        setShipsFilterRequest((current) => ({
+            shipTypes,
+            tiers,
+            nonce: (current?.nonce ?? 0) + 1,
+        }));
+        setActiveTab('ships');
+        trackEvent('player-tier-chart-drilldown', { realm, source });
+    }, [realm]);
+
+    const handleDietCellSelect = useCallback(
+        (shipType: string, shipTier: number) => openShipsFiltered([shipType], [shipTier], 'cell'),
+        [openShipsFiltered],
+    );
+    const handleDietClassSelect = useCallback(
+        (shipType: string) => openShipsFiltered([shipType], [], 'class'),
+        [openShipsFiltered],
+    );
 
     const activeConfig = TAB_CONFIG.find((tab) => tab.id === activeTab) ?? TAB_CONFIG[0];
     // Computed once (not per-tab inside the strip map): whether the player has any
@@ -691,7 +694,13 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 ) : null}
 
                 {activeTab === 'ships' ? (
-                    <RandomsSVG playerId={playerId} playerName={playerName} isLoading={isLoading} theme={theme} />
+                    <RandomsSVG
+                        playerId={playerId}
+                        playerName={playerName}
+                        isLoading={isLoading}
+                        theme={theme}
+                        filterRequest={shipsFilterRequest}
+                    />
                 ) : null}
 
                 {activeTab === 'ranked' ? (
@@ -842,39 +851,21 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         ) : profileChartPayload ? (
                             <>
                                 <SectionHeadingWithTooltip
-                                    title="Tier vs Type Profile (Random Battles)"
-                                    description="This heatmap shows where the tracked player base clusters by ship tier and type. The player markers show where this captain spends most of their battles, so you can compare their ship mix with the broader population trend."
+                                    title="Random Battles by Tier"
+                                    description="Where this captain spends their random battles, and how they do there. Each bar is one tier and ship class: its length is the battle count, on a single scale shared across the whole chart, and its colour is the win rate. Colour fades toward grey where too few battles have been played for the win rate to mean much, so a lucky handful of games cannot pose as a strength. Totals for each class run along the bottom."
                                     className="mb-2 pt-2.5 pl-[15px]"
                                 />
-                                <TierTypeHeatmapSVG playerId={playerId} data={profileChartPayload} theme={theme} />
-
-                                {/* The two performance breakdowns share a row on desktop
-                                    (Type's horizontal bars left, Tier's vertical columns
-                                    right) and stack on narrow viewports. min-w-0 lets each
-                                    chart container measure the halved column instead of
-                                    forcing overflow. */}
-                                <div className="mt-4 flex flex-col gap-4 md:flex-row">
-                                    <div className="min-w-0 md:w-1/2">
-                                        <SectionHeadingWithTooltip
-                                            title="Performance by Ship Type"
-                                            description="This chart groups the player's battle volume and win rate by ship class, showing where destroyers, cruisers, battleships, carriers, or submarines contribute most."
-                                            className="mb-2 pl-[15px]"
-                                        />
-                                        <TypeSVG playerId={playerId} data={derivedTypeRows} svgHeight={typeChartHeight} theme={theme} />
-                                    </div>
-
-                                    <div className="min-w-0 md:w-1/2">
-                                        <SectionHeadingWithTooltip
-                                            title="Performance by Tier"
-                                            description="This chart groups the player's battle volume and win rate by ship tier, making it easier to see whether performance clusters in lower, mid, or high tiers."
-                                            className="mb-2 pl-[15px]"
-                                        />
-                                        <TierSVG playerId={playerId} data={derivedTierRows} svgHeight={typeChartHeight} theme={theme} />
-                                    </div>
+                                <div className="pl-[15px]">
+                                    <TierTypeDietSVG
+                                        data={profileChartPayload}
+                                        theme={theme}
+                                        onCellSelect={handleDietCellSelect}
+                                        onClassSelect={handleDietClassSelect}
+                                    />
                                 </div>
                             </>
                         ) : (
-                            <LoadingPanel label="Loading profile charts..." minHeight={560} />
+                            <LoadingPanel label="Loading profile charts..." minHeight={420} />
                         )}
 
                         {/* Population comparison — formerly the standalone Population

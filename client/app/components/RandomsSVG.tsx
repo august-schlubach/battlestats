@@ -7,6 +7,7 @@ import { chartColors, type ChartTheme } from '../lib/chartTheme';
 import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
+import { SHIP_TYPE_ABBREV } from './tierTypeDietModel';
 import {
     battleHistoryFetchUrl,
     battleHistoryCacheKey,
@@ -14,11 +15,29 @@ import {
     type BattleHistoryPayload,
 } from './BattleHistoryCard';
 
+/**
+ * A filter pre-selection handed in from another surface (the Profile tab's
+ * "Random Battles by Tier" figure drilling down into a tier x class).
+ *
+ * `nonce` is what makes a repeat drill-down work: the request is applied once
+ * per nonce, so clicking a second cell while the Ships tab is already open
+ * re-applies rather than being swallowed as an unchanged prop. Ship classes
+ * arrive in the tier/type payload's vocabulary ("Aircraft Carrier"), which is
+ * not this payload's ("AirCarrier"), so they are matched by abbreviation.
+ */
+export interface RandomsFilterRequest {
+    shipTypes: string[];
+    /** Empty means "leave the tier filter alone" (a whole-class drill-down). */
+    tiers: number[];
+    nonce: number;
+}
+
 interface RandomsSVGProps {
     playerId: number;
     playerName: string;
     isLoading?: boolean;
     theme?: ChartTheme;
+    filterRequest?: RandomsFilterRequest | null;
 }
 
 // Per-ship stats over the trailing 30-day random-battle window, joined into the
@@ -378,6 +397,56 @@ const isRandomsTimestampStale = (timestamp: string | null): boolean => {
 // purely for instant paint; the network read is the source of truth.
 const lastRandomsByKey = new Map<string, { rows: RandomsRow[]; updatedAt: string | null }>();
 
+/**
+ * Collapse a ship-class string to a vocabulary-independent key, so the
+ * tier/type payload's "Aircraft Carrier" and this payload's "AirCarrier"
+ * compare equal. The abbreviation map already carries both spellings; the
+ * stripped-string fallback covers any class neither payload has named yet.
+ */
+const shipTypeKey = (shipType: string): string => (
+    SHIP_TYPE_ABBREV[shipType] ?? shipType.replace(/[^a-z]/gi, '').toLowerCase()
+);
+
+/**
+ * Resolve a drill-down request against the ships this captain actually has.
+ *
+ * Pure so the two things most likely to break can be tested directly: the
+ * cross-payload class vocabulary, and the tier handling (an explicit tier is
+ * kept only if some ship has it; an empty tier list means "all tiers of this
+ * class", which must override the tab's default tier-5 floor).
+ *
+ * Returns nulls for anything that should be left alone.
+ */
+export const resolveRandomsFilterRequest = (
+    rows: RandomsRow[],
+    request: { shipTypes: string[]; tiers: number[] },
+): { types: string[] | null; tiers: number[] | null } => {
+    if (rows.length === 0) {
+        return { types: null, tiers: null };
+    }
+
+    const wanted = new Set(request.shipTypes.map(shipTypeKey));
+    const matchedTypes = Array.from(new Set(rows.map((row) => row.ship_type)))
+        .filter((shipType) => wanted.has(shipTypeKey(shipType)));
+
+    const allTiers = Array.from(new Set(rows.map((row) => row.ship_tier))).sort((a, b) => b - a);
+    let tiers: number[] | null;
+    if (request.tiers.length === 0) {
+        // Whole-class drill-down: every tier, so the tab's default tier-5 floor
+        // does not silently hide the low-tier half of that class.
+        tiers = allTiers;
+    } else {
+        const present = new Set(allTiers);
+        const matched = request.tiers.filter((tier) => present.has(tier));
+        tiers = matched.length > 0 ? matched : null;
+    }
+
+    return {
+        types: matchedTypes.length > 0 ? matchedTypes : null,
+        tiers,
+    };
+};
+
 const deriveRandomsSelections = (rows: RandomsRow[]): { types: string[]; tiers: number[] } => {
     const types = Array.from(new Set(rows.map((r) => r.ship_type)));
     const tiers = Array.from(new Set(rows.map((r) => r.ship_tier)))
@@ -391,6 +460,7 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     playerName,
     isLoading = false,
     theme = 'light',
+    filterRequest = null,
 }) => {
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
@@ -430,8 +500,16 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
             setRandomsUpdatedAt(updatedAt);
 
             const { types, tiers } = deriveRandomsSelections(result);
-            setSelectedTypes(types);
-            setSelectedTiers(tiers);
+            // A drill-down that still owns the selection wins over the defaults.
+            // Every fetch resolve reseeds the pills (ttlMs is 0, so this runs on
+            // every mount), which would otherwise wipe a filter the user just
+            // arrived with: on a return visit the module-cache seed makes
+            // `allShips` non-empty at mount, so the drill-down applies FIRST and
+            // this reseed would land on top of it.
+            const owning = activeFilterRef.current;
+            const resolved = owning ? resolveRandomsFilterRequest(result, owning) : null;
+            setSelectedTypes(resolved?.types ?? types);
+            setSelectedTiers(resolved?.tiers ?? tiers);
 
             // Persist for instant repaint on the next mount (tab-switch return).
             lastRandomsByKey.set(`${playerId}:${realm}`, { rows: result, updatedAt });
@@ -601,10 +679,45 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         }
     }, [chartData, theme, windowStats]);
 
+    // Apply a drill-down request from the Profile tab's tier figure. Waits for
+    // `allShips`, because a request can arrive before the payload lands (the
+    // click switches tabs and mounts this component in the same beat), and
+    // fires once per nonce so a second click re-applies.
+    const appliedFilterNonce = useRef<number | null>(null);
+    // The drill-down that currently owns the pills, or null once the user has
+    // taken them over by hand. Read by applyResult so a refetch re-asserts the
+    // drill-down instead of resetting to defaults.
+    const activeFilterRef = useRef<RandomsFilterRequest | null>(null);
+    useEffect(() => {
+        if (!filterRequest || allShips.length === 0) {
+            return;
+        }
+        if (appliedFilterNonce.current === filterRequest.nonce) {
+            return;
+        }
+        appliedFilterNonce.current = filterRequest.nonce;
+        activeFilterRef.current = filterRequest;
+
+        const { types, tiers } = resolveRandomsFilterRequest(allShips, filterRequest);
+        if (types) {
+            setSelectedTypes(types);
+        }
+        if (tiers) {
+            setSelectedTiers(tiers);
+        }
+    }, [filterRequest, allShips]);
+
     const availableTypes = Array.from(new Set(allShips.map((row) => row.ship_type)));
-    const availableTiers = Array.from(new Set(allShips.map((row) => row.ship_tier)))
-        .filter((tier) => tier >= 5)
-        .sort((a, b) => b - a);
+    // Tier pills stay floored at 5, so the tab opens exactly as it always has
+    // and low-tier ships do not clutter the default view. The one exception is
+    // a tier currently selected: a drill-down from the Profile tab's tier
+    // figure can land on tier 2, and that tier needs a visible, un-pressable
+    // pill so the filter it applied can be seen and undone rather than acting
+    // invisibly.
+    const availableTiers = Array.from(new Set([
+        ...allShips.map((row) => row.ship_tier).filter((tier) => tier >= 5),
+        ...selectedTiers,
+    ])).sort((a, b) => b - a);
 
     const areAllSelected = <T extends string | number>(selected: T[], available: T[]) => (
         available.length > 0
@@ -631,21 +744,33 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
     const allTiersSelected = areAllSelected(selectedTiers, availableTiers);
 
     const toggleType = (shipType: string) => {
+        // The user is steering the pills now; release the drill-down's claim
+        // so a later refetch reseeds defaults rather than re-asserting it.
+        activeFilterRef.current = null;
         trackEvent('randoms-filter', { realm, control: 'type', value: shipType });
         setSelectedTypes((current) => toggleSelection(current, shipType, availableTypes));
     };
 
     const toggleTier = (tier: number) => {
+        // The user is steering the pills now; release the drill-down's claim
+        // so a later refetch reseeds defaults rather than re-asserting it.
+        activeFilterRef.current = null;
         trackEvent('randoms-filter', { realm, control: 'tier', value: tier });
         setSelectedTiers((current) => toggleSelection(current, tier, availableTiers));
     };
 
     const selectAllTypes = () => {
+        // The user is steering the pills now; release the drill-down's claim
+        // so a later refetch reseeds defaults rather than re-asserting it.
+        activeFilterRef.current = null;
         trackEvent('randoms-filter', { realm, control: 'type', value: 'all' });
         setSelectedTypes([...availableTypes]);
     };
 
     const selectAllTiers = () => {
+        // The user is steering the pills now; release the drill-down's claim
+        // so a later refetch reseeds defaults rather than re-asserting it.
+        activeFilterRef.current = null;
         trackEvent('randoms-filter', { realm, control: 'tier', value: 'all' });
         setSelectedTiers([...availableTiers]);
     };
