@@ -2518,7 +2518,6 @@ class ApiContractTests(TestCase):
 
     def test_warm_player_correlations_populates_all_heatmap_caches(self):
         from warships.data import (
-            PLAYER_TIER_TYPE_CACHE_VERSION,
             _player_correlation_cache_key,
             _player_correlation_published_cache_key,
             warm_player_correlations,
@@ -2565,13 +2564,11 @@ class ApiContractTests(TestCase):
 
         result = warm_player_correlations()
 
-        self.assertEqual(result["tier_type"]["tracked_population"], 2)
+        # No tier_type entry since 4.5.5: that payload is per-player only, so
+        # there is no population cache for the warmer to fill.
+        self.assertNotIn("tier_type", result)
         self.assertEqual(result["win_rate_survival"]["tracked_population"], 2)
         self.assertEqual(result["ranked_wr_battles"]["tracked_population"], 2)
-        self.assertIsNotNone(
-            cache.get(_player_correlation_cache_key(PLAYER_TIER_TYPE_CACHE_VERSION)))
-        self.assertIsNotNone(
-            cache.get(_player_correlation_published_cache_key(PLAYER_TIER_TYPE_CACHE_VERSION)))
         self.assertIsNotNone(
             cache.get(_player_correlation_cache_key("win_rate_survival")))
         self.assertIsNotNone(
@@ -2583,7 +2580,6 @@ class ApiContractTests(TestCase):
 
     def test_player_correlation_distribution_returns_tier_type_payload(self):
         cache.clear()
-        from warships.data import warm_player_tier_type_population_correlation
 
         Player.objects.create(
             name="TierTypeOne",
@@ -2624,10 +2620,8 @@ class ApiContractTests(TestCase):
             ],
         )
 
-        # Pre-warm the population correlation cache so this request exercises
-        # the populated response path rather than the cold-cache pending path.
-        warm_player_tier_type_population_correlation()
-
+        # No pre-warm: since 4.5.5 the payload is per-player only, computed
+        # inline from battles_json, with no population cache to prime.
         response = self.client.get(
             "/api/fetch/player_correlation/tier_type/8831/")
 
@@ -2637,7 +2631,6 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["label"], "Tier vs Ship Type")
         self.assertEqual(payload["x_label"], "Ship Type")
         self.assertEqual(payload["y_label"], "Tier")
-        self.assertEqual(payload["tracked_population"], 2)
         self.assertEqual(
             payload["x_labels"][:5],
             ["Destroyer", "Cruiser", "Battleship",
@@ -2648,18 +2641,16 @@ class ApiContractTests(TestCase):
         self.assertEqual(payload["player_cells"][0]["ship_tier"], 10)
         self.assertEqual(payload["player_cells"][0]["pvp_battles"], 40)
         self.assertAlmostEqual(payload["player_cells"][0]["win_ratio"], 0.6)
-        self.assertTrue(any(
-            tile["x_index"] == 0
-            and tile["y_index"] == 1
-            and tile["count"] == 55
-            for tile in payload["tiles"]
-        ))
-        self.assertTrue(any(
-            point["x_index"] == 2
-            and point["count"] == 35
-            and point["avg_tier"] > 8.7
-            for point in payload["trend"]
-        ))
+        # The population layers were removed in 4.5.5 — nothing on the frontend
+        # read them, and producing them cost a ~325 s/realm jsonb scan.
+        for dropped in ("tiles", "trend", "tracked_population"):
+            self.assertNotIn(dropped, payload)
+        # Only this player's own cells: the other two players' battles must not
+        # leak into the payload now that there is no population aggregate.
+        self.assertEqual(
+            {(cell["ship_type"], cell["ship_tier"]) for cell in payload["player_cells"]},
+            {("Destroyer", 10), ("Cruiser", 8), ("Battleship", 8)},
+        )
 
     @patch("warships.data.update_battle_data_task.delay")
     def test_player_correlation_distribution_flags_pending_tier_type_refresh_when_player_battles_are_missing(self, mock_update_battle_data_task):
@@ -2685,11 +2676,6 @@ class ApiContractTests(TestCase):
             ],
         )
 
-        # Pre-warm the population correlation cache so the request path
-        # doesn't need to rebuild it inline (matches production behavior).
-        from warships.data import warm_player_tier_type_population_correlation
-        warm_player_tier_type_population_correlation()
-
         response = self.client.get(
             "/api/fetch/player_correlation/tier_type/8834/")
 
@@ -2698,7 +2684,14 @@ class ApiContractTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["metric"], "tier_type")
         self.assertEqual(payload["player_cells"], [])
-        self.assertTrue(payload["tiles"])
+        # The grid axes still arrive on the pending path, so the chart has a
+        # frame to draw while the player's battle data is being fetched.
+        self.assertEqual(
+            payload["x_labels"][:5],
+            ["Destroyer", "Cruiser", "Battleship",
+                "Aircraft Carrier", "Submarine"],
+        )
+        self.assertEqual(payload["y_values"][:3], [11, 10, 9])
         mock_update_battle_data_task.assert_called_once_with(
             player_id='8834', realm='na')
 

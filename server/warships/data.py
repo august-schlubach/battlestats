@@ -141,14 +141,6 @@ def _dispatch_async_refresh(task, *args, **kwargs) -> None:
         )
 
 
-def _dispatch_async_correlation_warm(realm: str = DEFAULT_REALM) -> None:
-    # Routes through the lock-aware gate so cold-cache page-load bursts
-    # don't fan out one warm task per request. See
-    # agents/runbooks/runbook-post-rollout-followups-2026-05-01.md Phase 1.
-    from warships.tasks import queue_warm_player_correlations
-    queue_warm_player_correlations(realm=realm)
-
-
 def player_detail_needs_refresh(
     player: Player,
     stale_after: timedelta = PLAYER_DETAIL_STALE_AFTER,
@@ -2691,11 +2683,12 @@ PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CONFIG = {
 }
 PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_CACHE_VERSION = 'clan_battle_wr_battles:v1'
 
+# Purely presentational now: the tier x type payload is per-player only, so
+# there is no population floor to configure.
 PLAYER_TIER_TYPE_CORRELATION_CONFIG = {
     'label': 'Tier vs Ship Type',
     'x_label': 'Ship Type',
     'y_label': 'Tier',
-    'min_population_battles': 100,
 }
 
 PLAYER_TIER_TYPE_ORDER = {
@@ -2709,7 +2702,6 @@ _SHIP_TYPE_ALIASES: dict[str, str] = {
     'AirCarrier': 'Aircraft Carrier',
 }
 _SHIP_TYPE_EXCLUDED_FROM_HEATMAP: set[str] = {'Unknown'}
-PLAYER_TIER_TYPE_CACHE_VERSION = 'tier_type_population:v3'
 
 
 def _player_distribution_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
@@ -2726,22 +2718,6 @@ def _player_correlation_cache_key(metric: str, realm: str = DEFAULT_REALM) -> st
 
 def _player_correlation_published_cache_key(metric: str, realm: str = DEFAULT_REALM) -> str:
     return f'{_player_correlation_cache_key(metric, realm=realm)}:published'
-
-
-# F9.4 (DB audit): the tier-type population rebuild is the heaviest standing
-# analytical statement on prod (~400 s/realm — a CROSS JOIN LATERAL
-# jsonb_array_elements over every qualifying player's battles_json). The daily
-# Beat always outlives the 12 h fresh-key TTL, so without a floor every daily
-# warm re-ran the full scan. The payload is a slow-moving career population
-# baseline, so the warmer now re-runs the scan at most once per
-# TIER_TYPE_POPULATION_REBUILD_HOURS per realm (marker key below) and serves
-# the durable `published` payload between rebuilds.
-TIER_TYPE_POPULATION_REBUILD_HOURS = int(
-    os.getenv('TIER_TYPE_POPULATION_REBUILD_HOURS', '72'))
-
-
-def _tier_type_rebuild_marker_key(realm: str = DEFAULT_REALM) -> str:
-    return f'{_player_correlation_cache_key(PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)}:rebuilt'
 
 
 def _build_doubling_bin_edges(max_value: int, seed_edges: list[int]) -> list[int]:
@@ -3114,222 +3090,6 @@ def _build_tier_type_player_cells(battles_json: Any) -> list[dict]:
     return player_cells
 
 
-# Aggregates the tier-type population entirely inside Postgres (jsonb), so we
-# never stream every qualifying player's battles_json into Python — that
-# per-element parse + transfer was a ~8 min full scan per realm. The `()`
-# grouping-set row carries tracked_population (distinct players among non-Unknown
-# qualifying rows); the other rows are per-(ship_type, ship_tier) battle sums.
-# The WHERE clause mirrors `_extract_tier_type_battle_rows` exactly: object
-# elements, non-empty string ship_type, JSON-number ship_tier/pvp_battles both
-# truncated-to-int and > 0, the AirCarrier alias, and the Unknown exclusion.
-_TIER_TYPE_POPULATION_SQL = """
-WITH qualifying AS (
-    SELECT
-        p.player_id,
-        CASE WHEN btrim(elem->>'ship_type') = 'AirCarrier'
-             THEN 'Aircraft Carrier'
-             ELSE btrim(elem->>'ship_type') END AS ship_type,
-        trunc((elem->>'ship_tier')::numeric)::int   AS ship_tier,
-        trunc((elem->>'pvp_battles')::numeric)::int AS pvp_battles
-    FROM warships_player p
-    CROSS JOIN LATERAL jsonb_array_elements(p.battles_json) AS elem
-    WHERE p.realm = %s
-      AND p.is_hidden = false
-      AND p.pvp_battles >= %s
-      AND p.battles_json IS NOT NULL
-      AND jsonb_typeof(p.battles_json) = 'array'
-      AND jsonb_typeof(elem) = 'object'
-      AND jsonb_typeof(elem->'ship_type') = 'string'
-      AND btrim(elem->>'ship_type') <> ''
-      AND jsonb_typeof(elem->'ship_tier') = 'number'
-      AND jsonb_typeof(elem->'pvp_battles') = 'number'
-      AND trunc((elem->>'ship_tier')::numeric)::int > 0
-      AND trunc((elem->>'pvp_battles')::numeric)::int > 0
-)
-SELECT ship_type, ship_tier,
-       SUM(pvp_battles)::bigint AS battles,
-       COUNT(DISTINCT player_id) AS players
-FROM qualifying
-WHERE ship_type <> 'Unknown'
-GROUP BY GROUPING SETS ((ship_type, ship_tier), ())
-"""
-
-
-def _aggregate_tier_type_population_sql(realm: str, min_population_battles: int) -> tuple[dict[tuple[str, int], int], int]:
-    """Return (tile_counts, tracked_population) via a single in-Postgres jsonb
-    aggregation. See `_TIER_TYPE_POPULATION_SQL`."""
-    tile_counts: dict[tuple[str, int], int] = {}
-    tracked_population = 0
-    with connection.cursor() as cursor:
-        cursor.execute(_TIER_TYPE_POPULATION_SQL,
-                       [realm, min_population_battles])
-        for ship_type, ship_tier, battles, players in cursor.fetchall():
-            if ship_type is None and ship_tier is None:
-                tracked_population = int(players or 0)
-            else:
-                tile_counts[(ship_type, int(ship_tier))] = int(battles or 0)
-    return tile_counts, tracked_population
-
-
-def _aggregate_tier_type_population_python(realm: str, min_population_battles: int) -> tuple[dict[tuple[str, int], int], int]:
-    """Proven-correct fallback: stream battles_json and aggregate in Python
-    (the original ~8 min/realm path). Used only if the SQL aggregation raises."""
-    tile_counts: dict[tuple[str, int], int] = {}
-    tracked_population = 0
-    rows = Player.objects.filter(
-        realm=realm,
-        is_hidden=False,
-        pvp_battles__gte=min_population_battles,
-        battles_json__isnull=False,
-    ).values_list('battles_json', flat=True)
-    for battles_json in rows.iterator(chunk_size=1000):
-        normalized_rows = _extract_tier_type_battle_rows(battles_json)
-        if not normalized_rows:
-            continue
-        tracked_population += 1
-        for row in normalized_rows:
-            key = (str(row['ship_type']), int(row['ship_tier']))
-            tile_counts[key] = tile_counts.get(
-                key, 0) + int(row['pvp_battles'])
-    return tile_counts, tracked_population
-
-
-def _fetch_player_tier_type_population_correlation(realm: str = DEFAULT_REALM, *, allow_rebuild: bool = True, force_rebuild: bool = False) -> dict:
-    cache_key = _player_correlation_cache_key(
-        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
-    published_cache_key = _player_correlation_published_cache_key(
-        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
-    # force_rebuild (used by the periodic warmer) must skip the read
-    # short-circuit below — otherwise the durable `published` fallback is
-    # returned before the rebuild, so a once-published empty/stale payload can
-    # never be replaced. The rebuild overwrites both keys at the end, so the
-    # old published value keeps serving until the fresh one lands (no gap).
-    if not force_rebuild:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            cache.set(published_cache_key, cached, timeout=None)
-            return cached
-
-        published = cache.get(published_cache_key)
-        if published is not None:
-            return published
-
-        if not allow_rebuild:
-            return None
-
-    config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
-    min_population_battles = config['min_population_battles']
-
-    try:
-        with transaction.atomic(), _elevated_work_mem():
-            tile_counts, tracked_population = _aggregate_tier_type_population_sql(
-                realm, min_population_battles)
-    except Exception:
-        logging.exception(
-            "tier_type SQL aggregation failed for realm=%s; "
-            "falling back to the Python scan", realm)
-        with transaction.atomic(), _elevated_work_mem():
-            tile_counts, tracked_population = _aggregate_tier_type_population_python(
-                realm, min_population_battles)
-
-    # trend and the observed ship-type set are fully derivable from the raw
-    # per-(type, tier) battle sums (avg_tier = Σ tier·battles / Σ battles).
-    # Derive from the unfiltered tile_counts so any tier outside the 1–11 board
-    # still contributes to the trend exactly as the row-by-row scan did.
-    observed_ship_types: set[str] = {ship_type for (ship_type, _tier) in tile_counts}
-    trend_tier_weighted_sum: dict[str, float] = {}
-    trend_battles: dict[str, int] = {}
-    for (ship_type, ship_tier), count in tile_counts.items():
-        trend_tier_weighted_sum[ship_type] = trend_tier_weighted_sum.get(
-            ship_type, 0.0) + (ship_tier * count)
-        trend_battles[ship_type] = trend_battles.get(ship_type, 0) + count
-
-    x_labels = _build_tier_type_x_labels(observed_ship_types)
-    y_values = _build_tier_type_y_values()
-    x_index_by_label = {label: index for index, label in enumerate(x_labels)}
-    y_index_by_value = {value: index for index, value in enumerate(y_values)}
-
-    tiles = [
-        {
-            'x_index': x_index_by_label[ship_type],
-            'y_index': y_index_by_value[ship_tier],
-            'count': count,
-        }
-        for (ship_type, ship_tier), count in sorted(
-            tile_counts.items(),
-            key=lambda item: _tier_type_sort_key(item[0][0], item[0][1]),
-        )
-        if ship_type in x_index_by_label and ship_tier in y_index_by_value
-    ]
-
-    trend = [
-        {
-            'x_index': x_index_by_label[ship_type],
-            'avg_tier': round(trend_tier_weighted_sum[ship_type] / total_battles, 4),
-            'count': total_battles,
-        }
-        for ship_type, total_battles in sorted(
-            trend_battles.items(),
-            key=lambda item: _tier_type_sort_key(item[0]),
-        )
-        if total_battles > 0 and ship_type in x_index_by_label
-    ]
-
-    payload = {
-        'metric': 'tier_type',
-        'label': config['label'],
-        'x_label': config['x_label'],
-        'y_label': config['y_label'],
-        'tracked_population': tracked_population,
-        'x_labels': x_labels,
-        'y_values': y_values,
-        'tiles': tiles,
-        'trend': trend,
-    }
-    cache.set(cache_key, payload, PLAYER_CORRELATION_CACHE_TTL)
-    cache.set(published_cache_key, payload, timeout=None)
-    return payload
-
-
-def warm_player_tier_type_population_correlation(realm: str = DEFAULT_REALM) -> dict:
-    """Refresh the tier-type population correlation cache.
-
-    The rebuild is a full scan over every qualifying player's ``battles_json``
-    (~8 min/realm on prod), so we only force it when the TTL'd cache is stale
-    or empty — including a realm frozen at ``tracked_population=0`` by a warm
-    that ran before its population was enriched (the original asia bug). A
-    fresh, non-empty cache short-circuits to a cheap no-op.
-
-    F9.4 rebuild-interval floor: the daily Beat always outlives the 12 h
-    fresh-key TTL, so skip-if-fresh alone still re-ran the ~400 s/realm scan
-    every day. A marker key (TTL ``TIER_TYPE_POPULATION_REBUILD_HOURS``, set
-    only after a successful non-empty rebuild) bounds the scan to at most one
-    run per interval per realm; between rebuilds the warmer serves the durable
-    ``published`` payload. An empty/missing published payload rebuilds straight
-    through the marker (preserving the asia-freeze rescue), and a marker lost
-    to cache eviction merely rebuilds early — fail-safe in both directions.
-    """
-    cache_key = _player_correlation_cache_key(
-        PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm)
-    fresh = cache.get(cache_key)
-    if isinstance(fresh, dict) and fresh.get('tracked_population', 0) > 0:
-        return fresh
-
-    marker_key = _tier_type_rebuild_marker_key(realm)
-    if cache.get(marker_key) is not None:
-        published = cache.get(_player_correlation_published_cache_key(
-            PLAYER_TIER_TYPE_CACHE_VERSION, realm=realm))
-        if isinstance(published, dict) and published.get('tracked_population', 0) > 0:
-            return published
-
-    payload = _fetch_player_tier_type_population_correlation(
-        realm=realm, force_rebuild=True)
-    if isinstance(payload, dict) and payload.get('tracked_population', 0) > 0:
-        cache.set(marker_key, django_timezone.now().isoformat(),
-                  timeout=TIER_TYPE_POPULATION_REBUILD_HOURS * 3600)
-    return payload
-
-
 def warm_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
     """Force-rebuild the win-rate vs survival correlation cache."""
     return fetch_player_wr_survival_correlation(realm=realm, force_rebuild=True)
@@ -3337,11 +3097,9 @@ def warm_player_wr_survival_correlation(realm: str = DEFAULT_REALM) -> dict:
 
 def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
     """Pre-warm all population correlation caches."""
+    # No tier_type entry: that payload is per-player only since 4.5.5, so there
+    # is no population left to warm.
     results = {}
-
-    tier_type = warm_player_tier_type_population_correlation(realm=realm)
-    results['tier_type'] = {
-        'tracked_population': tier_type.get('tracked_population', 0)}
 
     win_rate_survival = warm_player_wr_survival_correlation(realm=realm)
     results['win_rate_survival'] = {
@@ -3360,26 +3118,29 @@ def warm_player_correlations(realm: str = DEFAULT_REALM) -> dict:
 
 
 def fetch_player_tier_type_correlation(player_id: str, player: Player | None = None, realm: str = DEFAULT_REALM) -> dict:
-    player = player or Player.objects.get(player_id=player_id, realm=realm)
-    population_payload = _fetch_player_tier_type_population_correlation(
-        realm=realm, allow_rebuild=False)
+    """Per-player tier x ship-type battle cells.
 
-    if population_payload is None:
-        _dispatch_async_correlation_warm(realm=realm)
-        config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
-        return {
-            'metric': 'tier_type',
-            'label': config['label'],
-            'x_label': config['x_label'],
-            'y_label': config['y_label'],
-            'tracked_population': 0,
-            'x_labels': [],
-            'y_values': _build_tier_type_y_values(),
-            'tiles': [],
-            'trend': [],
-            'player_cells': [],
-            '_population_pending': True,
-        }
+    Purely per-player and cheap: no population aggregation is involved. The
+    population half (``tiles``/``trend``/``tracked_population``) was dropped in
+    4.5.5 once the frontend stopped reading it — the Profile tab's "Random
+    Battles by Tier" figure plots only ``player_cells``. That removed a
+    ~325 s/realm ``CROSS JOIN LATERAL`` over every qualifying player's
+    ``battles_json`` that was being computed and discarded.
+    """
+    player = player or Player.objects.get(player_id=player_id, realm=realm)
+    config = PLAYER_TIER_TYPE_CORRELATION_CONFIG
+    # Leads with the canonical five classes (an empty observed set yields
+    # exactly those), so a captain who only sails cruisers still gets the full
+    # grid and the classes they never touch read as absent rather than
+    # disappearing. The population used to supply this.
+    base_x_labels = _build_tier_type_x_labels(set())
+    base_payload = {
+        'metric': 'tier_type',
+        'label': config['label'],
+        'x_label': config['x_label'],
+        'y_label': config['y_label'],
+        'y_values': _build_tier_type_y_values(),
+    }
 
     if player.battles_json is None:
         # Never fetched — legitimately warming. Kick a refresh; the view signals
@@ -3391,15 +3152,16 @@ def fetch_player_tier_type_correlation(player_id: str, player: Player | None = N
         _dispatch_async_refresh(update_battle_data_task,
                                 player_id=player_id, realm=realm)
         return {
-            **population_payload,
+            **base_payload,
+            'x_labels': base_x_labels,
             'player_cells': [],
         }
 
     player_cells = _build_tier_type_player_cells(player.battles_json)
 
     return {
-        **population_payload,
-        'x_labels': _extend_tier_type_x_labels(population_payload['x_labels'], player_cells),
+        **base_payload,
+        'x_labels': _extend_tier_type_x_labels(base_x_labels, player_cells),
         'player_cells': player_cells,
     }
 
