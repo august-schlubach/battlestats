@@ -13,11 +13,11 @@ from rest_framework.decorators import api_view, throttle_classes
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django.utils import timezone
-from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily, PlayerDailyShipStats, realm_cache_key
+from warships.models import DEFAULT_REALM, VALID_REALMS, Player, Clan, Ship, EntityVisitDaily, PlayerDailyShipStats, RankedSeason, realm_cache_key
 from warships.api.players import _fetch_player_id_by_name
 from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerializer, ActivityDataSerializer, \
     TierDataSerializer, TypeDataSerializer, RandomsDataSerializer, ClanDataSerializer, ClanMemberSerializer, \
-    RankedDataSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, \
+    RankedDataSerializer, RankedSeasonCatalogSerializer, ClanBattleSeasonSummarySerializer, PlayerClanBattleSeasonSerializer, PlayerSummarySerializer, \
     WRDistributionBinSerializer, PlayerPopulationDistributionSerializer, CompactPlayerCorrelationDistributionSerializer, RankedPlayerCorrelationDistributionSerializer, \
     PlayerTierTypeCorrelationSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer
 from warships.data import (
@@ -633,6 +633,46 @@ def ranked_data(request, player_id: str) -> Response:
     if player and player.ranked_updated_at:
         response["X-Ranked-Updated-At"] = player.ranked_updated_at.isoformat()
 
+    return response
+
+
+RANKED_SEASON_CATALOG_CACHE_KEY = "ranked_season_catalog:v1"
+RANKED_SEASON_CATALOG_CACHE_TTL = 6 * 60 * 60  # 6 hours
+
+
+@api_view(["GET"])
+@throttle_classes(PUBLIC_API_THROTTLES)
+def ranked_season_catalog(request) -> Response:
+    """Every ranked season WG has run, oldest first — player-independent.
+
+    Read STRAIGHT off the durable `RankedSeason` table: no WG call and no
+    `_get_ranked_seasons_metadata()`, whose resolution chain can reach
+    `seasons/info/` — no request-thread endpoint may block on the WG API. The
+    table is the same copy that upsert path writes, so a cold Redis costs one
+    ~30-row query, not an upstream fetch.
+
+    Season ids are global across realms (WG numbers ranked seasons once), so
+    the response carries no realm and the cache key has none either.
+    """
+    cached = cache.get(RANKED_SEASON_CATALOG_CACHE_KEY)
+    if cached is not None:
+        return Response(cached)
+
+    rows = [
+        {
+            "season_id": season.season_id,
+            "season_name": season.name,
+            "season_label": season.label,
+            "start_date": season.start_date.isoformat() if season.start_date else None,
+            "end_date": season.end_date.isoformat() if season.end_date else None,
+        }
+        for season in RankedSeason.objects.order_by("season_id").only(
+            "season_id", "name", "label", "start_date", "end_date")
+    ]
+
+    response = _validated_list_response(rows, RankedSeasonCatalogSerializer)
+    cache.set(RANKED_SEASON_CATALOG_CACHE_KEY, response.data,
+              RANKED_SEASON_CATALOG_CACHE_TTL)
     return response
 
 

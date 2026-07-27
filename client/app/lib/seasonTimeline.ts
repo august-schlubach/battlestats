@@ -1,18 +1,15 @@
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, type ChartTheme } from './chartTheme';
-import { leagueSymbol, leagueStroke, leagueInnerBorderColor } from './rankedLeagueGlyph';
 import wrColor from './wrColor';
 
 // One dated season on the activity timeline. winRate is a PERCENT (0..100);
 // frac is the season's fractional year (2020-07-01 → ~2020.5) so same-year
-// seasons resolve to distinct x positions. leagueOrder (ranked only) drives the
-// glyph shape when the timeline is drawn glyphByLeague.
+// seasons resolve to distinct x positions.
 export interface TimelineMark {
     label: string;
     battles: number;
     winRate: number;
     frac: number;
-    leagueOrder?: number;
 }
 
 // Parse a start date to a fractional year. Accepts "YYYY", "YYYY-MM",
@@ -32,8 +29,11 @@ export const fractionalYear = (startDate?: string | null): number | null => {
 // A single-row year timeline: horizontal axis over the season span ±1 year
 // (year markers only), with one WR-colored marker per played season at its
 // fractional-year x. Overlapping markers in a busy year read as a cluster,
-// giving a sense of where activity concentrates. Shared by the ranked and
-// clan-battle tabs (each maps its own season payload to TimelineMark[]).
+// giving a sense of where activity concentrates.
+//
+// Clan battles only. The ranked tab used to share this with a league-glyph
+// variant; it moved to the notional season lattice (`seasonLattice.ts`), which
+// draws every season WG has run rather than only the dated, played ones.
 export const drawSeasonTimeline = (
     container: HTMLDivElement,
     marks: TimelineMark[],
@@ -41,7 +41,6 @@ export const drawSeasonTimeline = (
     svgHeight: number,
     theme: ChartTheme,
     emptyMessage: string,
-    glyphByLeague = false,
 ): void => {
     const colors = chartColors[theme];
 
@@ -87,70 +86,17 @@ export const drawSeasonTimeline = (
 
     const markTitle = (mark: TimelineMark) => `${mark.label} ${Math.floor(mark.frac)}: ${mark.battles.toLocaleString()} battles, ${mark.winRate.toFixed(1)}% WR`;
 
-    // Marker size encodes battles played, relative to the player's OWN record:
-    // fewest battles → 1× base, most → maxMult (linear); a flat/single record
-    // sits at the midpoint. Returned as a LINEAR scale (radius/side). Circles use
-    // it directly (max 4×); glyph AREAS use its square, so glyphs cap lower (3×)
-    // to keep the biggest star from ballooning.
+    // Circle radius encodes battles played, relative to the player's OWN record:
+    // fewest battles → 1× base, most → 4× (linear); a flat/single record sits at
+    // the midpoint.
     const battlesValues = marks.map((mark) => mark.battles);
     const minBattles = Math.min(...battlesValues);
     const maxBattles = Math.max(...battlesValues);
-    const sizeScaleTo = (maxMult: number) => (battles: number): number => (
+    const circleSizeScale = (battles: number): number => (
         maxBattles > minBattles
-            ? 1 + (maxMult - 1) * (battles - minBattles) / (maxBattles - minBattles)
-            : 1 + (maxMult - 1) / 2
+            ? 1 + 3 * (battles - minBattles) / (maxBattles - minBattles)
+            : 2.5
     );
-    const circleSizeScale = sizeScaleTo(4);
-    const glyphSizeScale = sizeScaleTo(3);
-
-    if (glyphByLeague) {
-        // League glyphs (shape + metal border + inner hairline), identical to the
-        // ranked scatter. One group per mark so the two paths scale together on
-        // hover.
-        const symbolGen = d3.symbol();
-        const innerBorder = leagueInnerBorderColor(theme);
-        const orderOf = (mark: TimelineMark) => mark.leagueOrder ?? 0;
-        const markTransform = (mark: TimelineMark) => `translate(${x(mark.frac)}, ${baselineY}) rotate(${leagueSymbol(orderOf(mark)).rotate})`;
-
-        const groups = svg.append('g')
-            .selectAll('g')
-            .data(marks)
-            .enter()
-            .append('g')
-            .attr('transform', markTransform)
-            .style('cursor', 'pointer');
-
-        groups.append('path')
-            .attr('d', (mark: TimelineMark) => {
-                const { type, size } = leagueSymbol(orderOf(mark));
-                return symbolGen.type(type).size(size * glyphSizeScale(mark.battles) ** 2)();
-            })
-            .attr('fill', (mark: TimelineMark) => wrColor(mark.winRate))
-            .attr('stroke', (mark: TimelineMark) => leagueStroke(orderOf(mark), colors).color)
-            .attr('stroke-width', (mark: TimelineMark) => leagueStroke(orderOf(mark), colors).width);
-
-        groups.filter((mark: TimelineMark) => orderOf(mark) >= 2)
-            .append('path')
-            .attr('d', (mark: TimelineMark) => {
-                const { type, size } = leagueSymbol(orderOf(mark));
-                return symbolGen.type(type).size(size * 0.66 * glyphSizeScale(mark.battles) ** 2)();
-            })
-            .attr('fill', 'none')
-            .attr('stroke', innerBorder)
-            .attr('stroke-width', 1)
-            .style('pointer-events', 'none');
-
-        groups.append('title').text(markTitle);
-
-        groups
-            .on('mouseover', function onOver(this: SVGGElement, _event: MouseEvent, mark: TimelineMark) {
-                d3.select(this).attr('transform', `${markTransform(mark)} scale(1.35)`);
-            })
-            .on('mouseout', function onOut(this: SVGGElement, _event: MouseEvent, mark: TimelineMark) {
-                d3.select(this).attr('transform', markTransform(mark));
-            });
-        return;
-    }
 
     const dots = svg.append('g')
         .selectAll('circle')

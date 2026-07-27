@@ -794,15 +794,16 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 <div className="mt-2">
                                     <SectionHeadingWithTooltip
                                         title="Ranked Season Timeline"
-                                        description="Where the player's ranked seasons fall in time. Each marker is one season, positioned by year; its shape shows the highest league reached that season, its size the battles played (relative to the player's own range), and its color the season win rate."
+                                        description="Every ranked season Wargaming has run, in order — one box each. A filled box is a season this player played, colored by that season's win rate; an empty box is a season they sat out. A mark above a box is the highest league reached that season: a silver diamond for Silver, a gold star for Gold or above. Spacing is by season, not by date, so the year labels below fall wherever the calendar rolls over."
                                         className="mb-2 pl-[15px]"
                                     />
                                     <RankedSeasonTimelineSVG playerId={playerId} isLoading={isLoading} theme={theme} />
                                 </div>
                             ) : null}
 
-                            {/* One-line shape key for the scatter's league glyphs,
-                                sitting just above the seasons table. */}
+                            {/* One-line key for the league AWARD marks — the same
+                                square-on-point / star the scatter puts under its
+                                x-axis and the lattice puts above each box. */}
                             {showRankedHeatmap ? (
                                 <div className="mt-3 pl-[15px]">
                                     <RankedLeagueLegend theme={theme} />

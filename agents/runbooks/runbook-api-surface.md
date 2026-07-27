@@ -53,12 +53,16 @@ _Removed in 3.0 (landing featured-boards decommission): `/api/landing/clans/` (`
 | `/api/fetch/activity_data/<player_id>/`  | GET             | `activity_fourgate`       | Yes     |
 | `/api/fetch/ranked_data/<player_id>/`    | GET (populated) | `ranked_punkhunter25`     | Yes     |
 | `/api/fetch/ranked_data/<player_id>/`    | GET (empty)     | `ranked_empty_kevik70`    | Yes     |
+| `/api/ranked_seasons/`                   | GET             | n/a (player-independent)  | Yes     |
 
 **Behavior notes**:
 
 - `/api/fetch/player_summary/<player_id>/` is contract-backed by the derived ODCS player-summary artifact and should stay aligned with serializer fields.
 - `/api/fetch/ranked_data/<player_id>/` now serves the full non-empty ranked history persisted on the player, not only the last 10 seasons.
 - Fresh ranked cache rows should be served even when `top_ship_name` enrichment is missing; enrichment repair belongs to maintenance commands, not read paths.
+- `/api/ranked_seasons/` is the player- and realm-independent ranked **season catalog**: every season WG has run, oldest first, as `season_id` / `season_name` / `season_label` / `start_date` / `end_date` (`end_date` null while a season is live). Season ids are global across realms, so the response takes no `?realm=` and the 6h Redis key carries none.
+  - It reads the durable `RankedSeason` table **directly** — never `_get_ranked_seasons_metadata()`, whose resolution chain can reach WG `seasons/info/`. No request-thread endpoint may block on the WG API, so a cold cache costs one ~30-row query.
+  - It backs the ranked tab's season **lattice** (`client/app/lib/seasonLattice.ts`): one box per season that exists, filled on the win-rate scale where the player played and outline-only where they did not. The frontend joins on `season_id` and keeps any played season the catalog has not published yet.
 
 ### Clan (Router — ClanViewSet)
 
