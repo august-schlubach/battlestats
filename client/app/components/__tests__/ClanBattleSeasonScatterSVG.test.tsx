@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import ClanBattleSeasonScatterSVG from '../ClanBattleSeasonScatterSVG';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+import { clanBattleSeasonHighlight } from '../../lib/seasonHoverLink';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -12,7 +13,33 @@ const mockFetch = fetchSharedJson as jest.Mock;
 const resolved = (data: unknown) => Promise.resolve({ data, headers: {} });
 
 describe('ClanBattleSeasonScatterSVG', () => {
-    beforeEach(() => mockFetch.mockReset());
+    beforeEach(() => {
+        mockFetch.mockReset();
+        clanBattleSeasonHighlight.set(null);
+    });
+
+    it('pulses the point whose season the timeline below is hovering, and only that one', async () => {
+        mockFetch.mockReturnValue(resolved([
+            { season_id: 21, season_label: 'CB1', battles: 40, win_rate: 55 },
+            { season_id: 22, season_label: 'CB2', battles: 120, win_rate: 48 },
+        ]));
+
+        render(<ClanBattleSeasonScatterSVG playerId={41} theme="light" />);
+        const region = screen.getByRole('img', { name: /clan battle win rate versus battles/i });
+        await waitFor(() => expect(region.querySelectorAll('circle')).toHaveLength(2));
+
+        const pointFor = (seasonId: number) => region.querySelector(`circle[data-season-id="${seasonId}"]`);
+        expect(pointFor(21)).toBeTruthy();
+        expect(pointFor(21)?.getAttribute('stroke-width')).toBe('1.5');
+
+        act(() => clanBattleSeasonHighlight.set(21));
+        expect(pointFor(21)?.getAttribute('stroke-width')).toBe('2');
+        expect(pointFor(22)?.getAttribute('stroke-width')).toBe('1.5');
+
+        act(() => clanBattleSeasonHighlight.set(null));
+        expect(pointFor(21)?.getAttribute('stroke-width')).toBe('1.5');
+        expect(Number(pointFor(21)?.getAttribute('r'))).toBe(5);
+    });
 
     it('renders the labelled region and draws without throwing (multi-season)', async () => {
         mockFetch.mockReturnValue(resolved([

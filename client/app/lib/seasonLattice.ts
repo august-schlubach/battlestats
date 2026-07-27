@@ -1,7 +1,7 @@
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, type ChartTheme } from './chartTheme';
 import { LEAGUE_AWARD_MIN_ORDER, leagueAwardLabel, leagueAwardSymbol } from './rankedLeagueGlyph';
-import { setHighlightedSeason } from './rankedSeasonHighlight';
+import { rankedSeasonHighlight } from './seasonHoverLink';
 import wrColor from './wrColor';
 
 // One slot in the season lattice: a season that EXISTS, whether or not this
@@ -207,12 +207,12 @@ export const drawSeasonLattice = (
             d3.select(this).raise().attr('stroke', colors.labelText).attr('stroke-width', 2);
             // Publish only for seasons the player actually played: an unplayed
             // box has no point on the scatter to answer it.
-            setHighlightedSeason(slot.played ? slot.seasonId : null);
+            rankedSeasonHighlight.set(slot.played ? slot.seasonId : null);
         })
         .on('mouseout', function onOut(this: SVGRectElement, _event: MouseEvent, slot: LatticeSlot) {
             d3.select(this)
                 .attr('stroke', slot.played ? colors.barBg : colors.gridLine)
                 .attr('stroke-width', 1);
-            setHighlightedSeason(null);
+            rankedSeasonHighlight.set(null);
         });
 };
