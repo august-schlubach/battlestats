@@ -610,18 +610,6 @@ class RankedPlayerCorrelationDistributionSerializer(serializers.Serializer):
         allow_null=True, required=False)
 
 
-class PlayerTierTypeTileSerializer(serializers.Serializer):
-    x_index = serializers.IntegerField(min_value=0)
-    y_index = serializers.IntegerField(min_value=0)
-    count = serializers.IntegerField(min_value=0)
-
-
-class PlayerTierTypeTrendSerializer(serializers.Serializer):
-    x_index = serializers.IntegerField(min_value=0)
-    avg_tier = serializers.FloatField()
-    count = serializers.IntegerField(min_value=0)
-
-
 class PlayerTierTypeCellSerializer(serializers.Serializer):
     ship_type = serializers.CharField()
     ship_tier = serializers.IntegerField()
@@ -635,10 +623,7 @@ class PlayerTierTypeCorrelationSerializer(serializers.Serializer):
     label = serializers.CharField()
     x_label = serializers.CharField()
     y_label = serializers.CharField()
-    tracked_population = serializers.IntegerField()
     x_labels = serializers.ListField(child=serializers.CharField())
     y_values = serializers.ListField(
         child=serializers.IntegerField(min_value=1))
-    tiles = PlayerTierTypeTileSerializer(many=True)
-    trend = PlayerTierTypeTrendSerializer(many=True)
     player_cells = PlayerTierTypeCellSerializer(many=True)

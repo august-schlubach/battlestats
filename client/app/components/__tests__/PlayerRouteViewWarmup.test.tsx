@@ -91,17 +91,8 @@ const profileChartPayload = {
     label: 'Tier vs Ship Type',
     x_label: 'Ship Type',
     y_label: 'Tier',
-    tracked_population: 2,
     x_labels: ['Destroyer', 'Cruiser', 'Battleship', 'Aircraft Carrier', 'Submarine'],
     y_values: [11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
-    tiles: [
-        { x_index: 0, y_index: 1, count: 40 },
-        { x_index: 1, y_index: 3, count: 20 },
-    ],
-    trend: [
-        { x_index: 0, avg_tier: 9.5, count: 40 },
-        { x_index: 1, avg_tier: 8, count: 20 },
-    ],
     player_cells: [
         { ship_type: 'Destroyer', ship_tier: 10, pvp_battles: 25, wins: 15, win_ratio: 0.6 },
         { ship_type: 'Cruiser', ship_tier: 8, pvp_battles: 10, wins: 5, win_ratio: 0.5 },
