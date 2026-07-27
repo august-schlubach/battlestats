@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { drawSeasonTimeline, fractionalYear, type TimelineMark } from '../lib/seasonTimeline';
+import { clanBattleSeasonHighlight } from '../lib/seasonHoverLink';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
@@ -9,6 +10,7 @@ import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
 interface ClanBattleSeasonRow {
+    season_id: number;
     season_label: string;
     battles: number;
     win_rate: number; // percent
@@ -31,7 +33,13 @@ const toMarks = (seasons: ClanBattleSeasonRow[]): TimelineMark[] => seasons
     .filter((season) => (season.battles || 0) > 0)
     .map((season) => {
         const frac = fractionalYear(season.start_date);
-        return frac == null ? null : { label: season.season_label, battles: season.battles, winRate: season.win_rate, frac };
+        return frac == null ? null : {
+            seasonId: season.season_id,
+            label: season.season_label,
+            battles: season.battles,
+            winRate: season.win_rate,
+            frac,
+        };
     })
     .filter((mark): mark is TimelineMark => mark !== null);
 
@@ -111,6 +119,9 @@ const ClanBattleSeasonTimelineSVG: React.FC<ClanBattleSeasonTimelineSVGProps> = 
         window.addEventListener('resize', onResize);
         return () => {
             window.removeEventListener('resize', onResize);
+            // Unmounting mid-hover (tab switch, nav) must not leave the scatter
+            // pulsing a season nothing is pointing at any more.
+            clanBattleSeasonHighlight.set(null);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
     }, [seasons, pending, theme, svgHeight, svgWidth]);

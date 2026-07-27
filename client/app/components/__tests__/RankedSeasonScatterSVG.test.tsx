@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import RankedSeasonScatterSVG from '../RankedSeasonScatterSVG';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
-import { setHighlightedSeason } from '../../lib/rankedSeasonHighlight';
+import { rankedSeasonHighlight } from '../../lib/seasonHoverLink';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -54,12 +54,12 @@ describe('RankedSeasonScatterSVG', () => {
         expect(pointFor(1013)?.getAttribute('stroke-width')).toBe('1.5');
 
         // Hovering S13's box down in the lattice highlights S13's point here.
-        act(() => setHighlightedSeason(1013));
+        act(() => rankedSeasonHighlight.set(1013));
         expect(pointFor(1013)?.getAttribute('stroke-width')).toBe('2');
         expect(pointFor(1014)?.getAttribute('stroke-width')).toBe('1.5');
 
         // Leaving the box restores the resting point.
-        act(() => setHighlightedSeason(null));
+        act(() => rankedSeasonHighlight.set(null));
         expect(pointFor(1013)?.getAttribute('stroke-width')).toBe('1.5');
         expect(Number(pointFor(1013)?.getAttribute('r'))).toBe(5);
     });
@@ -75,9 +75,9 @@ describe('RankedSeasonScatterSVG', () => {
 
         // An unplayed season has a lattice box but no point; highlighting it
         // must be a no-op rather than throwing on an empty selection.
-        expect(() => act(() => setHighlightedSeason(1099))).not.toThrow();
+        expect(() => act(() => rankedSeasonHighlight.set(1099))).not.toThrow();
         expect(region.querySelector('circle[data-season-id="1013"]')?.getAttribute('stroke-width')).toBe('1.5');
-        act(() => setHighlightedSeason(null));
+        act(() => rankedSeasonHighlight.set(null));
     });
 
     it('survives a single season (collapsed domains) without throwing', async () => {

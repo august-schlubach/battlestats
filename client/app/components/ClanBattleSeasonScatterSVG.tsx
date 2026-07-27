@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import wrColor from '../lib/wrColor';
+import { SEASON_POINT_R, clanBattleSeasonHighlight, startSeasonPulse } from '../lib/seasonHoverLink';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
@@ -163,9 +164,11 @@ const drawChart = (
         .data(plot)
         .enter()
         .append('circle')
+        // The join key the season timeline below hovers against.
+        .attr('data-season-id', (season: ClanBattleSeasonPoint) => season.season_id)
         .attr('cx', (season: ClanBattleSeasonPoint) => x(season.battles))
         .attr('cy', (season: ClanBattleSeasonPoint) => y(season.win_rate))
-        .attr('r', 5)
+        .attr('r', SEASON_POINT_R)
         .attr('fill', (season: ClanBattleSeasonPoint) => wrColor(season.win_rate))
         .attr('stroke', colors.barBg)
         .attr('stroke-width', 1.5)
@@ -180,7 +183,7 @@ const drawChart = (
             showDetail(season);
         })
         .on('mouseout', function onOut(this: SVGCircleElement) {
-            d3.select(this).attr('r', 5).attr('stroke', colors.barBg);
+            d3.select(this).attr('r', SEASON_POINT_R).attr('stroke', colors.barBg);
             detail.style('opacity', 0);
         });
 };
@@ -257,14 +260,37 @@ const ClanBattleSeasonScatterSVG: React.FC<ClanBattleSeasonScatterSVGProps> = ({
         };
         redraw();
 
+        // Follow the season timeline's hover: pulse the matching point while the
+        // pointer sits on that season's marker. Subscribing replays the current
+        // value, so a resize redraw mid-hover re-attaches to the fresh circle
+        // instead of leaving the animation on a discarded one.
+        let stopPulse: (() => void) | null = null;
+        const colors = chartColors[theme];
+        const followHighlight = (seasonId: number | null) => {
+            stopPulse?.();
+            stopPulse = null;
+            if (seasonId == null || !containerRef.current) return;
+            stopPulse = startSeasonPulse(containerRef.current, seasonId, colors.barBg, colors.labelText);
+        };
+        let unsubscribe = clanBattleSeasonHighlight.subscribe(followHighlight);
+
         let resizeFrame: number | null = null;
         const onResize = () => {
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
-            resizeFrame = requestAnimationFrame(redraw);
+            resizeFrame = requestAnimationFrame(() => {
+                redraw();
+                // The redraw replaced every circle; re-point the pulse at the
+                // new one by resubscribing (which replays the live highlight).
+                unsubscribe();
+                stopPulse = null;
+                unsubscribe = clanBattleSeasonHighlight.subscribe(followHighlight);
+            });
         };
         window.addEventListener('resize', onResize);
         return () => {
             window.removeEventListener('resize', onResize);
+            unsubscribe();
+            stopPulse?.();
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
     }, [seasons, pending, theme, svgHeight, svgWidth]);

@@ -3,7 +3,7 @@ import { fractionalYear } from '../../lib/seasonTimeline';
 import ClanBattleSeasonTimelineSVG from '../ClanBattleSeasonTimelineSVG';
 import RankedSeasonTimelineSVG from '../RankedSeasonTimelineSVG';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
-import { getHighlightedSeason, setHighlightedSeason } from '../../lib/rankedSeasonHighlight';
+import { clanBattleSeasonHighlight, rankedSeasonHighlight } from '../../lib/seasonHoverLink';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -30,18 +30,45 @@ describe('fractionalYear', () => {
 describe('season timeline components', () => {
     beforeEach(() => {
         mockFetch.mockReset();
-        setHighlightedSeason(null);
+        rankedSeasonHighlight.set(null);
+        clanBattleSeasonHighlight.set(null);
     });
 
     it('draws the clan-battle timeline across the season span (percent WR)', async () => {
         mockFetch.mockReturnValue(resolved([
-            { season_label: 'CB1', battles: 40, win_rate: 55, start_date: '2020-06-01' },
-            { season_label: 'CB2', battles: 120, win_rate: 48, start_date: '2025-02-01' },
+            { season_id: 21, season_label: 'CB1', battles: 40, win_rate: 55, start_date: '2020-06-01' },
+            { season_id: 22, season_label: 'CB2', battles: 120, win_rate: 48, start_date: '2025-02-01' },
         ]));
 
         render(<ClanBattleSeasonTimelineSVG playerId={1} theme="light" />);
         const region = screen.getByRole('img', { name: /clan battle season activity timeline/i });
         await waitFor(() => expect(region.querySelector('svg')).toBeTruthy());
+    });
+
+    it('publishes the hovered clan-battle season so its scatter point can pulse', async () => {
+        mockFetch.mockReturnValue(resolved([
+            { season_id: 21, season_label: 'CB1', battles: 40, win_rate: 55, start_date: '2020-06-01' },
+            { season_id: 22, season_label: 'CB2', battles: 120, win_rate: 48, start_date: '2025-02-01' },
+        ]));
+
+        const { unmount } = render(<ClanBattleSeasonTimelineSVG playerId={31} theme="light" />);
+        const region = screen.getByRole('img', { name: /clan battle season activity timeline/i });
+        await waitFor(() => expect(region.querySelectorAll('circle')).toHaveLength(2));
+        const markers = Array.from(region.querySelectorAll('circle'));
+
+        expect(clanBattleSeasonHighlight.get()).toBeNull();
+        fireEvent.mouseOver(markers[0]);
+        expect(clanBattleSeasonHighlight.get()).toBe(21);
+        // The ranked channel is untouched — the two tabs must not cross-talk.
+        expect(rankedSeasonHighlight.get()).toBeNull();
+
+        fireEvent.mouseOut(markers[0]);
+        expect(clanBattleSeasonHighlight.get()).toBeNull();
+
+        fireEvent.mouseOver(markers[1]);
+        expect(clanBattleSeasonHighlight.get()).toBe(22);
+        unmount();
+        expect(clanBattleSeasonHighlight.get()).toBeNull();
     });
 
     // The ranked timeline is a LATTICE: it joins the player's played seasons
@@ -113,24 +140,24 @@ describe('season timeline components', () => {
         await waitFor(() => expect(region.querySelectorAll('rect')).toHaveLength(4));
         const boxes = Array.from(region.querySelectorAll('rect'));
 
-        expect(getHighlightedSeason()).toBeNull();
+        expect(rankedSeasonHighlight.get()).toBeNull();
 
         // A played box publishes its season id...
         fireEvent.mouseOver(boxes[1]);
-        expect(getHighlightedSeason()).toBe(1002);
+        expect(rankedSeasonHighlight.get()).toBe(1002);
         fireEvent.mouseOut(boxes[1]);
-        expect(getHighlightedSeason()).toBeNull();
+        expect(rankedSeasonHighlight.get()).toBeNull();
 
         // ...an UNPLAYED one publishes nothing: there is no point to pulse.
         fireEvent.mouseOver(boxes[0]);
-        expect(getHighlightedSeason()).toBeNull();
+        expect(rankedSeasonHighlight.get()).toBeNull();
         fireEvent.mouseOut(boxes[0]);
 
         // Unmounting mid-hover must not strand a highlight on the scatter.
         fireEvent.mouseOver(boxes[1]);
-        expect(getHighlightedSeason()).toBe(1002);
+        expect(rankedSeasonHighlight.get()).toBe(1002);
         unmount();
-        expect(getHighlightedSeason()).toBeNull();
+        expect(rankedSeasonHighlight.get()).toBeNull();
     });
 
     it('keeps a played season that the catalog has not published yet', async () => {
@@ -175,8 +202,8 @@ describe('season timeline components', () => {
 
     it('scales markers by battles relative to the player record (min→1×, max→4×)', async () => {
         mockFetch.mockReturnValue(resolved([
-            { season_label: 'CB1', battles: 10, win_rate: 50, start_date: '2020-01-01' },
-            { season_label: 'CB2', battles: 100, win_rate: 55, start_date: '2022-01-01' },
+            { season_id: 21, season_label: 'CB1', battles: 10, win_rate: 50, start_date: '2020-01-01' },
+            { season_id: 22, season_label: 'CB2', battles: 100, win_rate: 55, start_date: '2022-01-01' },
         ]));
 
         render(<ClanBattleSeasonTimelineSVG playerId={9} theme="light" />);
@@ -191,7 +218,7 @@ describe('season timeline components', () => {
 
     it('renders a placeholder when no season is dated/played', async () => {
         mockFetch.mockReturnValue(resolved([
-            { season_label: 'CB1', battles: 0, win_rate: 0, start_date: null },
+            { season_id: 21, season_label: 'CB1', battles: 0, win_rate: 0, start_date: null },
         ]));
 
         render(<ClanBattleSeasonTimelineSVG playerId={3} theme="light" />);

@@ -1,11 +1,15 @@
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, type ChartTheme } from './chartTheme';
+import { clanBattleSeasonHighlight } from './seasonHoverLink';
 import wrColor from './wrColor';
 
 // One dated season on the activity timeline. winRate is a PERCENT (0..100);
 // frac is the season's fractional year (2020-07-01 → ~2020.5) so same-year
 // seasons resolve to distinct x positions.
 export interface TimelineMark {
+    // WG's season id — the join key the clan-battle scatter above uses to pulse
+    // the same season's point while this marker is hovered.
+    seasonId: number;
     label: string;
     battles: number;
     winRate: number;
@@ -116,8 +120,11 @@ export const drawSeasonTimeline = (
     dots
         .on('mouseover', function onOver(this: SVGCircleElement, _event: MouseEvent, mark: TimelineMark) {
             d3.select(this).attr('r', 5 * circleSizeScale(mark.battles) * 1.4).attr('stroke', colors.labelText);
+            // Pulse this season's point in the scatter above (see seasonHoverLink).
+            clanBattleSeasonHighlight.set(mark.seasonId);
         })
         .on('mouseout', function onOut(this: SVGCircleElement, _event: MouseEvent, mark: TimelineMark) {
             d3.select(this).attr('r', 5 * circleSizeScale(mark.battles)).attr('stroke', colors.barBg);
+            clanBattleSeasonHighlight.set(null);
         });
 };

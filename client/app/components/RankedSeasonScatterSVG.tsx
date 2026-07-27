@@ -3,7 +3,7 @@ import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
 import { LEAGUE_AWARD_MIN_ORDER, leagueAwardSymbol, leagueOrderFrom } from '../lib/rankedLeagueGlyph';
 import wrColor from '../lib/wrColor';
-import { setHighlightedSeason, subscribeHighlightedSeason } from '../lib/rankedSeasonHighlight';
+import { SEASON_POINT_R, rankedSeasonHighlight, startSeasonPulse } from '../lib/seasonHoverLink';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
 import { degradationMonitor } from '../lib/degradationMonitor';
@@ -66,46 +66,6 @@ const winRateDomain = (wrValues: number[]): [number, number] => {
         if (hi - lo < 15) lo = Math.max(0, hi - 15);
     }
     return [lo, hi];
-};
-
-// Base point radius, shared by drawChart and the lattice-hover pulse below.
-const SCATTER_POINT_R = 5;
-const PULSE_MAX_R = SCATTER_POINT_R * 2.1;
-const PULSE_HALF_CYCLE_MS = 420;
-
-// Pulse the point for `seasonId` until told otherwise. Driven by hover on the
-// season lattice below the scatter, so the two views read as one record: the
-// box under the pointer and its point up here move together.
-//
-// Animates the EXISTING svg rather than re-rendering: a React redraw would
-// rebuild the circle every cycle and the animation would never advance. The
-// returned stop() cancels the in-flight transition and restores the resting
-// radius, so a fast pointer sweep across the row can't leave a point inflated.
-const startSeasonPulse = (
-    container: HTMLDivElement,
-    seasonId: number,
-    restingStroke: string,
-    highlightStroke: string,
-): (() => void) => {
-    const point = d3.select(container).select(`circle[data-season-id="${seasonId}"]`);
-    if (point.empty()) return () => {};
-
-    let stopped = false;
-    point.raise().attr('stroke', highlightStroke).attr('stroke-width', 2);
-
-    const grow = () => {
-        if (stopped) return;
-        point.transition().duration(PULSE_HALF_CYCLE_MS).attr('r', PULSE_MAX_R)
-            .transition().duration(PULSE_HALF_CYCLE_MS).attr('r', SCATTER_POINT_R)
-            .on('end', grow);
-    };
-    grow();
-
-    return () => {
-        stopped = true;
-        point.interrupt().attr('r', SCATTER_POINT_R)
-            .attr('stroke', restingStroke).attr('stroke-width', 1.5);
-    };
 };
 
 const drawChart = (
@@ -253,7 +213,7 @@ const drawChart = (
 
     // One circle per season, colored by win rate. r5 matches the clan-battle
     // scatter's dots (hover → 7 on both).
-    const circleR = SCATTER_POINT_R;
+    const circleR = SEASON_POINT_R;
     const circles = svg.append('g').selectAll('circle')
         .data(plot).enter().append('circle')
         // The join key the season lattice below hovers against.
@@ -387,7 +347,7 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
             if (seasonId == null || !containerRef.current) return;
             stopPulse = startSeasonPulse(containerRef.current, seasonId, colors.barBg, colors.labelText);
         };
-        let unsubscribe = subscribeHighlightedSeason(followHighlight);
+        let unsubscribe = rankedSeasonHighlight.subscribe(followHighlight);
 
         let resizeFrame: number | null = null;
         const onResize = () => {
@@ -398,7 +358,7 @@ const RankedSeasonScatterSVG: React.FC<RankedSeasonScatterSVGProps> = ({
                 // new one by resubscribing (which replays the live highlight).
                 unsubscribe();
                 stopPulse = null;
-                unsubscribe = subscribeHighlightedSeason(followHighlight);
+                unsubscribe = rankedSeasonHighlight.subscribe(followHighlight);
             });
         };
         window.addEventListener('resize', onResize);
