@@ -264,6 +264,41 @@ describe('PlayerDetailInsightsTabs', () => {
         expect(mockTrackEvent).toHaveBeenCalledWith('player-insights-ranked-view', expect.objectContaining({ view: 'activity' }));
     });
 
+    it('holds the ranked sub-view toggle at the same height across both views', async () => {
+        // The activity sub-view's toggle rides in the battle-history card's own
+        // header (flush at the panel top); the history sub-view's rides on the
+        // shared pt-2.5 header row. Without the matching inset on the panel the
+        // chip jumped 10px on every switch.
+        render(
+            <PlayerDetailInsightsTabs
+                playerId={131}
+                playerName="TestCaptain"
+                pvpRatio={55}
+                pvpSurvivalRate={40}
+                pvpBattles={800}
+                hasKnownRankedGames
+                hasClan
+                hasClanBattleData
+                efficiencyRows={[]}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Ranked' }));
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+
+        const panel = document.getElementById('player-insights-panel-ranked');
+        // Activity sub-view: the panel supplies the shared tab-top inset.
+        expect(panel).toHaveClass('pt-2.5');
+
+        // History sub-view: the inset comes from its own header row instead, so
+        // the panel must NOT double it.
+        fireEvent.click(screen.getByRole('button', { name: 'History' }));
+        expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
+        expect(document.getElementById('player-insights-panel-ranked')).not.toHaveClass('pt-2.5');
+    });
+
     it('falls back to the ranked history sub-view when the player has no ranked activity', async () => {
         mockFetchSharedJson.mockImplementation((url) => {
             if (url.includes('/api/fetch/player_correlation/tier_type/')) {

@@ -70,6 +70,11 @@ const ACTIVITY_MODE_OPTIONS: Array<{ value: ActivityMode; label: string }> = [
     { value: 'window', label: 'Window Only' },
 ];
 
+// The Clear control. Deliberately NOT `filterButtonClass`: it is an action, not
+// a selectable filter value, so it carries no pressed state and reads quieter
+// than the pills it sits beside.
+const CLEAR_FILTERS_BUTTON_CLASS = 'border border-transparent px-2 py-1 text-xs font-medium text-[var(--text-secondary)] underline decoration-dotted underline-offset-2 transition-colors hover:text-[var(--accent-dark)]';
+
 const normalizeRandomsRows = (data: unknown): RandomsRow[] => {
     if (Array.isArray(data)) {
         return data as RandomsRow[];
@@ -775,6 +780,22 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
         setSelectedTiers([...availableTiers]);
     };
 
+    // One control that returns EVERY filter on this tab to the state the tab
+    // opens in: all types, the default tier floor, both cutoffs at zero, and
+    // the activity mode back to All. Clearing also drops a drill-down's claim,
+    // so an off-floor tier it pinned (say T2) releases its pill instead of
+    // surviving the reset.
+    const clearFilters = () => {
+        activeFilterRef.current = null;
+        const { types, tiers } = deriveRandomsSelections(allShips);
+        setSelectedTypes(types);
+        setSelectedTiers(tiers);
+        setMinWR(0);
+        setMinBattles(0);
+        setActivityMode('all');
+        trackEvent('randoms-filter', { realm, control: 'clear' });
+    };
+
     const getFreshnessStatus = (timestamp: string | null): 'fresh' | 'stale' | 'unknown' => {
         if (!timestamp) {
             return 'unknown';
@@ -846,6 +867,17 @@ const RandomsSVG: React.FC<RandomsSVGProps> = ({
                             {shipType}
                         </button>
                     ))}
+                    {/* Resets every filter on the tab, not just this row — so it
+                        sits apart from the type pills rather than reading as one
+                        more type. */}
+                    <button
+                        key="clear-filters"
+                        type="button"
+                        className={`${CLEAR_FILTERS_BUTTON_CLASS} ml-3`}
+                        onClick={clearFilters}
+                    >
+                        Clear
+                    </button>
                 </div>
                 <div className="flex flex-wrap justify-start gap-1">
                     <button

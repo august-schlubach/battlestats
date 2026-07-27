@@ -655,7 +655,15 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                 // The dense battle-history table takes the full panel width — that's
                 // the Activity tab and the Ranked tab's activity sub-view (a ranked
                 // copy of it).
-                className={activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}
+                //
+                // The ranked activity sub-view additionally takes the shared
+                // pt-2.5 tab-top inset. Its sub-view toggle rides in the card's
+                // own header, which starts flush at the panel top, while the
+                // history sub-view's toggle sits on the shared header row — so
+                // without this the chip jumped 10px every time the user switched
+                // views. Padding the panel moves the whole card, keeping the chip
+                // inline with the caption beside it.
+                className={`${activeTab === 'activity' || (activeTab === 'ranked' && rankedView === 'activity') ? 'flex min-h-0 min-w-0 flex-col' : 'min-w-0'}${activeTab === 'ranked' && rankedView === 'activity' ? ' pt-2.5' : ''}`}
                 data-perf-section={panelSectionIdByTab[activeTab]}
                 style={{
                     // Panels size to their content instead of a shared locked
