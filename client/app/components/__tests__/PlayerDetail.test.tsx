@@ -585,26 +585,26 @@ describe('PlayerDetail efficiency-rank icon', () => {
         await waitFor(() => {
             expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'true');
         });
-        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
         expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
 
-        // Performance by Tier lives behind the Profile tab.
+        // The ship-diet figure lives behind the Profile tab.
         fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
         await waitFor(() => {
-            expect(screen.getByText('Performance by Tier')).toBeInTheDocument();
+            expect(screen.getByText(/Random Battles by Tier/)).toBeInTheDocument();
         });
 
         fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
 
         expect(screen.getByText('Efficiency badges')).toBeInTheDocument();
         expect(screen.queryByText('Clan Battles vs Win Rate')).not.toBeInTheDocument();
-        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
 
         expect(screen.getByText('Clan Battles vs Win Rate')).toBeInTheDocument();
-        expect(screen.queryByText('Performance by Tier')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
         expect(screen.queryByText('Efficiency badges')).not.toBeInTheDocument();
     });
 
@@ -669,7 +669,7 @@ describe('PlayerDetail efficiency-rank icon', () => {
         });
         expect(screen.getByRole('tab', { name: 'Activity' })).toBeDisabled();
         // Profile and Ranked lanes stay inactive until selected.
-        expect(screen.queryByText('Tier vs Type Profile')).not.toBeInTheDocument();
+        expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Games vs Win Rate')).not.toBeInTheDocument();
     });
 

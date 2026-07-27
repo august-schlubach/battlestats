@@ -1,5 +1,7 @@
 # Runbook: Mobile Player Detail Chart Scaling
 
+> **Partly superseded (2026-07-27, v4.5.3).** The Profile-tab charts this runbook tunes — `TierTypeHeatmapSVG`, `TierSVG`, `TypeSVG` (and their shared `shipBarPlot`) — were **deleted** and replaced by a single figure, `TierTypeDietSVG` ("Random Battles by Tier"), which carries its own compact branch below 480px (the row margin drops its bar and keeps the numbers). Changes 1, 2 and 6 below therefore describe components that no longer exist; the measurement method and the remaining chart rows are still valid. See CLAUDE.md → Key frontend patterns.
+
 **Created**: 2026-03-28
 **Updated**: 2026-03-29
 **Status**: Complete — all 7 changes implemented, tested, deployed

@@ -1,5 +1,4 @@
 import {
-    barChartDataRightX,
     drawSvgMessage,
     resolveChartWidth,
     resolveContainerChartWidth,
@@ -72,22 +71,5 @@ describe('resolveContainerChartWidth', () => {
 
     it('enforces the minimum width floor', () => {
         expect(resolveContainerChartWidth(100, 600)).toBe(280);
-    });
-});
-
-describe('barChartDataRightX', () => {
-    it('matches shipBarPlot data edge at full-width panel sizes', () => {
-        // 68 + (svgWidth - 68 - 46) - 148 — bars are scaled to end a fixed 148px
-        // label gutter short of the plot edge, so the longest bar ends here.
-        expect(barChartDataRightX(788)).toBeCloseTo(68 + (788 - 68 - 46) - 148, 5);
-        expect(barChartDataRightX(586)).toBeCloseTo(68 + (586 - 68 - 46) - 148, 5);
-    });
-
-    it('uses shipBarPlot compact margins + gutter below its 420px threshold', () => {
-        expect(barChartDataRightX(380)).toBeCloseTo(62 + (380 - 62 - 14) - 100, 5);
-    });
-
-    it('uses full margins between 420 and 480 (population compact, bars not)', () => {
-        expect(barChartDataRightX(440)).toBeCloseTo(68 + (440 - 68 - 46) - 148, 5);
     });
 });
