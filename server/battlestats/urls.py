@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, player_name_suggestions, clan_name_suggestions, player_summary, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, sitemap_entities, streamer_submission_view, battle_history, realm_top_ships, realm_ships_by_tier_type, ship_leaderboard, ship_combat_stats
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, ranked_season_catalog, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, player_name_suggestions, clan_name_suggestions, player_summary, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, sitemap_entities, streamer_submission_view, battle_history, realm_top_ships, realm_ships_by_tier_type, ship_leaderboard, ship_combat_stats
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -52,6 +52,12 @@ urlpatterns = [
          ranked_data, name='fetch_ranked_data'),
     path('api/fetch/ranked_data/<str:player_id>',
          ranked_data, name='fetch_ranked_data_no_slash'),
+    # Player-independent season catalog (every ranked season WG has run) —
+    # the lattice the ranked-tab timeline draws played seasons onto.
+    path('api/ranked_seasons/',
+         ranked_season_catalog, name='ranked_season_catalog'),
+    path('api/ranked_seasons',
+         ranked_season_catalog, name='ranked_season_catalog_no_slash'),
     path('api/fetch/player_summary/<str:player_id>/',
          player_summary, name='fetch_player_summary'),
     path('api/fetch/player_summary/<str:player_id>',

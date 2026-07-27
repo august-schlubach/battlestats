@@ -1,6 +1,6 @@
 import os
 from unittest.mock import patch
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from kombu.exceptions import OperationalError as KombuOperationalError
 
 from django.conf import settings
@@ -3195,6 +3195,51 @@ class ApiThrottleTests(TestCase):
         self.assertNotIn("X-Clan-Battle-Seasons-Pending", response)
         mock_remote_fetch.assert_not_called()
         mock_queue_refresh.assert_not_called()
+
+    def test_ranked_season_catalog_lists_every_season_oldest_first(self):
+        # The catalog is the lattice the ranked timeline draws onto: EVERY
+        # season, including ones no player in the DB has played, oldest first.
+        RankedSeason.objects.create(
+            season_id=1003, name="The Third Season", label="S3",
+            start_date=date(2021, 5, 19), end_date=date(2021, 8, 5))
+        RankedSeason.objects.create(
+            season_id=1001, name="The First Season", label="S1",
+            start_date=date(2020, 12, 21), end_date=date(2021, 2, 2))
+        # A live season: no end date yet.
+        RankedSeason.objects.create(
+            season_id=1004, name="Season 4", label="S4",
+            start_date=date(2021, 8, 18), end_date=None)
+
+        response = self.client.get("/api/ranked_seasons/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([row["season_id"] for row in payload], [1001, 1003, 1004])
+        self.assertEqual(payload[0]["season_label"], "S1")
+        self.assertEqual(payload[0]["start_date"], "2020-12-21")
+        self.assertIsNone(payload[2]["end_date"])
+
+    @patch("warships.data._get_ranked_seasons_metadata")
+    @patch("warships.api.players._make_api_request")
+    def test_ranked_season_catalog_never_calls_the_wg_api(self, mock_api_request, mock_metadata):
+        # No request-thread endpoint may block on WG. The catalog reads the
+        # durable table directly, so neither the HTTP client nor the metadata
+        # resolver (whose chain can reach seasons/info/) may be touched.
+        RankedSeason.objects.create(
+            season_id=1001, name="The First Season", label="S1",
+            start_date=date(2020, 12, 21), end_date=date(2021, 2, 2))
+
+        response = self.client.get("/api/ranked_seasons/")
+
+        self.assertEqual(response.status_code, 200)
+        mock_api_request.assert_not_called()
+        mock_metadata.assert_not_called()
+
+    def test_ranked_season_catalog_is_empty_when_no_seasons_are_known(self):
+        response = self.client.get("/api/ranked_seasons/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), [])
 
     @patch("warships.views.fetch_ranked_data")
     def test_ranked_data_returns_serialized_rows_and_refresh_header(self, mock_fetch_ranked_data):

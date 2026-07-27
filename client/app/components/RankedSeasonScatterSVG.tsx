@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { chartColors, drawSvgMessage, resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
-import { leagueOrderFrom } from '../lib/rankedLeagueGlyph';
+import { LEAGUE_AWARD_MIN_ORDER, leagueAwardSymbol, leagueOrderFrom } from '../lib/rankedLeagueGlyph';
 import wrColor from '../lib/wrColor';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
@@ -88,11 +88,12 @@ const drawChart = (
     // right also matches so the plots share a right edge. compact uses the same
     // svgWidth < 480 threshold the heatmap uses.
     const compact = svgWidth < 480;
-    // A touch more bottom room + tickPadding so the medal icons (Silver/Gold,
-    // just below the x-axis) sit above the axis labels.
+    // Bottom room is sized for the award row: the Silver/Gold+ marks get their
+    // own band under the x-axis, clear of both the axis line and the tick
+    // labels, with the axis title below that.
     const margin = compact
-        ? { top: 16, right: 8, bottom: 48, left: 38 }
-        : { top: 20, right: 18, bottom: 54, left: 52 };
+        ? { top: 16, right: 8, bottom: 60, left: 38 }
+        : { top: 20, right: 18, bottom: 70, left: 52 };
     const axisFontSize = compact ? '9px' : '10px';
     const width = svgWidth - margin.left - margin.right;
     const height = svgHeight - margin.top - margin.bottom;
@@ -131,7 +132,7 @@ const drawChart = (
     svg.append('g')
         .style('color', colors.labelText)
         .attr('transform', `translate(0, ${height})`)
-        .call(d3.axisBottom(x).ticks(compact ? 3 : 5, '~s').tickSizeOuter(0).tickPadding(compact ? 12 : 14))
+        .call(d3.axisBottom(x).ticks(compact ? 3 : 5, '~s').tickSizeOuter(0).tickPadding(compact ? 26 : 30))
         .selectAll('text')
         .style('font-size', axisFontSize);
     svg.append('g')
@@ -142,7 +143,7 @@ const drawChart = (
 
     // Axis titles.
     svg.append('text')
-        .attr('x', width / 2).attr('y', height + (compact ? 40 : 44))
+        .attr('x', width / 2).attr('y', height + (compact ? 52 : 60))
         .attr('text-anchor', 'middle')
         .style('font-size', axisFontSize)
         .style('fill', colors.labelMuted)
@@ -192,17 +193,21 @@ const drawChart = (
 
     const cx = (season: RankedSeasonPoint) => x(season.total_battles);
 
-    // Silver/Gold+ seasons get a small metal icon just below the x-axis at the
-    // season's x: Silver = a sideways square, Gold+ = a star. No borders.
-    const medalSeasons = plot.filter((season) => leagueOrder(season) >= 2);
-    const iconY = height + (compact ? 8 : 9);
+    // Silver/Gold+ seasons get a small metal award just below the x-axis at the
+    // season's x. Shape/size/metal come from the shared league-award glyph, so
+    // the same season wears the same mark on the season lattice below.
+    const medalSeasons = plot.filter((season) => leagueOrder(season) >= LEAGUE_AWARD_MIN_ORDER);
+    const iconY = height + (compact ? 13 : 15);
     const symbolGen = d3.symbol();
     svg.append('g').selectAll('path')
         .data(medalSeasons).enter().append('path')
         .attr('class', 'medal-icon')
-        .attr('transform', (season: RankedSeasonPoint) => `translate(${cx(season)}, ${iconY}) rotate(${leagueOrder(season) >= 3 ? 0 : 45})`)
-        .attr('d', (season: RankedSeasonPoint) => symbolGen.type(leagueOrder(season) >= 3 ? d3.symbolStar : d3.symbolSquare).size(leagueOrder(season) >= 3 ? 52 : 42)())
-        .attr('fill', (season: RankedSeasonPoint) => (leagueOrder(season) >= 3 ? colors.badgeI : colors.badgeII))
+        .attr('transform', (season: RankedSeasonPoint) => `translate(${cx(season)}, ${iconY}) rotate(${leagueAwardSymbol(leagueOrder(season), colors).rotate})`)
+        .attr('d', (season: RankedSeasonPoint) => {
+            const award = leagueAwardSymbol(leagueOrder(season), colors);
+            return symbolGen.type(award.type).size(award.size)();
+        })
+        .attr('fill', (season: RankedSeasonPoint) => leagueAwardSymbol(leagueOrder(season), colors).color)
         .style('pointer-events', 'none');
 
     // One circle per season, colored by win rate. r5 matches the clan-battle

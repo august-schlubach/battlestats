@@ -19,6 +19,21 @@ export const leagueSymbol = (order: number) => {
     return { type: d3.symbolCircle, size: 85, rotate: 0 };
 };
 
+// The award mark for a season's highest league: Silver = a square on point,
+// Gold+ = a star, filled with the metal token and drawn without a border.
+// Bronze and unknown earn no award. Shared by the ranked scatter (a row under
+// its x-axis) and the season lattice (above each played box), so one league
+// reads identically wherever a season is shown.
+export const LEAGUE_AWARD_MIN_ORDER = 2;
+
+export const leagueAwardSymbol = (order: number, colors: ChartColors) => (
+    order >= 3
+        ? { type: d3.symbolStar, size: 52, rotate: 0, color: colors.badgeI }
+        : { type: d3.symbolSquare, size: 42, rotate: 45, color: colors.badgeII }
+);
+
+export const leagueAwardLabel = (order: number): string => (order >= 3 ? 'Gold or above' : 'Silver');
+
 // Border encodes league metal: 1px silver (Silver squares), 1px gold (Gold+
 // stars); Bronze/unknown keeps the neutral card-bg contrast ring.
 export const leagueStroke = (order: number, colors: ChartColors): { color: string; width: number } => {

@@ -392,6 +392,20 @@ class RankedDataSerializer(serializers.Serializer):
     sprints = RankedSprintSerializer(many=True)
 
 
+class RankedSeasonCatalogSerializer(serializers.Serializer):
+    """One WG ranked season as a slot in the season catalog.
+
+    Player-independent: the catalog is every season that has ever run, which
+    the ranked-tab timeline draws as a fixed lattice (played seasons lit, the
+    rest dark). `end_date` is null for a season still in progress.
+    """
+    season_id = serializers.IntegerField()
+    season_name = serializers.CharField(allow_blank=True)
+    season_label = serializers.CharField(allow_blank=True)
+    start_date = serializers.CharField(allow_null=True)
+    end_date = serializers.CharField(allow_null=True)
+
+
 class ClanDataSerializer(serializers.Serializer):
     player_name = serializers.CharField()
     pvp_battles = serializers.IntegerField()

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { resolveContainerChartWidth, type ChartTheme } from '../lib/chartTheme';
-import { drawSeasonTimeline, fractionalYear, type TimelineMark } from '../lib/seasonTimeline';
+import { drawSeasonLattice, type LatticeSlot } from '../lib/seasonLattice';
 import { leagueOrderFrom } from '../lib/rankedLeagueGlyph';
 import { PLAYER_ROUTE_PANEL_FETCH_TTL_MS } from '../lib/playerRouteFetch';
 import { fetchSharedJson, isAbortError } from '../lib/sharedJsonFetch';
@@ -10,12 +10,23 @@ import { useRealm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 
 interface RankedSeasonRow {
+    season_id: number;
     season_label: string;
     total_battles: number;
     win_rate: number; // 0..1 fraction
     start_date?: string | null;
     highest_league?: number;
     highest_league_name?: string;
+}
+
+// /api/ranked_seasons/ — every ranked season WG has run, oldest first,
+// player-independent. This is the lattice the player's record is drawn onto.
+interface RankedSeasonCatalogRow {
+    season_id: number;
+    season_label: string;
+    season_name: string;
+    start_date: string | null;
+    end_date: string | null;
 }
 
 interface RankedSeasonTimelineSVGProps {
@@ -26,6 +37,9 @@ interface RankedSeasonTimelineSVGProps {
     theme?: ChartTheme;
 }
 
+// The catalog only moves when WG starts a season; an hour of client-side reuse
+// costs nothing and keeps tab switches free.
+const RANKED_CATALOG_TTL_MS = 60 * 60 * 1000;
 const RANKED_FETCH_RETRY_DELAY_MS = 350;
 const RANKED_PENDING_RETRY_DELAY_MS = 1500;
 const RANKED_PENDING_RETRY_LIMIT = 12;
@@ -34,21 +48,72 @@ const delay = (timeoutMs: number): Promise<void> => new Promise((resolve) => {
     window.setTimeout(resolve, timeoutMs);
 });
 
-// Played, dated seasons → timeline marks. Ranked win_rate is a 0..1 fraction,
-// so scale to percent for the shared timeline.
-const toMarks = (seasons: RankedSeasonRow[]): TimelineMark[] => seasons
-    .filter((season) => (season.total_battles || 0) > 0)
-    .map((season): TimelineMark | null => {
-        const frac = fractionalYear(season.start_date);
-        return frac == null ? null : {
-            label: season.season_label,
-            battles: season.total_battles,
-            winRate: season.win_rate * 100,
-            frac,
-            leagueOrder: leagueOrderFrom(season.highest_league_name, season.highest_league),
-        };
-    })
-    .filter((mark): mark is TimelineMark => mark !== null);
+const seasonYear = (startDate?: string | null): number | null => {
+    const match = /(\d{4})/.exec(startDate ?? '');
+    return match ? Number(match[1]) : null;
+};
+
+// Catalog × player record → one slot per season that exists. A season the
+// player logged battles in is lit on the WR scale (ranked win_rate is a 0..1
+// fraction, so scale to percent); every other season stays an empty box.
+//
+// The catalog is authoritative for which slots exist and their order. A played
+// season missing from the catalog would be invisible, so those are appended in
+// season-id order — the catalog lags only for a season WG has not published.
+const toSlots = (
+    catalog: RankedSeasonCatalogRow[],
+    played: RankedSeasonRow[],
+): LatticeSlot[] => {
+    const playedById = new Map<number, RankedSeasonRow>();
+    played.forEach((season) => {
+        if ((season.total_battles || 0) > 0) playedById.set(season.season_id, season);
+    });
+
+    // A catalog row's missing end_date means "still running"; an orphan's means
+    // "we have no catalog row at all", which is NOT the same claim. Deciding
+    // in-progress here — rather than from `end_date` downstream — keeps a failed
+    // catalog request (every season becomes an orphan) from labelling the whole
+    // record in progress.
+    interface SeasonSlotSource {
+        season_id: number;
+        season_label: string;
+        start_date: string | null;
+        inProgress: boolean;
+    }
+
+    const catalogIds = new Set(catalog.map((season) => season.season_id));
+    const sources: SeasonSlotSource[] = [
+        ...catalog.map((season) => ({
+            season_id: season.season_id,
+            season_label: season.season_label,
+            start_date: season.start_date,
+            inProgress: season.end_date == null,
+        })),
+        ...played
+            .filter((season) => playedById.has(season.season_id) && !catalogIds.has(season.season_id))
+            .map((season) => ({
+                season_id: season.season_id,
+                season_label: season.season_label,
+                start_date: season.start_date ?? null,
+                inProgress: false,
+            })),
+    ];
+
+    return sources
+        .sort((left, right) => left.season_id - right.season_id)
+        .map((season): LatticeSlot => {
+            const record = playedById.get(season.season_id);
+            return {
+                label: season.season_label || `S${season.season_id - 1000}`,
+                year: seasonYear(season.start_date),
+                played: record != null,
+                battles: record?.total_battles ?? 0,
+                winRate: (record?.win_rate ?? 0) * 100,
+                leagueOrder: record ? leagueOrderFrom(record.highest_league_name, record.highest_league) : 0,
+                inProgress: season.inProgress,
+            };
+        });
+};
 
 const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
     playerId,
@@ -61,8 +126,36 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
     const { realm } = useRealm();
     const requestSignal = usePlayerRequestSignal();
     const [seasons, setSeasons] = useState<RankedSeasonRow[] | null>(null);
+    const [catalog, setCatalog] = useState<RankedSeasonCatalogRow[] | null>(null);
     // True while the endpoint is still serving []+pending (cold cache).
     const [pending, setPending] = useState(true);
+
+    // The season catalog is player- and realm-independent and changes only when
+    // WG starts a season, so it is fetched once per mount under a shared cache
+    // key — every player page reuses the same copy.
+    useEffect(() => {
+        if (isLoading) return undefined;
+        let isMounted = true;
+
+        (async () => {
+            try {
+                const payload = await fetchSharedJson<RankedSeasonCatalogRow[]>('/api/ranked_seasons/', {
+                    label: 'Ranked season catalog',
+                    ttlMs: RANKED_CATALOG_TTL_MS,
+                    signal: requestSignal,
+                    cacheKey: 'ranked-season-catalog',
+                });
+                if (isMounted) setCatalog(payload.data);
+            } catch (err) {
+                if (isAbortError(err) || !isMounted) return;
+                // No catalog → fall back to the player's own played seasons as
+                // the lattice, rather than drawing nothing.
+                setCatalog([]);
+            }
+        })();
+
+        return () => { isMounted = false; };
+    }, [isLoading, requestSignal]);
 
     useEffect(() => {
         if (isLoading) return undefined;
@@ -129,11 +222,13 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
         const resolveWidth = () => resolveContainerChartWidth(containerRef.current?.clientWidth, svgWidth);
         const redraw = () => {
             if (!containerRef.current) return;
-            if (seasons === null || (seasons.length === 0 && pending)) {
-                drawSeasonTimeline(containerRef.current, [], resolveWidth(), svgHeight, theme, 'Loading ranked seasons…', true);
+            // Hold the placeholder until BOTH the lattice and the record are in
+            // — drawing the catalog first would flash a fully unplayed board.
+            if (seasons === null || catalog === null || (seasons.length === 0 && pending)) {
+                drawSeasonLattice(containerRef.current, [], resolveWidth(), svgHeight, theme, 'Loading ranked seasons…');
                 return;
             }
-            drawSeasonTimeline(containerRef.current, toMarks(seasons), resolveWidth(), svgHeight, theme, 'No dated ranked seasons to plot yet.', true);
+            drawSeasonLattice(containerRef.current, toSlots(catalog, seasons), resolveWidth(), svgHeight, theme, 'No ranked seasons to plot yet.');
         };
         redraw();
 
@@ -147,7 +242,7 @@ const RankedSeasonTimelineSVG: React.FC<RankedSeasonTimelineSVGProps> = ({
             window.removeEventListener('resize', onResize);
             if (resizeFrame != null) cancelAnimationFrame(resizeFrame);
         };
-    }, [seasons, pending, theme, svgHeight, svgWidth]);
+    }, [seasons, catalog, pending, theme, svgHeight, svgWidth]);
 
     return (
         <div

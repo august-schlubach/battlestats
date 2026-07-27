@@ -40,19 +40,103 @@ describe('season timeline components', () => {
         await waitFor(() => expect(region.querySelector('svg')).toBeTruthy());
     });
 
-    it('draws the ranked timeline with league glyphs (fractional WR scaled to percent)', async () => {
-        // Mixed leagues exercise the glyph branch (star/square/circle) + the
-        // league-less fallback, without throwing.
-        mockFetch.mockReturnValue(resolved([
-            { season_label: 'S14', total_battles: 300, win_rate: 0.57, start_date: '2024-09-15', highest_league_name: 'Gold' },
-            { season_label: 'S13', total_battles: 120, win_rate: 0.51, start_date: '2024-03-01', highest_league_name: 'Silver' },
-            { season_label: 'S12', total_battles: 80, win_rate: 0.48, start_date: '2023-06-01', highest_league_name: 'Bronze' },
-            { season_label: 'S11', total_battles: 40, win_rate: 0.5, start_date: '2022-01-01' },
-        ]));
+    // The ranked timeline is a LATTICE: it joins the player's played seasons
+    // onto the full season catalog, so it issues two requests.
+    const mockRankedFetches = (catalog: unknown[], played: unknown[]) => {
+        mockFetch.mockImplementation((url: string) => (
+            url.includes('/api/ranked_seasons') ? resolved(catalog) : resolved(played)
+        ));
+    };
+
+    const CATALOG = [
+        { season_id: 1001, season_label: 'S1', season_name: 'Pilot Season', start_date: '2020-12-21', end_date: '2021-02-02' },
+        { season_id: 1002, season_label: 'S2', season_name: 'The Second Season', start_date: '2021-02-17', end_date: '2021-05-14' },
+        { season_id: 1003, season_label: 'S3', season_name: 'The Third Season', start_date: '2021-05-19', end_date: '2021-08-05' },
+        { season_id: 1004, season_label: 'S4', season_name: 'The Fourth Season', start_date: '2021-08-18', end_date: null },
+    ];
+
+    it('draws one box per catalog season, lit only where the player played', async () => {
+        mockRankedFetches(CATALOG, [
+            { season_id: 1002, season_label: 'S2', total_battles: 120, win_rate: 0.51, start_date: '2021-02-17', highest_league_name: 'Silver' },
+            { season_id: 1004, season_label: 'S4', total_battles: 300, win_rate: 0.57, start_date: '2021-08-18', highest_league_name: 'Gold' },
+        ]);
 
         render(<RankedSeasonTimelineSVG playerId={2} theme="dark" />);
         const region = screen.getByRole('img', { name: /ranked season activity timeline/i });
-        await waitFor(() => expect(region.querySelector('svg')).toBeTruthy());
+        await waitFor(() => expect(region.querySelectorAll('rect')).toHaveLength(4));
+
+        const boxes = Array.from(region.querySelectorAll('rect'));
+        // Unplayed seasons are outline-only; played ones carry a WR fill.
+        expect(boxes.map((box) => box.getAttribute('fill') === 'none'))
+            .toEqual([true, false, true, false]);
+        // Uniform lattice: one size for every slot, square.
+        expect(new Set(boxes.map((box) => box.getAttribute('width'))).size).toBe(1);
+        expect(boxes[0].getAttribute('width')).toBe(boxes[0].getAttribute('height'));
+        // Seasons the player skipped still say so on hover.
+        expect(boxes[0].querySelector('title')?.textContent).toMatch(/S1 \(2020\): not played/);
+        expect(boxes[1].querySelector('title')?.textContent).toMatch(/S2 \(2021\): Silver · 120 battles, 51.0% WR/);
+    });
+
+    it('marks Silver and Gold+ seasons with an award above the box, Bronze with none', async () => {
+        mockRankedFetches(CATALOG, [
+            { season_id: 1001, season_label: 'S1', total_battles: 30, win_rate: 0.5, start_date: '2020-12-21', highest_league_name: 'Bronze' },
+            { season_id: 1002, season_label: 'S2', total_battles: 120, win_rate: 0.51, start_date: '2021-02-17', highest_league_name: 'Silver' },
+            { season_id: 1004, season_label: 'S4', total_battles: 300, win_rate: 0.57, start_date: '2021-08-18', highest_league_name: 'Hurricane' },
+        ]);
+
+        render(<RankedSeasonTimelineSVG playerId={4} theme="dark" />);
+        const region = screen.getByRole('img', { name: /ranked season activity timeline/i });
+        await waitFor(() => expect(region.querySelectorAll('rect')).toHaveLength(4));
+
+        // Three played seasons, but Bronze earns no award: one Silver + one Gold+.
+        const awards = Array.from(region.querySelectorAll('path'));
+        expect(awards).toHaveLength(2);
+        // Silver sits above its own box (S2, slot index 1) and Gold+ above S4.
+        const centers = awards.map((award) => award.getAttribute('transform'));
+        expect(centers[0]).toMatch(/rotate\(45\)$/);   // Silver: square on point
+        expect(centers[1]).toMatch(/rotate\(0\)$/);    // Gold+: star
+        // Awards are decorative; the box title carries the league.
+        expect(awards[0].getAttribute('pointer-events')).not.toBe('auto');
+    });
+
+    it('keeps a played season that the catalog has not published yet', async () => {
+        // WG can lag: the player has battles in a season the catalog is missing.
+        // Dropping it would silently hide real play, so it is appended in order.
+        mockRankedFetches(CATALOG, [
+            { season_id: 1005, season_label: 'S5', total_battles: 44, win_rate: 0.5, start_date: '2021-11-17' },
+        ]);
+
+        render(<RankedSeasonTimelineSVG playerId={5} theme="light" />);
+        const region = screen.getByRole('img', { name: /ranked season activity timeline/i });
+        await waitFor(() => expect(region.querySelectorAll('rect')).toHaveLength(5));
+
+        const boxes = Array.from(region.querySelectorAll('rect'));
+        expect(boxes[4].getAttribute('fill')).not.toBe('none');
+        // Only the CATALOG can say a season is live. An orphan has no catalog
+        // row at all, so it must not inherit "in progress" from its absence.
+        expect(boxes[4].querySelector('title')?.textContent)
+            .toBe('S5 (2021): 44 battles, 50.0% WR');
+    });
+
+    it('falls back to the played seasons when the catalog request fails', async () => {
+        mockFetch.mockImplementation((url: string) => (
+            url.includes('/api/ranked_seasons')
+                ? Promise.reject(new Error('catalog down'))
+                : resolved([
+                    { season_id: 1002, season_label: 'S2', total_battles: 120, win_rate: 0.51, start_date: '2021-02-17' },
+                ])
+        ));
+
+        render(<RankedSeasonTimelineSVG playerId={6} theme="light" />);
+        const region = screen.getByRole('img', { name: /ranked season activity timeline/i });
+        await waitFor(() => expect(region.querySelectorAll('rect')).toHaveLength(1));
+        expect(region.querySelector('rect')?.getAttribute('fill')).not.toBe('none');
+        // Degraded, not wrong: with no catalog every season is an orphan, and
+        // none of them may claim to be in progress. This is the state prod sits
+        // in between a frontend deploy and the backend deploy that adds the
+        // catalog endpoint.
+        expect(region.querySelector('title')?.textContent)
+            .toBe('S2 (2021): 120 battles, 51.0% WR');
     });
 
     it('scales markers by battles relative to the player record (min→1×, max→4×)', async () => {
