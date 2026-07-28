@@ -923,6 +923,41 @@ EOF
 # nginx block): agents/runbooks/runbook-flower-observability-2026-04-02.md.
 FLOWER_HOME=/opt/battlestats-flower
 if [[ -x "${FLOWER_HOME}/venv/bin/celery" && -f /etc/battlestats-flower.env ]]; then
+# Keep Flower's AMQP URL DERIVED rather than hand-maintained. It is fully
+# determined by two values already on the box: the monitoring user's
+# credentials (from FLOWER_BROKER_API, which the management API proves valid)
+# and the broker host/vhost (from the app's working CELERY_BROKER_URL). Hand
+# maintenance is what broke it: a broker password rotation left the flower copy
+# stale and it sat blind for a month (2026-07-27), retrying ~34k times a day.
+# Deriving it every deploy means a future rotation self-heals.
+python3 - <<'PYFLOWER' || echo "[deploy] WARN: could not derive FLOWER_BROKER — leaving it as-is"
+import pathlib, re, sys
+
+flower_env = pathlib.Path('/etc/battlestats-flower.env')
+server_env = pathlib.Path('/etc/battlestats-server.env')
+text = flower_env.read_text()
+
+api = re.search(r'^FLOWER_BROKER_API=(.+)$', text, re.M)
+broker_src = re.search(r'^CELERY_BROKER_URL=(.+)$', server_env.read_text(), re.M)
+if not api or not broker_src:
+    sys.exit(1)
+
+creds = re.match(r'https?://([^:]+):([^@]+)@', api.group(1).strip())
+target = re.search(r'@(.+)$', broker_src.group(1).strip().strip('"').strip("'"))
+if not creds or not target:
+    sys.exit(1)
+
+desired = 'amqp://%s:%s@%s' % (creds.group(1), creds.group(2), target.group(1))
+current = re.search(r'^FLOWER_BROKER=(.+)$', text, re.M)
+if current and current.group(1).strip() == desired:
+    print('[deploy] FLOWER_BROKER already correct')
+    sys.exit(0)
+
+text = (re.sub(r'^FLOWER_BROKER=.*$', 'FLOWER_BROKER=' + desired, text, flags=re.M)
+        if current else text.rstrip('\n') + '\nFLOWER_BROKER=' + desired + '\n')
+flower_env.write_text(text)
+print('[deploy] FLOWER_BROKER re-derived (user=%s)' % creds.group(1))
+PYFLOWER
 cat > /etc/systemd/system/battlestats-flower.service <<EOF
 [Unit]
 Description=Battlestats Flower (Celery monitoring UI, localhost only)
@@ -945,6 +980,15 @@ EOF
   systemctl enable --now battlestats-flower >/dev/null 2>&1 || true
   systemctl try-restart battlestats-flower >/dev/null 2>&1 || true
   echo "[deploy] battlestats-flower.service (re)asserted"
+  # Assert the broker connection actually came up. A broken Flower is silent by
+  # nature — it keeps serving stale persisted data — so the deploy is the only
+  # place that reliably notices. Warn, never fail: Flower is observability, not
+  # the app runtime.
+  sleep 6
+  if journalctl -u battlestats-flower --since '15 seconds ago' --no-pager 2>/dev/null | grep -qiE 'ACCESS_REFUSED|AccessRefused'; then
+    echo "[deploy] WARN: flower is being REFUSED by the broker — its task/worker view is blind."
+    echo "[deploy]       journalctl -u battlestats-flower -n 50 | grep -i refused"
+  fi
 else
   echo "[deploy] flower venv/env absent — skipping flower unit (see runbook-flower-observability-2026-04-02.md)"
 fi
