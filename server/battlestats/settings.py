@@ -292,6 +292,16 @@ CELERY_TASK_IGNORE_RESULT = True
 CELERY_TASK_TRACK_STARTED = False
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
+# Task events feed Flower's task view. Without them Flower still lists workers
+# (that rides the control channel) but its task history silently freezes at
+# whatever it last saw — and because it runs --persistent=True it keeps serving
+# those rows as if they were current. That combination hid a month-long
+# monitoring outage (2026-07-27). Set in code, not as a `-E` flag on the worker
+# ExecStart, so it cannot be lost the next time the unit file is rewritten.
+# Kill switch: CELERY_WORKER_SEND_TASK_EVENTS=0 (the events cost one small
+# broker message per task transition).
+CELERY_WORKER_SEND_TASK_EVENTS = os.getenv(
+    'CELERY_WORKER_SEND_TASK_EVENTS', '1') == '1'
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_WORKER_MAX_TASKS_PER_CHILD = int(
     os.getenv('CELERY_WORKER_MAX_TASKS_PER_CHILD', '200'))

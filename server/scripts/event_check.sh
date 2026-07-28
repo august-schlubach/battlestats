@@ -82,7 +82,15 @@ import sys, json
 try: d=json.load(sys.stdin)
 except Exception as e: print("  ERROR:", e); sys.exit(0)
 if not isinstance(d,dict) or not d:
-    print("  no workers reported by Flower"); sys.exit(0)
+    # Flower with an empty registry is a FLOWER fault, not proof the workers
+    # are down — cross-check the RabbitMQ consumer counts above before
+    # concluding anything. A dead Flower broker connection looks exactly like
+    # this (2026-07-27: stale credentials, blind for a month).
+    print("  STALE: no workers reported by Flower")
+    print("  -> Flower cannot see the cluster. Check its broker connection:")
+    print("     journalctl -u battlestats-flower -n 50 | grep -i refused")
+    print("  -> Trust the QUEUES consumers column above for real worker liveness.")
+    sys.exit(0)
 print("  online:", len(d))
 for name in sorted(d):
     w=d[name] or {}
@@ -92,11 +100,31 @@ for name in sorted(d):
 '
 
 echo; echo "## RECENT TASKS (Flower API, last 500 seen)"
-curl -s -u "$FBA" "$FAPI/tasks?limit=500" 2>/dev/null | python3 -c '
-import sys, json, collections
+# Flower runs --persistent=True, so its db SURVIVES a dead event stream: when
+# the broker connection breaks it keeps serving the last rows it ever saw, and
+# they read as current. That is how a month-old snapshot was reported as live
+# on 2026-07-27. Anything older than TASK_STALE_AFTER_S is refused outright
+# rather than summarised.
+TASK_STALE_AFTER_S=${TASK_STALE_AFTER_S:-600}
+curl -s -u "$FBA" "$FAPI/tasks?limit=500" 2>/dev/null | TASK_STALE_AFTER_S="$TASK_STALE_AFTER_S" python3 -c '
+import sys, json, collections, os, time
 try: d=json.load(sys.stdin)
 except Exception as e: print("  ERROR:", e); sys.exit(0)
 items = list(d.values()) if isinstance(d,dict) else (d or [])
+stale_after = float(os.environ.get("TASK_STALE_AFTER_S", "600"))
+stamps = [t.get("received") or t.get("timestamp") for t in items if isinstance(t,dict)]
+stamps = [t for t in stamps if isinstance(t,(int,float))]
+if stamps:
+    age = time.time() - max(stamps)
+    if age > stale_after:
+        newest = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(max(stamps)))
+        print("  STALE: newest task event is %s (%.1f hours old)" % (newest, age/3600.0))
+        print("  REFUSING to summarise — these are persisted rows, not live traffic.")
+        print("  -> Either Flower lost its broker connection, or the workers are")
+        print("     not emitting task events (CELERY_WORKER_SEND_TASK_EVENTS).")
+        print("  -> Real throughput lives in the QUEUES ack/s column above.")
+        sys.exit(0)
+    print("  freshness: newest event %.0fs ago" % age)
 st=collections.Counter(); names=collections.Counter(); fails=[]
 for t in items:
     if not isinstance(t,dict): continue

@@ -60,18 +60,26 @@ Those are the one-time provisioning below (needed on a fresh droplet / rebuild).
 RMQ_PASS=$(openssl rand -hex 16)
 rabbitmqctl add_user flower "$RMQ_PASS"
 rabbitmqctl set_user_tags flower monitoring
-rabbitmqctl set_permissions -p / flower '^$' '^$' '.*'    # read-only
+# Flower needs to DECLARE its event queue and publish control commands, so
+# configure/write are scoped to the event + pidbox resources (not '^$', which
+# blocks the AMQP side entirely), and read stays broad for monitoring.
+FLOWER_PAT='^(celeryev(\..*)?|celery\.pidbox|(.*\.)?reply\.celery\.pidbox|kombu\..*)$'
+rabbitmqctl set_permissions -p / flower "$FLOWER_PAT" "$FLOWER_PAT" '.*'
 
 # 2. dedicated venv
 python3 -m venv /opt/battlestats-flower/venv
 /opt/battlestats-flower/venv/bin/pip install --upgrade pip wheel flower
 chown -R battlestats:battlestats /opt/battlestats-flower
 
-# 3. env file (reuse the app's broker URL; de-quote it — systemd strips quotes, raw grep doesn't)
+# 3. env file. FLOWER_BROKER points at the broker HOST from the app's URL but
+# authenticates as the `flower` monitoring user — NOT the app's administrator
+# account. The deploy re-derives this line every run (see "What the deploy
+# script does"), so a broker password rotation self-heals.
 B=$(grep -hoP '^CELERY_BROKER_URL=\K.*' /etc/battlestats-server.env /etc/battlestats-server.secrets.env | tail -1); B=${B%\"}; B=${B#\"}
+BROKER_HOST=${B#*@}
 umask 027
 cat > /etc/battlestats-flower.env <<EOF
-FLOWER_BROKER=$B
+FLOWER_BROKER=amqp://flower:${RMQ_PASS}@${BROKER_HOST}
 FLOWER_BROKER_API=http://flower:${RMQ_PASS}@127.0.0.1:15672/api/
 FLOWER_BASIC_AUTH=admin:$(openssl rand -hex 16)
 FLOWER_PURGE_OFFLINE_WORKERS=300
@@ -150,10 +158,49 @@ ssh root@battlestats.online 'rabbitmqctl list_queues name messages_ready message
 ```
 
 Flower's Workers tab should list `default`, `hydration`, `background`, `crawls`,
-`floor`; the Tasks tab populates from `worker_send_task_events`. If the Tasks tab is
-empty after a deploy, confirm `worker_send_task_events=True` is in `celery.py` and the
-workers were restarted (runtime `celery -b <url> control enable_events` is a temporary
-fallback, lost on restart).
+`floor`; the Tasks tab populates from `worker_send_task_events`, which lives in
+`server/battlestats/settings.py` as **`CELERY_WORKER_SEND_TASK_EVENTS`** (default on,
+kill switch `CELERY_WORKER_SEND_TASK_EVENTS=0`) and is guarded by
+`warships/tests/test_celery_observability_config.py`. It is set in code rather than as
+a `-E` flag on the worker ExecStart so it survives the unit file being rewritten.
+
+**The Workers tab and the Tasks tab fail independently** — worker liveness rides the
+control channel, task history rides events. A worker list that looks healthy proves
+nothing about the freshness of the task list.
+
+## Incident: a month blind, reported as healthy (2026-07-27)
+
+Flower sat with a **stale broker password** in `/etc/battlestats-flower.env` after a
+rotation. Symptoms and the trap:
+
+- `amqp.exceptions.AccessRefused: (403)` every 5s — **~34,600 failed logins/day**,
+  churning `/var/log/rabbitmq/`. The unit stayed `active`, so systemd looked fine.
+- The Workers tab was empty. That is a **Flower** fault, not a worker outage — the
+  RabbitMQ `consumers` column showed all five lanes consuming normally throughout.
+- **The dangerous part:** Flower runs `--persistent=True`. With the event stream dead
+  it kept serving the last rows in `flower.db` — a month-old snapshot — and
+  `event_check.sh` summarised them as current. A healthy-looking "495 SUCCESS, 0.4%
+  failure rate" table was reporting June data in late July.
+
+Fixes applied (all in-repo so they stick):
+
+1. `FLOWER_BROKER` is now **derived on every deploy** from `FLOWER_BROKER_API`'s
+   credentials + `CELERY_BROKER_URL`'s host, instead of being hand-maintained. A future
+   rotation self-heals. `prov_flower.sh` (referenced by the old env header) no longer
+   exists anywhere — nothing else regenerates this file.
+2. The deploy **warns loudly** if Flower is being refused by the broker right after
+   restart. Warn, never fail: Flower is observability, not runtime.
+3. Flower authenticates as the `flower` monitoring user, not the `battlestats`
+   administrator, with configure/write scoped to event + pidbox resources.
+4. `event_check.sh` **refuses to summarise** task data whose newest event is older than
+   `TASK_STALE_AFTER_S` (default 600s), and prints the freshness age when it does
+   report. An empty worker list now says STALE and points at the broker connection.
+5. `CELERY_WORKER_SEND_TASK_EVENTS` was missing entirely — the workers had never been
+   emitting task events since the rotation, so even a healthy Flower would have shown a
+   frozen Tasks tab.
+
+Lesson worth carrying: **a monitoring surface that persists its last-known state must
+report the age of that state, or it will lie quietly.**
 
 ## Notes / constraints
 
