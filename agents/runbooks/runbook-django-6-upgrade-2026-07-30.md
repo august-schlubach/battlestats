@@ -3,7 +3,7 @@
 _Created: 2026-07-30_
 _Context: The project runs Django 5.1.15, whose last patch shipped 2025-12-02 — the 5.1 series is end-of-life and no longer receives security fixes, while 5.2 (LTS) and 6.0 both received patches on 2026-07-07. This runbook plans the two-hop upgrade to 6.0.7._
 _QA: Both target versions were dry-run against the real test suite before this runbook was written — 5.2.16 and 6.0.7 each pass 850/850 (2 skipped). Django 6.0.7 additionally passes `manage.py check` with no issues and `makemigrations --check --dry-run` with no changes detected. Evidence in §3._
-_Status: **BOTH PHASES IMPLEMENTED AND MERGED 2026-07-30 — not yet deployed.** Phase 1 (`django==5.2.16`) merged at `9da05da`, CI green on Postgres with migration replay. Phase 2 (`django==6.0.7`, `djangorestframework==3.17.1`, `asgiref==3.10.0`) followed. Both passed the full release gate locally (850 backend, 482 frontend, production build) with `manage.py check` clean and no migration drift. **Deployment deferred to the next batch by the operator** — §6 (what the dry run did not cover) still applies at deploy time, particularly the live Celery worker._
+_Status: **DEPLOYED TO PRODUCTION 2026-07-30 in v4.9.0.** Phase 1 (`django==5.2.16`) merged at `9da05da`, CI green on Postgres with migration replay. Phase 2 (`django==6.0.7`, `djangorestframework==3.17.1`, `asgiref==3.10.0`) followed. Both passed the full release gate locally (850 backend, 493 frontend, production build) with `manage.py check` clean and no migration drift. Shipped alongside the landing recent-players change; see §6a for what the live estate actually showed._
 
 ## Purpose
 
@@ -174,6 +174,25 @@ State plainly, because the pass counts above are seductive:
   and the analytical paths that run with elevated `work_mem`.
 - **The admin.** Little used here, but it is the largest surface 6.0 touched that
   the API tests do not reach.
+
+## 6a. What the live deploy showed (2026-07-30, v4.9.0)
+
+The §6 gaps were closed by observation at deploy time, not by argument:
+
+| gap | observed |
+|---|---|
+| Migrations on PG18 under Django 6 | `migrate` ran clean: **"No migrations to apply"** — matching `makemigrations --check` |
+| Live Celery estate | **5/5 lanes online** (default, hydration, background, floor, crawls), `failed_units: none` |
+| AMQP transport + `acks_late` | queues drained to `ready=0` on every lane; 500-task sample **0.0% failure** |
+| Beat schedule | **66 periodic tasks, 62 enabled** — the `post_migrate` registration survived intact |
+| Runtime pins | prod reports Django **6.0.7**, DRF **3.17.1**, asgiref **3.10.0** |
+| Public surface | 24/24 healthcheck endpoints pass; `GET /` 200 |
+
+Flower's newest event was **11s old** at the check, which matters because of
+`project_flower_blind_month_2026-07-27`: Flower has previously served *persisted*
+state as live. Freshness was confirmed rather than assumed.
+
+The admin remains the one §6 item still unexercised; it is little used here.
 
 ## 7. Follow-ups (deliberately out of scope)
 
