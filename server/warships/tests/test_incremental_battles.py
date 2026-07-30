@@ -2915,217 +2915,76 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(random_resp.json()["totals"]["battles"], 4)
         self.assertEqual(ranked_resp.json()["totals"]["battles"], 10)
 
-    def test_has_recent_24h_activity_flag_reflects_battle_events(self):
-        """Frontend grays out the Day pill when this flag is false. Backend
-        sets it from a BattleEvent.detected_at >= now-24h existence probe.
+    def test_window_day_is_todays_calendar_date_not_a_rolling_24h(self):
+        """`day` reads PlayerDailyShipStats for TODAY (UTC), the same row the
+        trend strip's last bar draws, with windows=1.
+
+        Regression (2026-07-30, found on `fimm500`): `day` used to be a true
+        rolling 24h served by a separate BattleEvent-direct builder. That made
+        it the only window not aligned to whole calendar bars, so the card
+        contradicted itself — the strip's last bar showed today while Day's
+        totals reached back into yesterday's bar. Both were correct; they
+        simply measured different spans. Day is now the calendar day, so the
+        bar, the bracket and the totals agree by construction.
         """
-        from warships.models import BattleEvent, BattleObservation
-        now = django_timezone.now()
-        # Seed an old event (30h ago) and a daily rollup (so Week has data
-        # to render). The flag should still be False because the BattleEvent
-        # is outside the 24h window.
-        oa = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=32))
-        ob = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=30))
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANDOM, battles_delta=4, wins_delta=2,
-            from_observation=oa, to_observation=ob,
-        )
-        BattleEvent.objects.filter(
-            from_observation=oa, to_observation=ob,
-        ).update(detected_at=now - timedelta(hours=30))
+        today = django_timezone.now().date()
         PlayerDailyShipStats.objects.create(
-            player=self.player,
-            date=(now - timedelta(hours=30)).date(),
-            ship_id=42, ship_name="Yamato",
-            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=3, wins=2,
         )
-        with mock.patch.dict(
-            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
-        ):
-            r = self.client.get(
-                "/api/player/api_test/battle-history/?window=week&mode=random",
-            )
-        self.assertEqual(r.status_code, 200)
-        self.assertFalse(r.json()["has_recent_24h_activity"])
-
-        # Add a fresh event (2h ago) → flag flips to True.
-        oc = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=3))
-        od = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=2))
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANDOM, battles_delta=2, wins_delta=2,
-            from_observation=oc, to_observation=od,
-        )
-        BattleEvent.objects.filter(
-            from_observation=oc, to_observation=od,
-        ).update(detected_at=now - timedelta(hours=2))
-        from django.core.cache import cache
-        cache.clear()
-        with mock.patch.dict(
-            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
-        ):
-            r = self.client.get(
-                "/api/player/api_test/battle-history/?window=week&mode=random",
-            )
-        self.assertTrue(r.json()["has_recent_24h_activity"])
-
-    def test_has_recent_24h_activity_flag_is_mode_scoped(self):
-        """The flag drives the Day pill, and the Day pill is mode-scoped: on
-        the random card it must report random 24h activity only.
-
-        Regression: the flag was an existence probe over every BattleEvent in
-        the window, so a player who played only RANKED in the last 24h kept a
-        lit Day pill on the random Activity tab — clicking it landed on an
-        empty window. The day window itself was already mode-scoped, so the
-        same player's payload disagreed with itself window to window.
-        """
-        from warships.models import BattleEvent, BattleObservation
-        from django.core.cache import cache
-        now = django_timezone.now()
-
-        # Random battles five days ago: enough for the week window to render,
-        # nowhere near the 24h window.
-        oa = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(days=5, hours=1))
-        ob = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(days=5))
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANDOM, battles_delta=5, wins_delta=2,
-            from_observation=oa, to_observation=ob,
-        )
-        BattleEvent.objects.filter(
-            from_observation=oa, to_observation=ob,
-        ).update(detected_at=now - timedelta(days=5))
+        # Yesterday. Under the old rolling window an evening session here
+        # landed inside `day`; under the calendar window it must not.
         PlayerDailyShipStats.objects.create(
-            player=self.player, date=(now - timedelta(days=5)).date(),
-            ship_id=42, ship_name="Yamato",
-            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=2,
+            player=self.player, date=today - timedelta(days=1),
+            ship_id=43, ship_name="Auckland",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=3, wins=1,
         )
-
-        # Ranked battles two hours ago — inside the 24h window, wrong mode.
-        oc = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=3))
-        od = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=2))
-        BattleEvent.objects.create(
-            player=self.player, ship_id=77, ship_name="Kleber",
-            mode=BattleEvent.MODE_RANKED, battles_delta=10, wins_delta=9,
-            from_observation=oc, to_observation=od,
-        )
-        BattleEvent.objects.filter(
-            from_observation=oc, to_observation=od,
-        ).update(detected_at=now - timedelta(hours=2))
-
-        def flag(window, mode):
-            cache.clear()
-            with mock.patch.dict(
-                "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
-            ):
-                r = self.client.get(
-                    f"/api/player/api_test/battle-history/"
-                    f"?window={window}&mode={mode}",
-                )
-            self.assertEqual(r.status_code, 200)
-            return r.json()
-
-        # Random: no random battles in 24h → flag false on EVERY window, and
-        # the day window really is empty (the two must agree).
-        for window in ("day", "week", "month", "fortyfive"):
-            payload = flag(window, "random")
-            self.assertFalse(
-                payload["has_recent_24h_activity"],
-                f"random/{window} must not report 24h activity from ranked play",
-            )
-        self.assertEqual(flag("day", "random")["totals"]["battles"], 0)
-
-        # Ranked: the same 24h play DOES light the ranked card's Day pill.
-        for window in ("day", "week"):
-            self.assertTrue(
-                flag(window, "ranked")["has_recent_24h_activity"],
-                f"ranked/{window} must report the ranked 24h play",
-            )
-        self.assertEqual(flag("day", "ranked")["totals"]["battles"], 10)
-
-    def test_window_day_aggregates_battle_events_in_last_24h(self):
-        """The `day` window queries BattleEvent.detected_at directly (true
-        rolling 24h, hour-precise) rather than the calendar-bucketed daily
-        rollup. Events older than 24h must be excluded.
-        """
-        from warships.models import BattleEvent, BattleObservation
-        now = django_timezone.now()
-        # Two sentinel observations for the from/to FK requirement.
-        obs_a = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=30))
-        obs_b = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=23))
-        obs_c = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=2))
-        # Old event (30h ago) — outside window
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANDOM, battles_delta=10, wins_delta=3,
-            damage_delta=100_000, frags_delta=2,
-            from_observation=obs_a, to_observation=obs_b,
-        )
-        # Recent event (2h ago) — inside window
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANDOM, battles_delta=4, wins_delta=3,
-            damage_delta=80_000, frags_delta=5,
-            from_observation=obs_b, to_observation=obs_c,
-        )
-        # Override detected_at (auto_now_add otherwise pins them to now)
-        BattleEvent.objects.filter(
-            from_observation=obs_a, to_observation=obs_b,
-        ).update(detected_at=now - timedelta(hours=30))
-        BattleEvent.objects.filter(
-            from_observation=obs_b, to_observation=obs_c,
-        ).update(detected_at=now - timedelta(hours=2))
-
         with mock.patch.dict(
             "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
         ):
-            r = self.client.get(
+            day = self.client.get(
                 "/api/player/api_test/battle-history/?window=day&mode=random",
-            )
-        self.assertEqual(r.status_code, 200)
-        body = r.json()
-        self.assertEqual(body["period"], "day")
-        # Only the 2h-old event counts: battles=4, wins=3, frags=5.
-        self.assertEqual(body["totals"]["battles"], 4)
-        self.assertEqual(body["totals"]["wins"], 3)
-        self.assertEqual(body["totals"]["frags"], 5)
-        self.assertEqual(len(body["by_ship"]), 1)
-        self.assertEqual(body["by_ship"][0]["ship_id"], 42)
-        self.assertEqual(body["by_ship"][0]["battles"], 4)
+            ).json()
+            week = self.client.get(
+                "/api/player/api_test/battle-history/?window=week&mode=random",
+            ).json()
+
+        # Today only: yesterday's 3 battles are excluded.
+        self.assertEqual(day["totals"]["battles"], 3)
+        self.assertEqual(day["totals"]["wins"], 2)
+        self.assertEqual([r["ship_id"] for r in day["by_ship"]], [42])
+        self.assertEqual(day["by_day"], [
+            {"date": today.isoformat(), "battles": 3, "wins": 2,
+             "damage": 0, "frags": 0},
+        ])
+        # It routes through the daily rollup now, so it reports as such.
+        self.assertEqual(day["period"], "daily")
+        self.assertEqual(day["window_days"], 1)
+        self.assertNotIn("window_hours", day)
+        # The flag the Day pill used to need is gone; the client derives
+        # every pill's emptiness from the strip it already holds.
+        self.assertNotIn("has_recent_24h_activity", day)
+
+        # The decisive property: Day equals the strip's last bar exactly.
+        last_bar = [r for r in week["by_day"] if r["date"] == today.isoformat()]
+        self.assertEqual(len(last_bar), 1)
+        self.assertEqual(last_bar[0]["battles"], day["totals"]["battles"])
+        self.assertEqual(last_bar[0]["wins"], day["totals"]["wins"])
+        # And the wider window still sees both days.
+        self.assertEqual(week["totals"]["battles"], 6)
 
     def test_window_day_separates_random_and_ranked(self):
-        """In the `day` window, mode=random/ranked filters by BattleEvent.mode
-        and combined returns both summed.
+        """In the `day` window, mode=random/ranked filters PlayerDailyShipStats
+        by mode and combined returns both summed.
         """
-        from warships.models import BattleEvent, BattleObservation
-        now = django_timezone.now()
-        oa = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=3))
-        ob = BattleObservation.objects.create(
-            player=self.player, observed_at=now - timedelta(hours=2))
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANDOM, battles_delta=4, wins_delta=3,
-            damage_delta=80_000, frags_delta=2,
-            from_observation=oa, to_observation=ob,
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=3,
         )
-        BattleEvent.objects.create(
-            player=self.player, ship_id=42, ship_name="Yamato",
-            mode=BattleEvent.MODE_RANKED, season_id=21,
-            battles_delta=10, wins_delta=7, damage_delta=400_000, frags_delta=8,
-            from_observation=oa, to_observation=ob,
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANKED, battles=10, wins=7,
         )
         with mock.patch.dict(
             "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,

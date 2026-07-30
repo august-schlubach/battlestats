@@ -556,7 +556,6 @@ describe('BattleHistoryCard', () => {
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({
             data: buildPayload({
-                has_recent_24h_activity: true,
                 by_day: [
                     { date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 },
                     { date: utcDay(0), battles: 3, wins: 1, damage: 0, frags: 0 },
@@ -597,7 +596,6 @@ describe('BattleHistoryCard', () => {
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({
             data: buildPayload({
-                has_recent_24h_activity: true,
                 by_day: [
                     { date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 },
                     { date: utcDay(0), battles: 3, wins: 1, damage: 0, frags: 0 },
@@ -623,17 +621,32 @@ describe('BattleHistoryCard', () => {
         expect(mockTrackEvent).not.toHaveBeenCalledWith('player-history-day', expect.anything());
     });
 
-    test('Day pill is disabled when has_recent_24h_activity is false', async () => {
-        resolveWith(buildPayload({ has_recent_24h_activity: false }));
+    test('Day pill is disabled when today has no battles (derived from the strip)', async () => {
+        // Day is a UTC calendar window like every other pill (2026-07-30), so
+        // its emptiness comes off the same strip array — no backend flag. This
+        // player played yesterday but not today: Day dims, Week does not.
+        const utcDay = (o: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - o);
+            return d.toISOString().slice(0, 10);
+        };
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                by_day: [{ date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 }],
+            }),
+            headers: {},
+        });
         render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         const dayBtn = screen.getByRole('button', { name: /^Day$/ });
-        expect(dayBtn).toBeDisabled();
+        await waitFor(() => expect(dayBtn).toBeDisabled());
         expect(dayBtn.getAttribute('aria-disabled')).toBe('true');
-        expect(dayBtn.getAttribute('title'))
-            .toBe('No battles in the last 24 hours');
+        expect(dayBtn.getAttribute('title')).toBe('No battles today');
+        // Yesterday's battles are inside the week window, so Week stays live.
+        expect(screen.getByRole('button', { name: /^Week$/ })).not.toBeDisabled();
 
         // Clicking the disabled pill does NOT trigger a refetch.
         const beforeCount = mockFetchSharedJson.mock.calls.length;
@@ -653,7 +666,6 @@ describe('BattleHistoryCard', () => {
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({
             data: buildPayload({
-                has_recent_24h_activity: false,
                 by_day: [{ date: utcDay(10), battles: 5, wins: 3, damage: 0, frags: 0 }],
             }),
             headers: {},
@@ -694,7 +706,6 @@ describe('BattleHistoryCard', () => {
             mockFetchSharedJson.mockReset();
             mockFetchSharedJson.mockResolvedValue({
                 data: buildPayload({
-                    has_recent_24h_activity: true,
                     by_day: [
                         { date: utcDay(1), battles: 4, wins: 2, damage: 0, frags: 0 },
                         { date: utcDay(0), battles: 3, wins: 1, damage: 0, frags: 0 },
@@ -780,7 +791,6 @@ describe('BattleHistoryCard', () => {
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({
             data: buildPayload({
-                has_recent_24h_activity: false,
                 by_day: [{ date: utcDay(60), battles: 5, wins: 3, damage: 0, frags: 0 }],
             }),
             headers: {},
@@ -808,7 +818,6 @@ describe('BattleHistoryCard', () => {
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({
             data: buildPayload({
-                has_recent_24h_activity: false,
                 totals: {
                     battles: 0, wins: 0, losses: 0, win_rate: 0,
                     damage: 0, avg_damage: 0, frags: 0, xp: 0,

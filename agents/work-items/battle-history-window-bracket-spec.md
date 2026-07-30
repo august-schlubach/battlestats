@@ -3,7 +3,7 @@
 - **Date:** 2026-07-30
 - **Surface:** Player page → Activity tab → `BattleHistoryCard`
 - **Branch:** `feat/player-sparkline`
-- **Status:** approved, pending implementation
+- **Status:** implemented + deployed 2026-07-30
 
 ## Problem
 
@@ -204,3 +204,42 @@ widths.
 - The `year` window and `VISIBLE_WINDOWS` membership.
 - Backend windows, retention, or the daily aggregate layer.
 - Any change to the bars, the WR overlay, or their entrance animations.
+
+
+---
+
+## Follow-up (2026-07-30): `day` becomes a calendar window
+
+The bracket exposed a semantics mismatch it did not create. `day` was a true-rolling
+24h window served by `_build_battle_history_payload_24h` (BattleEvent-direct), while
+every other window — and every bar of the strip — is a UTC calendar day off
+`PlayerDailyShipStats`. So the Day bracket marked exactly one bar while the Day totals
+drew on two.
+
+Observed on `fimm500`: the last bar read 3 battles / 2W / 66.7%, Day read 6 battles /
+50%. Both correct. The difference was a 22:20 session the previous evening, inside the
+rolling window but belonging to the previous bar. Verified row-by-row on prod that
+`BattleEvent` and `PlayerDailyShipStats` agreed exactly — this was semantics, not drift.
+
+**Change.** `BATTLE_HISTORY_WINDOWS["day"]` drops its `hours` key and becomes a plain
+`{"period": "daily", "windows": 1}`, routing through the same builder as week/month/45d.
+
+Consequences:
+
+- `_build_battle_history_payload_24h` (~275 lines), `_battle_events_24h_qs`, and
+  `_has_recent_24h_activity` are **deleted** — the whole parallel path, plus the
+  `is_24h_window` branching in the view and the invalidator.
+- The `has_recent_24h_activity` payload field is **removed**. It existed only because a
+  rolling span could not be read off calendar buckets; now it can. The client derives
+  all four pills' empty-state from one array via `sumTrailingBattles(WINDOW_SPAN_DAYS[w])`,
+  which structurally retires the two-sources bug class fixed earlier the same day.
+- Copy: header `Last 24 hours` → `Today`; tooltip → `Today (UTC calendar date, matching
+  the trend strip's last bar)`; empty → `No battles today`.
+- Cache key `v10` → `v11`. v10 `day` entries hold rolling-24h totals under a different
+  period key.
+- `day`'s cache period key changes from `day` to `daily`/`1`.
+
+**Accepted trade-off.** Right after a late-night session, "Today" (UTC) may hold less
+than the trailing 24h did — early UTC morning is the worst case. The card now trades
+that recency for internal consistency: what the bar shows, what the bracket marks, and
+what the totals count are the same span.
