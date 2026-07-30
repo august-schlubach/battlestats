@@ -3,7 +3,7 @@
 _Created: 2026-07-30_
 _Context: The project runs Django 5.1.15, whose last patch shipped 2025-12-02 — the 5.1 series is end-of-life and no longer receives security fixes, while 5.2 (LTS) and 6.0 both received patches on 2026-07-07. This runbook plans the two-hop upgrade to 6.0.7._
 _QA: Both target versions were dry-run against the real test suite before this runbook was written — 5.2.16 and 6.0.7 each pass 850/850 (2 skipped). Django 6.0.7 additionally passes `manage.py check` with no issues and `makemigrations --check --dry-run` with no changes detected. Evidence in §3._
-_Status: **PLANNED — not started.** No branch, no pins changed. Prerequisite (Python 3.12 everywhere) is already satisfied as of `0319047`._
+_Status: **BOTH PHASES IMPLEMENTED AND MERGED 2026-07-30 — not yet deployed.** Phase 1 (`django==5.2.16`) merged at `9da05da`, CI green on Postgres with migration replay. Phase 2 (`django==6.0.7`, `djangorestframework==3.17.1`, `asgiref==3.10.0`) followed. Both passed the full release gate locally (850 backend, 482 frontend, production build) with `manage.py check` clean and no migration drift. **Deployment deferred to the next batch by the operator** — §6 (what the dry run did not cover) still applies at deploy time, particularly the live Celery worker._
 
 ## Purpose
 
@@ -112,6 +112,14 @@ and for three of them the version we already pin is sufficient:
 | `djangorestframework` | 3.16.1 | **no** — must go to 3.17.1 |
 
 ## 5. Procedure
+
+> **As-built note (2026-07-30):** both phases were executed as written, with one
+> addition — Phase 2 also corrected the `django` environment marker in
+> `requirements.txt` from `python_version >= '3.10'` to `>= '3.12'`, since 6.0
+> requires 3.12. Cosmetic (pip enforces `requires_python` regardless) but the
+> marker was stating something false. The prescribed soak between phases was
+> **not** taken: the operator is deploying both together in a later batch, so the
+> phases are separated in history for bisect value rather than in time.
 
 ### Phase 1 — 5.1.15 → 5.2.16 (LTS)
 
