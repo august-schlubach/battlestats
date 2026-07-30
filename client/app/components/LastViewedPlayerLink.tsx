@@ -21,7 +21,9 @@ import { readLastViewedPlayers, type LastViewedPlayer } from '../lib/lastViewedP
 // Spec: agents/work-items/landing-recent-players-spec.md
 // Runbook: agents/runbooks/runbook-audience-growth-instrumentation-2026-07-29.md
 
-const SEPARATOR = '*';
+// Middle dot (U+00B7), written as an escape rather than the literal glyph so it
+// survives any editor or pipeline that is not confidently UTF-8.
+const SEPARATOR = '\u00B7';
 
 const LastViewedPlayerLink: React.FC = () => {
     const [lastViewed, setLastViewed] = useState<LastViewedPlayer[]>([]);

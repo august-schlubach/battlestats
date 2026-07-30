@@ -61,7 +61,10 @@ describe('LastViewedPlayerLink', () => {
         render(<LastViewedPlayerLink />);
 
         // Three names, two separators.
-        expect(screen.getAllByTestId('last-viewed-separator')).toHaveLength(2);
+        const separators = screen.getAllByTestId('last-viewed-separator');
+        expect(separators).toHaveLength(2);
+        // Middle dot, not an asterisk. Pinned so the glyph cannot drift silently.
+        separators.forEach((separator) => expect(separator).toHaveTextContent('·'));
     });
 
     it('url-encodes names that need it', () => {

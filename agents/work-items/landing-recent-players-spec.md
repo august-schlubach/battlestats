@@ -21,7 +21,7 @@ without turning the top of the landing page into a history list.
   to the front** rather than appending a duplicate; without this, three visits to one
   player fill all three slots with the same person, which is strictly worse than the
   single-entry version.
-- Presentation: `Last viewed:` followed by up to three names separated by ` * `.
+- Presentation: `Last viewed:` followed by up to three names separated by ` · `.
   **No realm tag.** Renders nothing, and reserves no space, when nothing is stored.
 - Entries are written only after a profile actually resolves. A 404 or an abandoned
   load never becomes an offer. (Unchanged.)
@@ -76,7 +76,7 @@ and 3 can later be shown to earn their space.
 
 - lib: move-to-front dedup (case-insensitive), cap at 3, legacy single-object
   migration, per-entry validation, corrupt/throwing storage, clear-all.
-- component: renders nothing at zero; renders up to three names with ` * ` separators
+- component: renders nothing at zero; renders up to three names with ` · ` separators
   and no realm tag; url-encodes names; tracks `position` per slot.
 - `PlayerRouteView`: resolved profile is remembered; a 404 is not; a cross-realm
   resolve leaves exactly one entry, under the resolved realm.

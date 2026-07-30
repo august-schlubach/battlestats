@@ -417,7 +417,7 @@ render would be a hydration mismatch), renders nothing and reserves no space for
 visitor, and emits the `landing-last-player` event. **D2 remains deferred.**
 
 **D1 widened to three entries (2026-07-30).** The key now holds an **array**, most recent first,
-capped at 3; the row reads `Last viewed:` with names separated by `*` and **no realm tag**. Identity
+capped at 3; the row reads `Last viewed:` with names separated by `·` (middle dot) and **no realm tag**. Identity
 is `(realm, name.toLowerCase())` and a re-view **moves to front**, so repeat visits to one player
 cannot fill every slot. The read is shape-tolerant (`Array.isArray`), so the legacy single-object
 value survives the deploy rather than dropping the affordance for exactly the returning visitors it
