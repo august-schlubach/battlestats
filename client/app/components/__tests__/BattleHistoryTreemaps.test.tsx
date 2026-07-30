@@ -173,7 +173,7 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         }));
         render(<BattleHistoryTreemaps byShip={many} />);
 
-        // Default is min(25, roster) — 12 ships < 25 → all shown.
+        // Default is min(15, roster) — 12 ships < 15 → all shown.
         const shipsSvg = screen.getByRole('img', { name: /ships sized by battles/i });
         expect(shipsSvg.querySelectorAll('rect')).toHaveLength(12);
         const slider = screen.getByRole('slider', { name: /most-played ships shown/i });
@@ -210,7 +210,7 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(screen.getByText('12')).toBeInTheDocument();
     });
 
-    it('large roster defaults to Top 25 on every load; a stored slider value is ignored', () => {
+    it('large roster defaults to Top 15 on every load; a stored slider value is ignored', () => {
         const many = Array.from({ length: 30 }, (_, i) => row({
             ship_id: i + 1,
             ship_name: `Ship${i + 1}`,
@@ -219,16 +219,16 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         const { unmount } = render(<BattleHistoryTreemaps byShip={many} />);
         expect(
             screen.getByRole('img', { name: /ships sized by battles/i }).querySelectorAll('rect'),
-        ).toHaveLength(25);
+        ).toHaveLength(15);
         unmount();
 
         // A stale value from an older build must NOT be adopted — the slider is no
-        // longer persisted, so every fresh mount resets to the default 25.
+        // longer persisted, so every fresh mount resets to the default 15.
         window.localStorage.setItem('bs-bh-ships-slider', '8');
         render(<BattleHistoryTreemaps byShip={many} />);
         expect(
             screen.getByRole('img', { name: /ships sized by battles/i }).querySelectorAll('rect'),
-        ).toHaveLength(25);
+        ).toHaveLength(15);
     });
 
     it('clicking a ship tile reports the row (ShipStats toggle contract)', () => {

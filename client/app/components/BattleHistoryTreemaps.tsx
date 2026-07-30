@@ -49,9 +49,9 @@ const NEUTRAL_TILE = '#6f7683';
 
 // A range slider (1 → played-ship count) zooms the ships map into the top-N
 // most-played ships live — the treemap re-lays-out on every tick. It resets to
-// 25 (or the player's max when they played fewer) on every load; the choice is
+// 15 (or the player's max when they played fewer) on every load; the choice is
 // deliberately NOT persisted, so each visit starts from the same default view.
-const DEFAULT_TOP_N = 25;
+const DEFAULT_TOP_N = 15;
 
 // Diverging fill for the damage map: the ratio of the player's avg damage to
 // the ship's realm 30d average. 1.0 = at expectation (neutral gray); the ends
@@ -402,7 +402,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
         [byShip, colorMetric],
     );
     // Slider zoom over the ships map: null = no explicit choice yet (use the
-    // default min(25, roster)). Kept as the raw slider number, clamped against
+    // default min(15, roster)). Kept as the raw slider number, clamped against
     // the current window's ship count so a window/mode/player switch that
     // shrinks the list can't strand an oversized N. Not persisted — every load
     // starts from the default.

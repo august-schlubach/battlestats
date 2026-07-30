@@ -730,11 +730,12 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v9: payload now carries `has_recent_24h_activity` so the frontend
-    # can gray out the Day pill when it would be empty without an extra
-    # round-trip.
+    # v9: payload carries `has_recent_24h_activity` so the frontend can gray
+    # out the Day pill without an extra round-trip.
+    # v10: that flag is mode-scoped. v9 entries hold the mode-blind value, so
+    # they must not be served — a ranked-only 24h lit the random Day pill.
     return realm_cache_key(
-        realm, f"battle-history:v9:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v10:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -768,16 +769,39 @@ def _period_window_start(today, period: str, windows: int):
     raise ValueError(f"Unknown period: {period}")
 
 
-def _has_recent_24h_activity(player) -> bool:
-    """Whether a player has any BattleEvent in the trailing 24h. Drives the
-    frontend's gray-out of the Day pill so the user doesn't click into an
-    empty window.
+def _battle_events_24h_qs(player, mode: str, ranked_ctx=None, since=None):
+    """The BattleEvents the rolling 24h `day` window is built from.
+
+    Single source of truth for that scope. `_build_battle_history_payload_24h`
+    aggregates this queryset and `_has_recent_24h_activity` probes it, so the
+    Day pill's enabled state cannot disagree with what clicking Day actually
+    shows — which is exactly what happened when the probe was mode-blind.
     """
     from warships.models import BattleEvent
-    return BattleEvent.objects.filter(
-        player=player,
-        detected_at__gte=timezone.now() - timedelta(hours=24),
-    ).exists()
+    since = since or (timezone.now() - timedelta(hours=24))
+    qs = BattleEvent.objects.filter(player=player, detected_at__gte=since)
+    # `combined` deliberately spans both modes; random/ranked are scoped.
+    if mode in ("random", "ranked"):
+        qs = qs.filter(mode=mode)
+    # Ranked is season-scoped, so play from a closed season doesn't count.
+    if ranked_ctx is not None and ranked_ctx.get("season_id") is not None:
+        qs = qs.filter(season_id=ranked_ctx["season_id"])
+    return qs
+
+
+def _has_recent_24h_activity(player, mode: str, ranked_ctx=None) -> bool:
+    """Whether the player has battles in the trailing 24h **in this mode**.
+    Drives the frontend's gray-out of the Day pill so the user doesn't click
+    into an empty window.
+
+    Mode-scoped because the pill is: a player whose only recent play is ranked
+    must not get a lit Day pill on the random Activity tab. `battles_delta > 0`
+    rather than bare existence, matching the day payload's own
+    `totals["battles"] > 0` test.
+    """
+    return _battle_events_24h_qs(
+        player, mode, ranked_ctx,
+    ).filter(battles_delta__gt=0).exists()
 
 
 # Minimum prior-battles count required for a meaningful lifetime delta.
@@ -906,9 +930,7 @@ def _build_battle_history_payload_24h(player, mode: str) -> dict:
     aggregates per (ship_id, mode) in Python, and emits the same payload
     shape `_build_battle_history_payload()` produces.
     """
-    from warships.models import (
-        BattleEvent, PlayerDailyShipStats as _PDSS, Ship,
-    )
+    from warships.models import PlayerDailyShipStats as _PDSS, Ship
 
     now = timezone.now()
     since = now - timedelta(hours=24)
@@ -926,12 +948,10 @@ def _build_battle_history_payload_24h(player, mode: str) -> dict:
         _current_ranked_season_context(player) if mode == "ranked" else None
     )
 
-    qs = BattleEvent.objects.filter(player=player, detected_at__gte=since)
-    if mode in ("random", "ranked"):
-        qs = qs.filter(mode=mode)
-    if ranked_ctx is not None and ranked_ctx["season_id"] is not None:
-        qs = qs.filter(season_id=ranked_ctx["season_id"])
-    rows = list(qs.order_by("detected_at", "ship_id"))
+    rows = list(
+        _battle_events_24h_qs(player, mode, ranked_ctx, since)
+        .order_by("detected_at", "ship_id")
+    )
 
     lifetime_by_ship: dict = {}
     for entry in (player.battles_json or []):
@@ -1487,7 +1507,9 @@ def _build_battle_history_payload(player, period: str, windows: int,
         "mode": mode,
         "available_modes": available_modes,
         "ranked_season_name": ranked_ctx["season_name"] if ranked_ctx else None,
-        "has_recent_24h_activity": _has_recent_24h_activity(player),
+        "has_recent_24h_activity": _has_recent_24h_activity(
+            player, mode, ranked_ctx,
+        ),
         "as_of": timezone.now().isoformat(),
         "totals": {
             **totals,

@@ -20,6 +20,33 @@ deploy runbooks.)
 - `.env.secrets` — secrets (WG_APP_ID, DB_PASSWORD, DJANGO_SECRET_KEY)
 - `.env.cloud` / `.env.secrets.cloud` — cloud database overrides
 
+### `server/ca-certificate.crt` — the managed-Postgres CA
+
+Not an env file and not in Pass, but the backend deploy needs it beside them.
+`server/deploy/deploy_to_droplet.sh` scps `${SERVER_DIR}/ca-certificate.crt` to the
+droplet and installs it at `/etc/ssl/certs/battlestats-do-ca-certificate.crt`, then
+points `DB_SSLROOTCERT` there. It is the DigitalOcean **project** CA (self-signed,
+`CN=c40a3d65-…​ Project CA`, 1537 bytes, valid to 2031-06-24) — the trust anchor for
+`DB_SSLMODE=require` against the managed cluster. One cert covers every database in
+the project, so it does not rotate per-cluster.
+
+**Canonical local copy: `server/ca-certificate.crt` in the main checkout.** It is
+gitignored (`.gitignore:17`), so it does not travel with a clone, a fresh dev box, or
+a **git worktree** — each needs its own copy, exactly like the `.cloud` env files. A
+missing copy fails the deploy at the scp with `stat local: No such file or directory`,
+after the CI check has already passed, so it looks later in the run than it is.
+
+Recover it from the droplet rather than from Pass, where it is not stored:
+
+```bash
+scp root@battlestats.online:/etc/ssl/certs/battlestats-do-ca-certificate.crt \
+    server/ca-certificate.crt
+```
+
+That is the same file the deploy would reinstall, so re-deploying after fetching it
+is a no-op server-side. The DigitalOcean control panel (Databases → cluster →
+Connection details → "Download CA certificate") is the fallback if no droplet has it.
+
 ## Server runtime env (defaults in parentheses)
 
 Cache/warming:

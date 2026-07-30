@@ -2974,6 +2974,84 @@ class BattleHistoryEndpointTests(TestCase):
             )
         self.assertTrue(r.json()["has_recent_24h_activity"])
 
+    def test_has_recent_24h_activity_flag_is_mode_scoped(self):
+        """The flag drives the Day pill, and the Day pill is mode-scoped: on
+        the random card it must report random 24h activity only.
+
+        Regression: the flag was an existence probe over every BattleEvent in
+        the window, so a player who played only RANKED in the last 24h kept a
+        lit Day pill on the random Activity tab — clicking it landed on an
+        empty window. The day window itself was already mode-scoped, so the
+        same player's payload disagreed with itself window to window.
+        """
+        from warships.models import BattleEvent, BattleObservation
+        from django.core.cache import cache
+        now = django_timezone.now()
+
+        # Random battles five days ago: enough for the week window to render,
+        # nowhere near the 24h window.
+        oa = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(days=5, hours=1))
+        ob = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(days=5))
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            mode=BattleEvent.MODE_RANDOM, battles_delta=5, wins_delta=2,
+            from_observation=oa, to_observation=ob,
+        )
+        BattleEvent.objects.filter(
+            from_observation=oa, to_observation=ob,
+        ).update(detected_at=now - timedelta(days=5))
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=(now - timedelta(days=5)).date(),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=2,
+        )
+
+        # Ranked battles two hours ago — inside the 24h window, wrong mode.
+        oc = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=3))
+        od = BattleObservation.objects.create(
+            player=self.player, observed_at=now - timedelta(hours=2))
+        BattleEvent.objects.create(
+            player=self.player, ship_id=77, ship_name="Kleber",
+            mode=BattleEvent.MODE_RANKED, battles_delta=10, wins_delta=9,
+            from_observation=oc, to_observation=od,
+        )
+        BattleEvent.objects.filter(
+            from_observation=oc, to_observation=od,
+        ).update(detected_at=now - timedelta(hours=2))
+
+        def flag(window, mode):
+            cache.clear()
+            with mock.patch.dict(
+                "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+            ):
+                r = self.client.get(
+                    f"/api/player/api_test/battle-history/"
+                    f"?window={window}&mode={mode}",
+                )
+            self.assertEqual(r.status_code, 200)
+            return r.json()
+
+        # Random: no random battles in 24h → flag false on EVERY window, and
+        # the day window really is empty (the two must agree).
+        for window in ("day", "week", "month", "fortyfive"):
+            payload = flag(window, "random")
+            self.assertFalse(
+                payload["has_recent_24h_activity"],
+                f"random/{window} must not report 24h activity from ranked play",
+            )
+        self.assertEqual(flag("day", "random")["totals"]["battles"], 0)
+
+        # Ranked: the same 24h play DOES light the ranked card's Day pill.
+        for window in ("day", "week"):
+            self.assertTrue(
+                flag(window, "ranked")["has_recent_24h_activity"],
+                f"ranked/{window} must report the ranked 24h play",
+            )
+        self.assertEqual(flag("day", "ranked")["totals"]["battles"], 10)
+
     def test_window_day_aggregates_battle_events_in_last_24h(self):
         """The `day` window queries BattleEvent.detected_at directly (true
         rolling 24h, hour-precise) rather than the calendar-bucketed daily
