@@ -6,6 +6,8 @@ import BattleHistoryCard, {
     battleHistoryCacheKey,
     battleHistoryFetchUrl,
     buildWindowedDays,
+    formatStripDay,
+    stripRangeLabel,
     prefetchBattleHistory,
     BATTLE_HISTORY_FETCH_TTL_MS,
 } from '../BattleHistoryCard';
@@ -762,6 +764,31 @@ describe('BattleHistoryCard', () => {
             expect(bracket().style.transform).toBe('translate(0.000px, 0px) scale(1.00000, 1)');
         });
 
+        test('the range label names the same span the bracket marks', async () => {
+            await renderActive();
+            const utcDay = (o: number): string => {
+                const d = new Date();
+                d.setUTCDate(d.getUTCDate() - o);
+                return d.toISOString().slice(0, 10);
+            };
+            const label = () => screen.getByTestId('window-range-label').textContent;
+            // 45d default: the full domain, 44 days back through today.
+            expect(label()).toBe(
+                `${formatStripDay(utcDay(44))} - ${formatStripDay(utcDay(0))}`,
+            );
+            await act(async () => { screen.getByRole('button', { name: /^Month$/ }).click(); });
+            expect(label()).toBe(
+                `${formatStripDay(utcDay(29))} - ${formatStripDay(utcDay(0))}`,
+            );
+            await act(async () => { screen.getByRole('button', { name: /^Week$/ }).click(); });
+            expect(label()).toBe(
+                `${formatStripDay(utcDay(6))} - ${formatStripDay(utcDay(0))}`,
+            );
+            // A one-day span collapses to a single date, no separator.
+            await act(async () => { screen.getByRole('button', { name: /^Day$/ }).click(); });
+            expect(label()).toBe(formatStripDay(utcDay(0)));
+        });
+
         test('it is decorative — the header already names the window', async () => {
             await renderActive();
             expect(bracket().closest('svg')).toHaveAttribute('aria-hidden', 'true');
@@ -933,6 +960,29 @@ describe('battle-history prefetch dedupe contract', () => {
             cacheKey: 'battle-history:lil_boots:na:fortyfive:random:0:0',
             ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         }));
+    });
+});
+
+describe('strip date labels', () => {
+    it('formats a UTC day key as DDMMM without a local-timezone parse', () => {
+        expect(formatStripDay('2026-07-30')).toBe('30JUL');
+        expect(formatStripDay('2026-01-01')).toBe('01JAN');
+        expect(formatStripDay('2026-12-09')).toBe('09DEC');
+        // Malformed / absent keys degrade to empty rather than "undefined".
+        expect(formatStripDay('')).toBe('');
+        expect(formatStripDay('2026-13-01')).toBe('');
+    });
+
+    it('collapses a one-day span to a single date and reads the trailing slice', () => {
+        const days = [
+            { date: '2026-07-28' }, { date: '2026-07-29' }, { date: '2026-07-30' },
+        ];
+        expect(stripRangeLabel(days, 3)).toBe('28JUL - 30JUL');
+        expect(stripRangeLabel(days, 2)).toBe('29JUL - 30JUL');
+        expect(stripRangeLabel(days, 1)).toBe('30JUL');
+        // A span wider than the data clamps to what exists.
+        expect(stripRangeLabel(days, 45)).toBe('28JUL - 30JUL');
+        expect(stripRangeLabel([], 30)).toBe('');
     });
 });
 

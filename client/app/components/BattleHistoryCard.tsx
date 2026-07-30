@@ -448,6 +448,34 @@ const STRIP_BAR_GAP = 0.5;
 const stripBarWidth = (n: number): number =>
     (STRIP_VIEW_W - STRIP_BAR_GAP * (n - 1)) / n;
 
+// DDMMM, e.g. "30JUL". The strip's day keys are UTC calendar dates (the
+// backend buckets that way), so the label is built by slicing the ISO key
+// rather than constructing a Date — a local-timezone parse would shift the
+// label off the bar the bracket is pointing at.
+const MONTH_ABBR = [
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
+    'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+];
+export const formatStripDay = (iso: string): string => {
+    const [, month, day] = (iso || '').split('-');
+    const abbr = MONTH_ABBR[Number(month) - 1];
+    return abbr && day ? `${day}${abbr}` : '';
+};
+
+// The selected window's span as a date range, derived from the SAME trailing
+// slice of strip days the bracket brackets, so the words and the mark can't
+// disagree. A single-day span collapses to one date.
+export const stripRangeLabel = (
+    days: { date: string }[], spanDays: number,
+): string => {
+    const span = days.slice(Math.max(0, days.length - spanDays));
+    if (!span.length) return '';
+    const first = formatStripDay(span[0].date);
+    const last = formatStripDay(span[span.length - 1].date);
+    if (!first || !last) return '';
+    return first === last ? first : `${first} - ${last}`;
+};
+
 // A measure line under the strip reporting which slice of the fixed
 // STRIP_DOMAIN_DAYS domain the selected window pill actually covers: a rule with
 // a tick at each end, right-anchored to the newest day and growing leftward into
@@ -1037,6 +1065,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // backs the empty-pill derivation below via trailing slices.
     const stripDays = buildWindowedDays(stripByDay, STRIP_DOMAIN_DAYS);
     const spanDays = Math.min(WINDOW_SPAN_DAYS[window], STRIP_DOMAIN_DAYS);
+    const rangeLabel = stripRangeLabel(stripDays, spanDays);
     const sparkline = (
         <>
             <InlineSparkline
@@ -1132,6 +1161,17 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             );
                         })}
                     </div>
+                    {/* The selected span in words, right of the pills and
+                        matching the bracket under the strip exactly (same
+                        trailing slice of the same UTC day keys). */}
+                    {rangeLabel && (
+                        <span
+                            data-testid="window-range-label"
+                            className="whitespace-nowrap text-xs tabular-nums text-[var(--text-muted)]"
+                        >
+                            {rangeLabel}
+                        </span>
+                    )}
                 </div>
                 {/* Right group: an optional caption-leading control (the Ranked
                     tab's sub-view toggle) sits inline to the LEFT of the static

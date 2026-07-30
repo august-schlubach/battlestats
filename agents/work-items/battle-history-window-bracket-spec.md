@@ -133,7 +133,47 @@ it must not compete with the WR overlay line's `--accent-secondary-mid`.
 At the new `45d` default the bracket is absent on first paint. It materializes only
 when the user narrows — the affordance appears at the moment it carries meaning.
 
-### 4. Ships treemap default scope
+### 4. The selected date range, in words
+
+Right of the pill row, a muted `DDMMM - DDMMM` label names the span the bracket
+marks (`30JUL`, `24JUL - 30JUL`). A one-day span collapses to a single date.
+
+It is derived from the **same trailing slice of the same strip days** the bracket
+is placed from (`stripRangeLabel(stripDays, spanDays)`), so the words and the mark
+cannot disagree. Formatting slices the ISO day key rather than constructing a
+`Date`: the strip's keys are UTC calendar dates (the backend buckets that way), and
+a local-timezone parse would shift the label off the bar the bracket points at.
+
+### 5. `has_recent_24h_activity` becomes mode-scoped (backend)
+
+**Bug.** The Day pill stayed lit on the random Activity tab for a player whose only
+battles in the last 24h were **ranked** (found on `WorldWarNEIO`, whose last random
+battles were five days old while 10 ranked battles landed that day). Clicking Day
+then landed on an empty window.
+
+**Root cause.** Two code paths produce the flag and they disagreed:
+
+- `_build_battle_history_payload_24h` (the `day` window) set it from its own
+  mode-scoped totals — correct.
+- `_build_battle_history_payload` (every other window) called
+  `_has_recent_24h_activity(player)`, a bare existence probe over `BattleEvent` with
+  **no mode filter** — so ranked play lit the random payload's flag.
+
+The client reads the flag off the current window's payload, so at the 45d default it
+saw the mode-blind `True`. The same player's payloads disagreed window to window:
+`day` → `False`, `week`/`month`/`fortyfive` → `True`.
+
+**Fix.** Extract `_battle_events_24h_qs(player, mode, ranked_ctx, since)` as the
+single definition of the 24h scope — mode filter for random/ranked, season filter
+for ranked, `combined` deliberately spanning both. The 24h builder aggregates that
+queryset and `_has_recent_24h_activity(player, mode, ranked_ctx)` probes it
+(`battles_delta > 0`, matching the day payload's own `totals["battles"] > 0` test),
+so the pill's enabled state cannot drift from what clicking it shows.
+
+**Cache contract.** The payload cache key goes `v9` → `v10`: cached v9 entries hold
+the mode-blind flag and must not be served.
+
+### 6. Ships treemap default scope
 
 `DEFAULT_TOP_N` in `BattleHistoryTreemaps.tsx` drops 25 → 15 (the Activity-tab ships
 map: tiles sized by battles, colored by win rate). The slider range and the clamp
@@ -154,6 +194,11 @@ against `playedShipCount` are unchanged, as is the non-persistence of the choice
   main and strip fetches sharing a URL.
 
 **`BattleHistoryTreemaps.test.tsx`** — default tile count 25 → 15.
+
+**`test_incremental_battles.py`** — `test_has_recent_24h_activity_flag_is_mode_scoped`:
+a player with ranked-only play inside 24h and random play five days old must report
+`False` on **every** random window and `True` on the ranked ones, with the day
+payload's own totals agreeing.
 
 **Browser verification (jsdom cannot discharge this).** Unit tests pin only the two
 end states; the motion itself exists only in a real browser. On the dev server,
