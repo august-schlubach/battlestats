@@ -17,14 +17,17 @@
 | Analytics | ✅ | Umami + custom entity tracking |
 
 ### What's Missing
+
+_Reconciled 2026-07-29: struck rows are shipped (see Implementation Order below); only SSR remains open._
+
 | Feature | Impact | Effort |
 |---------|--------|--------|
-| **Dynamic metadata on player/clan pages** | High | Low |
-| **Dynamic sitemap with player/clan URLs** | High | Medium |
-| **Open Graph / Twitter cards** | Medium | Low |
-| **Structured data (JSON-LD)** | Medium | Low |
-| **Canonical URLs** | Low | Trivial |
-| **OG image generation** | Medium | Medium |
+| ~~Dynamic metadata on player/clan pages~~ ✅ | High | Low |
+| ~~Dynamic sitemap with player/clan URLs~~ ✅ | High | Medium |
+| ~~Open Graph / Twitter cards~~ ✅ | Medium | Low |
+| ~~Structured data (JSON-LD)~~ ✅ | Medium | Low |
+| ~~Canonical URLs~~ ✅ | Low | Trivial |
+| ~~OG image generation~~ ✅ 2026-07-29 | Medium | Medium |
 | **SSR for player/clan data** | High | High |
 
 ---
@@ -299,11 +302,32 @@ Enables Google's sitelinks search box:
 }
 ```
 
-### Priority 4 — OG Image Generation (Medium Impact, Medium Effort)
+### Priority 4 — OG Image Generation ✅ **IMPLEMENTED 2026-07-29**
 
-Next.js supports dynamic OG image generation via `app/player/[playerName]/opengraph-image.tsx`. This could render a branded card with the player's name, win rate, and battle count — making shared links visually appealing in Discord/Slack/Twitter.
+Traffic patterns were observed, as this section asked for, and they settled the question: the only
+measurably converting social channel is JP X via `t.co`, where the preview card *is* the pitch.
+Player, clan, and ship pages now emit dynamic cards carrying the real numbers, and
+`twitter.card` moved from `summary` to `summary_large_image`.
 
-**Deferred** — requires designing a card template and may need API calls at build time. Worth doing after Priority 1-2 are live and traffic patterns are observed.
+**Built as a route, not the file convention.** `app/player/[playerName]/opengraph-image.tsx` — the
+approach this section originally proposed — cannot work here: image routes receive `params` but no
+`searchParams`, so the card cannot know the realm, and the same nickname can be two unrelated
+accounts on two realms (ASIA outdraws NA in pageviews). The card is therefore
+`GET /og?kind=player|clan|ship&…` (`client/app/og/route.tsx`), built by `generateMetadata`, which
+does see `searchParams`. It cannot live under `/api/*` — `next.config.mjs` rewrites that prefix to
+Django.
+
+Cards read the cache-first Django endpoints with a 2 s abort, never touch Wargaming, and degrade to
+a name-only card on any miss; a hidden account renders its name plus "Profile hidden by the player"
+and never numbers. Composition is pure and unit-tested (`lib/ogCard.ts`,
+`app/lib/__tests__/ogCard.test.ts`, `entityMetadata.test.ts`); the renderer is `lib/ogCardLayout.tsx`.
+
+The numbers were deliberately **not** added to the text `description`: that would require a fetch in
+`generateMetadata`, on the HTML critical path for every visitor, whereas the card route is hit once
+per hour per entity per crawler.
+
+Full rationale, measured baseline, and validation evidence:
+`agents/runbooks/runbook-audience-growth-instrumentation-2026-07-29.md`.
 
 ### Priority 5 — Full SSR (High Impact, High Effort)
 
@@ -323,7 +347,7 @@ Moving player/clan data fetching to the server component layer would give search
 3. ~~**Dynamic sitemap**~~ ✅ — backend `/api/sitemap-entities/` + dynamic `app/sitemap.ts` (hourly revalidation)
 4. ~~**Structured data (JSON-LD)**~~ ✅ — WebSite + SearchAction on homepage
 5. ~~**Analytics**~~ ✅ — Umami (self-hosted) + first-party entity tracking; Google Analytics removed 2026-06-10 in favor of Umami
-6. **OG image generation** — visual social sharing (future)
+6. ~~**OG image generation**~~ ✅ — dynamic `/og` card route with real numbers, `summary_large_image` (2026-07-29)
 7. **Full SSR** — complete search engine optimization (future)
 
 ---

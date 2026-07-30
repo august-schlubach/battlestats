@@ -20,6 +20,15 @@ export async function generateMetadata({ params, searchParams }: PlayerPageProps
     const realmParam = realm && ['na', 'eu', 'asia'].includes(realm) ? realm : 'na';
     const decoded = decodeURIComponent(playerName);
     const url = getSiteUrl(`/player/${playerName}?realm=${realmParam}`);
+    // The card renders the player's real numbers. It is built here rather than by
+    // the opengraph-image file convention because only metadata sees the realm,
+    // and a realm-blind card can show a same-named account from another realm.
+    // The numbers stay out of `description`: a fetch here would sit on the HTML
+    // critical path for every visitor, whereas the card route is only reached
+    // when a crawler scrapes a shared link (and it is Cache-Control'd).
+    const ogImage = getSiteUrl(
+        `/og?kind=player&name=${encodeURIComponent(decoded)}&realm=${realmParam}`,
+    );
 
     return {
         title: `${decoded} — WoWs Battlestats`,
@@ -31,11 +40,13 @@ export async function generateMetadata({ params, searchParams }: PlayerPageProps
             url,
             siteName: 'WoWs Battlestats',
             type: 'profile',
+            images: [{ url: ogImage, width: 1200, height: 630, alt: `${decoded} — WoWs Battlestats` }],
         },
         twitter: {
-            card: 'summary',
+            card: 'summary_large_image',
             title: `${decoded} — WoWs Battlestats`,
             description: `Player statistics for ${decoded} on World of Warships.`,
+            images: [ogImage],
         },
     };
 }

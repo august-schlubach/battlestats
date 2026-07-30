@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
+import CopyLinkButton from './CopyLinkButton';
 import DeferredSection from './DeferredSection';
 import { resilientDynamicImport } from './resilientDynamicImport';
 import { useClanMembers } from './useClanMembers';
@@ -84,6 +85,7 @@ const ClanDetail: React.FC<ClanDetailProps> = ({ clan, onSelectMember }) => {
                     <h1 className="text-3xl font-semibold tracking-tight text-[var(--text-primary)]">
                         [{clan.tag}] {clan.name}
                     </h1>
+                    <CopyLinkButton eventName="clan-share" ariaLabel="Copy shareable clan URL" />
                 </div>
                 <p className="mt-1 text-sm text-[var(--text-secondary)]">
                     {clan.members_count} members

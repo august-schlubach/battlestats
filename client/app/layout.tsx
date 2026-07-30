@@ -12,6 +12,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import { RealmProvider } from "./context/RealmContext";
 import { DegradationProvider } from "./context/DegradationContext";
 import ConnectionHint from "./components/ConnectionHint";
+import VisitorIdentity from "./components/VisitorIdentity";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -30,11 +31,14 @@ export const metadata: Metadata = {
     description: "World of Warships player and clan statistics.",
     siteName: "WoWs Battlestats",
     type: "website",
+    // Branded default card; entity pages override with their own numbers.
+    images: [{ url: "/og", width: 1200, height: 630, alt: "WoWs Battlestats" }],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "WoWs Battlestats",
     description: "World of Warships player and clan statistics.",
+    images: ["/og"],
   },
 };
 
@@ -70,6 +74,9 @@ export default function RootLayout({
                 </div>
               </header>
               <main className="pb-8">
+                {/* Gated identically to the tracker tag above: without the
+                    script there is nothing to identify. */}
+                {enableUmami ? <VisitorIdentity /> : null}
                 <ConnectionHint />
                 {children}
               </main>

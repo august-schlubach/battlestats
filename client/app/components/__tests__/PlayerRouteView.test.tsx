@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import PlayerRouteView from '../PlayerRouteView';
+import { readLastViewedPlayer } from '../../lib/lastViewedPlayer';
 
 const pushMock = jest.fn();
 const capturedProps: { current: null | Record<string, unknown> } = { current: null };
@@ -47,6 +48,7 @@ describe('PlayerRouteView', () => {
         pushMock.mockReset();
         capturedProps.current = null;
         trackEntityDetailViewMock.mockReset();
+        window.localStorage.clear();
         global.fetch = jest.fn();
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
     });
@@ -111,6 +113,25 @@ describe('PlayerRouteView', () => {
             entityName: 'Player One',
             entitySlug: 'Player One',
         });
+        // A resolved profile becomes the landing page's "last viewed" offer.
+        expect(readLastViewedPlayer()).toEqual({ name: 'Player One', realm: 'na' });
+    });
+
+    it('does not remember a player whose load failed', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: false,
+            status: 404,
+            headers: {
+                get: (headerName: string) => headerName === 'content-type' ? 'application/json' : null,
+            },
+            json: async () => ({ detail: 'Not found' }),
+        });
+
+        render(<PlayerRouteView playerName="Ghost" />);
+
+        await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+        // A 404 must never become the landing page's offer.
+        await waitFor(() => expect(readLastViewedPlayer()).toBeNull());
     });
 
     it('renders the player under React.StrictMode instead of a spurious "not found" (dev double-mount abort)', async () => {

@@ -21,6 +21,9 @@ export async function generateMetadata({ params, searchParams }: ClanPageProps):
     const decoded = decodeURIComponent(clanSlug);
     const label = decoded.replace(/^\d+-/, '') || decoded;
     const url = getSiteUrl(`/clan/${clanSlug}?realm=${realmParam}`);
+    const ogImage = getSiteUrl(
+        `/og?kind=clan&slug=${encodeURIComponent(clanSlug)}&label=${encodeURIComponent(label)}&realm=${realmParam}`,
+    );
 
     return {
         title: `${label} — Clan — WoWs Battlestats`,
@@ -32,11 +35,13 @@ export async function generateMetadata({ params, searchParams }: ClanPageProps):
             url,
             siteName: 'WoWs Battlestats',
             type: 'website',
+            images: [{ url: ogImage, width: 1200, height: 630, alt: `${label} — WoWs Battlestats` }],
         },
         twitter: {
-            card: 'summary',
+            card: 'summary_large_image',
             title: `${label} — Clan — WoWs Battlestats`,
             description: `Clan statistics for ${label} on World of Warships.`,
+            images: [ogImage],
         },
     };
 }

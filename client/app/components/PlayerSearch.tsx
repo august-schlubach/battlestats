@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import LastViewedPlayerLink from './LastViewedPlayerLink';
 import RealmTopShipsTreemapSVG from './RealmTopShipsTreemapSVG';
 import ShipLeaderboard, { type ShipBucket, type ShipLeaderboardHandle } from './ShipLeaderboard';
 import { buildPlayerPath } from '../lib/entityRoutes';
@@ -37,6 +38,11 @@ const PlayerSearch: React.FC = () => {
 
     return (
         <div className="py-4">
+            {/* A cold landing arrival has to type a name before anything is about
+                them; a returning visitor gets one click back instead. Renders
+                nothing (and reserves no space) when there is no history. */}
+            <LastViewedPlayerLink />
+
             {/* Realm most-played-ships treemap. Horizontal inset comes from the
                 site column (layout.tsx); this component adds vertical spacing only. */}
             <div className="mt-2 pt-6">

@@ -16,6 +16,7 @@ import {
     usePlayerLiveRefresh,
 } from './usePlayerLiveRefresh';
 import { trackEntityDetailView } from '../lib/visitAnalytics';
+import { rememberLastViewedPlayer } from '../lib/lastViewedPlayer';
 import { useRealm, type Realm } from '../context/RealmContext';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
@@ -110,6 +111,10 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                 });
                 if (!cancelled) {
                     setPlayerData(data);
+                    // Only a resolved profile is worth remembering, so this sits
+                    // after the fetch rather than on navigation: a 404 or an
+                    // abandoned load must not become the landing page's offer.
+                    rememberLastViewedPlayer(data.name || playerName, realm);
                     setInitialPending(parsePendingHeader(headers[PLAYER_REFRESH_PENDING_HEADER]));
                     setInitialNextRefresh(parseNextRefreshHeader(headers[PLAYER_NEXT_REFRESH_HEADER]));
 
