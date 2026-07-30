@@ -73,7 +73,6 @@ export interface BattleHistoryPayload {
     // current ranked season — used to label the ranked header in place of
     // the date-window label. Null/absent for random/combined.
     ranked_season_name?: string | null;
-    has_recent_24h_activity?: boolean;
     as_of: string;
     totals: BattleHistoryTotals;
     by_ship: BattleHistoryByShip[];
@@ -702,24 +701,26 @@ const WINDOW_LABEL: Record<BattleHistoryWindow, string> = {
     fortyfive: '45d', year: 'Year',
 };
 const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
-    day: 'Last 24 hours from now (rolling, not today\'s calendar date)',
+    day: 'Today (UTC calendar date, matching the trend strip\'s last bar)',
     week: 'Last 7 days',
     month: 'Last 30 days',
     fortyfive: 'Last 45 days',
     year: 'Last 365 days',
 };
 // Tooltip shown when a window pill is disabled for having no battles in its
-// span. Day's emptiness is a backend flag (has_recent_24h_activity); week/
-// month are derived client-side from the month by_day the card already holds.
+// span. Every window's emptiness is derived client-side from the 45-day strip
+// the card already holds — Day included, since 2026-07-30 made it a calendar
+// window like the rest (it previously needed a backend flag because a rolling
+// 24h span could not be read off calendar buckets).
 const WINDOW_TITLE_EMPTY: Record<BattleHistoryWindow, string> = {
-    day: 'No battles in the last 24 hours',
+    day: 'No battles today',
     week: 'No battles in the last 7 days',
     month: 'No battles in the last 30 days',
     fortyfive: 'No battles in the last 45 days',
     year: 'No battles in the last 365 days',
 };
 const WINDOW_HEADER: Record<BattleHistoryWindow, string> = {
-    day: 'Last 24 hours',
+    day: 'Today',
     week: 'Last 7 days',
     month: 'Last 30 days',
     fortyfive: 'Last 45 days',
@@ -1058,7 +1059,9 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         stripDays.slice(Math.max(0, stripDays.length - n))
             .reduce((s, d) => s + (d.battles || 0), 0);
     const isWindowEmpty = (w: BattleHistoryWindow): boolean => {
-        if (w === 'day') return payload?.has_recent_24h_activity === false;
+        // Uniform across all four pills: one array, one bucketing, so a pill's
+        // enabled state cannot disagree with the window it opens. Gated on
+        // stripLoaded so a loading card never dims a pill on absent data.
         if (!stripLoaded) return false;
         if (w === 'year') return false;
         return sumTrailingBattles(WINDOW_SPAN_DAYS[w]) === 0;

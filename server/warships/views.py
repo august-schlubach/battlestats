@@ -701,13 +701,21 @@ BATTLE_HISTORY_PERIODS = {
 }
 
 # Rolling-window picker (`?window=...`) — the user-facing API the frontend
-# pill row drives. Each entry maps to a (period, windows) pair the
-# existing daily-rollup query path can handle, except `day` which routes
-# through `_build_battle_history_payload_24h()` (BattleEvent-direct,
-# hour-precise — bypasses the calendar-bucketed daily rollup so the
-# 24h window is true-rolling rather than "today's calendar date").
+# pill row drives. EVERY entry maps to a (period, windows) pair the daily-
+# rollup query path handles, `day` included: it is simply the 1-day window.
+#
+# `day` was a true-rolling 24h view served by a separate BattleEvent-direct
+# builder until 2026-07-30. That made it the only window whose span did not
+# correspond to whole calendar bars, so the card contradicted itself — the
+# strip's last bar (today, UTC) and the Day totals (the trailing 24h, which
+# reaches back into yesterday's bar) legitimately disagreed. Observed on
+# `fimm500`: the bar read 3 battles / 2W while Day read 6 battles / 50%,
+# both correct, because a 22:20 session the previous evening was inside the
+# rolling window but belonged to the previous bar. Day is now today's UTC
+# calendar date, off the same rollup every other window reads, so the bar,
+# the bracket and the totals cannot disagree by construction.
 BATTLE_HISTORY_WINDOWS = {
-    "day":    {"period": "daily", "windows": 1, "hours": 24},
+    "day":    {"period": "daily", "windows": 1},
     "week":   {"period": "daily", "windows": 7},
     "month":  {"period": "daily", "windows": 30},
     # 60/90-day windows landed with the battle-history retention raise
@@ -730,12 +738,15 @@ BATTLE_HISTORY_DEFAULT_MODE = "random"
 def _battle_history_cache_key(realm: str, player_name: str, period: str,
                               windows: int, mode: str) -> str:
     norm = (player_name or "").strip().lower()
-    # v9: payload carries `has_recent_24h_activity` so the frontend can gray
+    # v9: payload carried `has_recent_24h_activity` so the frontend could gray
     # out the Day pill without an extra round-trip.
-    # v10: that flag is mode-scoped. v9 entries hold the mode-blind value, so
-    # they must not be served — a ranked-only 24h lit the random Day pill.
+    # v10: that flag became mode-scoped.
+    # v11: the flag is GONE and `day` is a calendar window — the client derives
+    # every pill's emptiness from the 45-day strip it already holds. v10 `day`
+    # entries hold rolling-24h totals under a different period key, so nothing
+    # earlier may be served.
     return realm_cache_key(
-        realm, f"battle-history:v10:{norm}:{period}:{windows}:{mode}"
+        realm, f"battle-history:v11:{norm}:{period}:{windows}:{mode}"
     )
 
 
@@ -753,7 +764,7 @@ def invalidate_battle_history_cache(realm: str, player_name: str) -> None:
     """
     keys = []
     for window_arg, cfg in BATTLE_HISTORY_WINDOWS.items():
-        cache_period_key = window_arg if "hours" in cfg else cfg["period"]
+        cache_period_key = cfg["period"]
         for mode in BATTLE_HISTORY_MODES:
             keys.append(_battle_history_cache_key(
                 realm, player_name, cache_period_key, cfg["windows"], mode))
@@ -767,41 +778,6 @@ def _period_window_start(today, period: str, windows: int):
     if period == "daily":
         return today - _td(days=windows - 1)
     raise ValueError(f"Unknown period: {period}")
-
-
-def _battle_events_24h_qs(player, mode: str, ranked_ctx=None, since=None):
-    """The BattleEvents the rolling 24h `day` window is built from.
-
-    Single source of truth for that scope. `_build_battle_history_payload_24h`
-    aggregates this queryset and `_has_recent_24h_activity` probes it, so the
-    Day pill's enabled state cannot disagree with what clicking Day actually
-    shows — which is exactly what happened when the probe was mode-blind.
-    """
-    from warships.models import BattleEvent
-    since = since or (timezone.now() - timedelta(hours=24))
-    qs = BattleEvent.objects.filter(player=player, detected_at__gte=since)
-    # `combined` deliberately spans both modes; random/ranked are scoped.
-    if mode in ("random", "ranked"):
-        qs = qs.filter(mode=mode)
-    # Ranked is season-scoped, so play from a closed season doesn't count.
-    if ranked_ctx is not None and ranked_ctx.get("season_id") is not None:
-        qs = qs.filter(season_id=ranked_ctx["season_id"])
-    return qs
-
-
-def _has_recent_24h_activity(player, mode: str, ranked_ctx=None) -> bool:
-    """Whether the player has battles in the trailing 24h **in this mode**.
-    Drives the frontend's gray-out of the Day pill so the user doesn't click
-    into an empty window.
-
-    Mode-scoped because the pill is: a player whose only recent play is ranked
-    must not get a lit Day pill on the random Activity tab. `battles_delta > 0`
-    rather than bare existence, matching the day payload's own
-    `totals["battles"] > 0` test.
-    """
-    return _battle_events_24h_qs(
-        player, mode, ranked_ctx,
-    ).filter(battles_delta__gt=0).exists()
 
 
 # Minimum prior-battles count required for a meaningful lifetime delta.
@@ -918,281 +894,6 @@ def _current_ranked_season_context(player) -> dict:
                     "losses": snap.losses,
                 }
     return ctx
-
-
-def _build_battle_history_payload_24h(player, mode: str) -> dict:
-    """Build the battle-history payload for the rolling 24h `day` window.
-
-    The calendar-bucketed daily rollup (`PlayerDailyShipStats.date`) can't
-    serve a true rolling 24h view — a `date >= today` filter only catches
-    today's row, missing the 12+h of yesterday that's still inside the
-    window. So this path queries `BattleEvent.detected_at` directly,
-    aggregates per (ship_id, mode) in Python, and emits the same payload
-    shape `_build_battle_history_payload()` produces.
-    """
-    from warships.models import PlayerDailyShipStats as _PDSS, Ship
-
-    now = timezone.now()
-    since = now - timedelta(hours=24)
-
-    available_modes = list(
-        _PDSS.objects.filter(player=player)
-        .values_list("mode", flat=True).distinct().order_by("mode")
-    )
-
-    # Ranked is season-scoped: the window, the per-ship/overall WR baselines,
-    # and the season label all derive from the player's current ranked season
-    # so the bars and the WR/O walk-back stay internally consistent across a
-    # season boundary. Random/combined are untouched.
-    ranked_ctx = (
-        _current_ranked_season_context(player) if mode == "ranked" else None
-    )
-
-    rows = list(
-        _battle_events_24h_qs(player, mode, ranked_ctx, since)
-        .order_by("detected_at", "ship_id")
-    )
-
-    lifetime_by_ship: dict = {}
-    for entry in (player.battles_json or []):
-        if not isinstance(entry, dict):
-            continue
-        ship_id = entry.get("ship_id")
-        if ship_id is None:
-            continue
-        try:
-            lifetime_by_ship[int(ship_id)] = {
-                "battles": int(entry.get("pvp_battles", 0) or 0),
-                "wins": int(entry.get("wins", 0) or 0),
-                "losses": int(entry.get("losses", 0) or 0),
-            }
-        except (TypeError, ValueError):
-            continue
-
-    totals = {
-        "battles": 0, "wins": 0, "losses": 0,
-        "damage": 0, "frags": 0, "xp": 0, "planes_killed": 0,
-        "survived_battles": 0,
-    }
-    totals_random_battles = 0
-    totals_random_wins = 0
-    by_ship_acc: dict = {}
-
-    ship_ids = {row.ship_id for row in rows}
-    ship_meta = {
-        s.ship_id: s for s in Ship.objects.filter(ship_id__in=ship_ids)
-    }
-
-    for row in rows:
-        b = row.battles_delta or 0
-        w = row.wins_delta or 0
-        l = row.losses_delta or 0
-        f = row.frags_delta or 0
-        dmg = row.damage_delta or 0
-        xp = row.xp_delta or 0
-        planes = row.planes_killed_delta or 0
-        survived_inc = 1 if row.survived else 0
-
-        totals["battles"] += b
-        totals["wins"] += w
-        totals["losses"] += l
-        totals["damage"] += dmg
-        totals["frags"] += f
-        totals["xp"] += xp
-        totals["planes_killed"] += planes
-        totals["survived_battles"] += survived_inc
-        if row.mode == _PDSS.MODE_RANDOM:
-            totals_random_battles += b
-            totals_random_wins += w
-
-        ship_entry = by_ship_acc.setdefault(row.ship_id, {
-            "ship_id": row.ship_id,
-            "ship_name": row.ship_name or (ship_meta.get(row.ship_id).name
-                                           if ship_meta.get(row.ship_id)
-                                           else ""),
-            "ship_tier": ship_meta.get(row.ship_id).tier
-            if ship_meta.get(row.ship_id) else None,
-            "ship_type": ship_meta.get(row.ship_id).ship_type
-            if ship_meta.get(row.ship_id) else None,
-            "battles": 0, "wins": 0, "losses": 0, "frags": 0,
-            "damage": 0, "xp": 0, "planes_killed": 0,
-            "survived_battles": 0,
-            "_random_battles": 0, "_random_wins": 0,
-        })
-        ship_entry["battles"] += b
-        ship_entry["wins"] += w
-        ship_entry["losses"] += l
-        ship_entry["frags"] += f
-        ship_entry["damage"] += dmg
-        ship_entry["xp"] += xp
-        ship_entry["planes_killed"] += planes
-        ship_entry["survived_battles"] += survived_inc
-        if row.mode == _PDSS.MODE_RANDOM:
-            ship_entry["_random_battles"] += b
-            ship_entry["_random_wins"] += w
-
-    win_rate = round(
-        100.0 * totals["wins"] / totals["battles"], 1
-    ) if totals["battles"] else 0.0
-    avg_damage = int(round(totals["damage"] / totals["battles"])) \
-        if totals["battles"] else 0
-    survival_rate = round(
-        100.0 * totals["survived_battles"] / totals["battles"], 1
-    ) if totals["battles"] else 0.0
-
-    by_ship = sorted(by_ship_acc.values(),
-                     key=lambda s: s["battles"], reverse=True)
-    for s in by_ship:
-        s["win_rate"] = round(
-            100.0 * s["wins"] / s["battles"], 1) if s["battles"] else 0.0
-        s["avg_damage"] = int(round(s["damage"] / s["battles"])) \
-            if s["battles"] else 0
-        period_random_battles = s.pop("_random_battles", 0)
-        period_random_wins = s.pop("_random_wins", 0)
-        s["is_ranked_only_period"] = (
-            mode == "combined"
-            and s["battles"] > 0
-            and period_random_battles == 0
-        )
-        # Pick the per-ship WR/O baseline and the period subset to subtract
-        # from it. random/combined anchor on the randoms-only career baseline
-        # (battles_json) and the period's random subset; ranked anchors on the
-        # current season's per-ship cumulative and the full (all-ranked)
-        # period subset.
-        if mode == "ranked":
-            lifetime = ranked_ctx["by_ship"].get(s["ship_id"]) if ranked_ctx else None
-            period_base_battles = s["battles"]
-            period_base_wins = s["wins"]
-        elif mode in ("random", "combined"):
-            lifetime = lifetime_by_ship.get(s["ship_id"])
-            period_base_battles = period_random_battles
-            period_base_wins = period_random_wins
-        else:
-            lifetime = None
-            period_base_battles = 0
-            period_base_wins = 0
-        if (lifetime
-                and lifetime["battles"] > 0
-                and period_base_battles > 0
-                and lifetime["battles"] >= period_base_battles):
-            prior_battles = lifetime["battles"] - period_base_battles
-            prior_wins = lifetime["wins"] - period_base_wins
-            lifetime_wr_now = round(
-                100.0 * lifetime["wins"] / lifetime["battles"], 1)
-            if prior_battles < _MIN_PRIOR_BATTLES_FOR_DELTA:
-                s["delta_win_rate"] = None
-                # NEW is a random-mode "first time in this ship" affordance;
-                # ranked anchors on the season (not career), so a ship whose
-                # whole season sits in the window isn't "new" — it just lacks
-                # a prior-to-window sample for a delta.
-                s["is_new_ship"] = mode != "ranked"
-                # When the window covers the ENTIRE baseline (career for
-                # random, season for ranked) the WR/O exactly duplicates the
-                # period WR/S — suppress it so the column doesn't show two
-                # identical values. WR/O reappears once a prior-to-window
-                # sample exists (a narrower window, or the season ages past
-                # the window).
-                if prior_battles == 0:
-                    s["lifetime_battles"] = None
-                    s["lifetime_win_rate"] = None
-                else:
-                    s["lifetime_battles"] = lifetime["battles"]
-                    s["lifetime_win_rate"] = lifetime_wr_now
-            else:
-                s["lifetime_battles"] = lifetime["battles"]
-                s["lifetime_win_rate"] = lifetime_wr_now
-                s["is_new_ship"] = False
-                # Sync skew between the lifetime snapshot and the live rollup
-                # can make the subtracted prior impossible — more wins than
-                # battles, or negative — when the snapshot predates some of
-                # the period's recorded battles. That would yield a >100%
-                # prior WR and a nonsense delta. Keep the valid lifetime WR
-                # but suppress the delta until the snapshot catches up.
-                if 0 <= prior_wins <= prior_battles:
-                    prior_wr = round(100.0 * prior_wins / prior_battles, 1)
-                    s["delta_win_rate"] = round(lifetime_wr_now - prior_wr, 1)
-                else:
-                    s["delta_win_rate"] = None
-        else:
-            s["lifetime_battles"] = None
-            s["lifetime_win_rate"] = None
-            s["delta_win_rate"] = None
-            s["is_new_ship"] = (
-                mode in ("random", "combined") and period_random_battles > 0
-            )
-
-    # Single 24h-aggregate bar in by_day. The frontend chart treats this
-    # as one wide bar — a per-hour breakdown is a separate runbook.
-    by_day = ([{
-        "date": now.date().isoformat(),
-        "battles": totals["battles"],
-        "wins": totals["wins"],
-        "damage": totals["damage"],
-        "frags": totals["frags"],
-    }] if totals["battles"] else [])
-
-    # Overall WR/O baseline + the period subset to subtract. ranked anchors on
-    # the current season's cumulative (all of the period is ranked); random/
-    # combined anchor on the randoms-only career counters and the period's
-    # random subset.
-    if mode == "ranked":
-        lifetime_battles_overall = ranked_ctx["overall_battles"] if ranked_ctx else 0
-        lifetime_wins_overall = ranked_ctx["overall_wins"] if ranked_ctx else 0
-        period_base_battles_overall = totals["battles"]
-        period_base_wins_overall = totals["wins"]
-    elif mode in ("random", "combined"):
-        lifetime_battles_overall = int(player.pvp_battles or 0)
-        lifetime_wins_overall = int(player.pvp_wins or 0)
-        period_base_battles_overall = totals_random_battles
-        period_base_wins_overall = totals_random_wins
-    else:
-        lifetime_battles_overall = 0
-        lifetime_wins_overall = 0
-        period_base_battles_overall = 0
-        period_base_wins_overall = 0
-    lifetime_overall_wr = round(
-        100.0 * lifetime_wins_overall / lifetime_battles_overall, 1
-    ) if lifetime_battles_overall else None
-    if (lifetime_battles_overall >= period_base_battles_overall
-            and period_base_battles_overall > 0):
-        prior_battles_overall = lifetime_battles_overall - period_base_battles_overall
-        prior_wins_overall = lifetime_wins_overall - period_base_wins_overall
-        # Same sync-skew guard as the per-ship delta: an impossible prior
-        # (wins outside [0, battles]) means the lifetime snapshot and the
-        # rollup disagree; suppress the delta rather than show a nonsense
-        # value.
-        prior_overall_wr = round(
-            100.0 * prior_wins_overall / prior_battles_overall, 1
-        ) if (prior_battles_overall > 0
-              and 0 <= prior_wins_overall <= prior_battles_overall) else None
-        delta_overall_wr = round(
-            lifetime_overall_wr - prior_overall_wr, 1
-        ) if prior_overall_wr is not None and lifetime_overall_wr is not None else None
-    else:
-        delta_overall_wr = None
-
-    return {
-        "period": "day",
-        "windows": 1,
-        "window_days": None,
-        "window_hours": 24,
-        "mode": mode,
-        "available_modes": available_modes,
-        "ranked_season_name": ranked_ctx["season_name"] if ranked_ctx else None,
-        "has_recent_24h_activity": totals["battles"] > 0,
-        "as_of": now.isoformat(),
-        "totals": {
-            **totals,
-            "win_rate": win_rate,
-            "avg_damage": avg_damage,
-            "survival_rate": survival_rate,
-            "lifetime_battles": lifetime_battles_overall or None,
-            "lifetime_win_rate": lifetime_overall_wr,
-            "delta_win_rate": delta_overall_wr,
-        },
-        "by_ship": by_ship,
-        "by_day": by_day,
-    }
 
 
 def _build_battle_history_payload(player, period: str, windows: int,
@@ -1507,9 +1208,6 @@ def _build_battle_history_payload(player, period: str, windows: int,
         "mode": mode,
         "available_modes": available_modes,
         "ranked_season_name": ranked_ctx["season_name"] if ranked_ctx else None,
-        "has_recent_24h_activity": _has_recent_24h_activity(
-            player, mode, ranked_ctx,
-        ),
         "as_of": timezone.now().isoformat(),
         "totals": {
             **totals,
@@ -1554,8 +1252,7 @@ def battle_history(request, player_name: str) -> Response:
         cfg = BATTLE_HISTORY_WINDOWS[window_arg]
         period = cfg["period"]
         windows = cfg["windows"]
-        is_24h_window = "hours" in cfg
-        cache_period_key = window_arg if is_24h_window else period
+        cache_period_key = period
     else:
         period = request.query_params.get("period", "daily")
         if period not in BATTLE_HISTORY_PERIODS:
@@ -1573,7 +1270,6 @@ def battle_history(request, player_name: str) -> Response:
         except (TypeError, ValueError):
             windows = period_cfg["default_windows"]
         windows = max(1, min(period_cfg["max_windows"], windows))
-        is_24h_window = False
         cache_period_key = period
 
     player = (
@@ -1593,11 +1289,8 @@ def battle_history(request, player_name: str) -> Response:
     if cached is not None:
         payload = cached
     else:
-        if is_24h_window:
-            payload = _build_battle_history_payload_24h(player, mode)
-        else:
-            payload = _build_battle_history_payload(
-                player, period, windows, mode)
+        payload = _build_battle_history_payload(
+            player, period, windows, mode)
         cache.set(cache_key, payload, BATTLE_HISTORY_CACHE_TTL)
     # Damage-treemap baselines attach per-request (cache-only, never
     # computed inline) so they hydrate as the background warm fills them,
