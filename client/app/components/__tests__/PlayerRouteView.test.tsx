@@ -1,7 +1,8 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import PlayerRouteView from '../PlayerRouteView';
-import { readLastViewedPlayer } from '../../lib/lastViewedPlayer';
+import { RealmProvider } from '../../context/RealmContext';
+import { readLastViewedPlayers } from '../../lib/lastViewedPlayer';
 
 const pushMock = jest.fn();
 const capturedProps: { current: null | Record<string, unknown> } = { current: null };
@@ -11,6 +12,9 @@ jest.mock('next/navigation', () => ({
     useRouter: () => ({
         push: pushMock,
     }),
+    // RealmProvider keys its resolve effect on the pathname; only the cross-realm
+    // test mounts the real provider, but the mock has to satisfy it.
+    usePathname: () => '/player/Test',
 }));
 
 jest.mock('../../lib/visitAnalytics', () => ({
@@ -114,7 +118,7 @@ describe('PlayerRouteView', () => {
             entitySlug: 'Player One',
         });
         // A resolved profile becomes the landing page's "last viewed" offer.
-        expect(readLastViewedPlayer()).toEqual({ name: 'Player One', realm: 'na' });
+        expect(readLastViewedPlayers()).toEqual([{ name: 'Player One', realm: 'na' }]);
     });
 
     it('does not remember a player whose load failed', async () => {
@@ -131,7 +135,77 @@ describe('PlayerRouteView', () => {
 
         await waitFor(() => expect(global.fetch).toHaveBeenCalled());
         // A 404 must never become the landing page's offer.
-        await waitFor(() => expect(readLastViewedPlayer()).toBeNull());
+        await waitFor(() => expect(readLastViewedPlayers()).toEqual([]));
+    });
+
+    it('remembers a cross-realm player once, under the realm they resolved in', async () => {
+        // Regression: the load effect writes with the REQUESTED realm, then the
+        // fallback calls setRealm(resolved) and — because `realm` is in the effect's
+        // deps — the effect re-runs and writes again. With a single stored slot the
+        // second write overwrote the first; with a list it would leave the landing
+        // row holding this player twice, one entry under a realm the account does
+        // not exist in.
+        (global.fetch as jest.Mock).mockResolvedValue({
+            ok: true,
+            headers: {
+                get: (headerName: string) => {
+                    const key = headerName.toLowerCase();
+                    if (key === 'content-type') return 'application/json';
+                    if (key === 'x-resolved-realm') return 'eu';
+                    return null;
+                },
+            },
+            json: async () => ({
+                id: 2,
+                name: 'Wanderer',
+                player_id: 88,
+                kill_ratio: null,
+                actual_kdr: null,
+                player_score: null,
+                total_battles: 10,
+                pvp_battles: 8,
+                pvp_wins: 4,
+                pvp_losses: 4,
+                pvp_ratio: 50,
+                pvp_survival_rate: 30,
+                wins_survival_rate: null,
+                creation_date: '2024-01-01',
+                days_since_last_battle: 2,
+                last_battle_date: '2026-03-01',
+                recent_games: {},
+                is_hidden: false,
+                stats_updated_at: '2026-03-01T00:00:00Z',
+                last_fetch: '2026-03-01T00:00:00Z',
+                last_lookup: '2026-03-01T00:00:00Z',
+                clan: null,
+                clan_name: null,
+                clan_tag: null,
+                clan_id: null,
+                verdict: null,
+            }),
+        });
+
+        // The real provider, so setRealm() actually re-runs the load effect the way
+        // it does in the browser. The default context value's no-op setRealm would
+        // hide the very re-entry this test exists to cover.
+        render(
+            <RealmProvider>
+                <PlayerRouteView playerName="Wanderer" />
+            </RealmProvider>,
+        );
+
+        await waitFor(() => {
+            expect(readLastViewedPlayers()).toEqual([{ name: 'Wanderer', realm: 'eu' }]);
+        });
+
+        // Let the realm switch settle and confirm the re-run did not add a second entry.
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenCalledWith(
+                '/api/player/Wanderer?realm=eu',
+                expect.objectContaining({ signal: expect.anything() }),
+            );
+        });
+        expect(readLastViewedPlayers()).toEqual([{ name: 'Wanderer', realm: 'eu' }]);
     });
 
     it('renders the player under React.StrictMode instead of a spurious "not found" (dev double-mount abort)', async () => {

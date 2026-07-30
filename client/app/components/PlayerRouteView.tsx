@@ -111,10 +111,23 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                 });
                 if (!cancelled) {
                     setPlayerData(data);
+                    const resolved = (headers[RESOLVED_REALM_HEADER] || '').toLowerCase() as Realm;
+                    const isCrossRealm = Boolean(resolved) && resolved !== realm
+                        && VALID_REALMS.includes(resolved);
+
                     // Only a resolved profile is worth remembering, so this sits
                     // after the fetch rather than on navigation: a 404 or an
                     // abandoned load must not become the landing page's offer.
-                    rememberLastViewedPlayer(data.name || playerName, realm);
+                    //
+                    // Remember the realm the player was RESOLVED in, not the one
+                    // requested. A cross-realm fallback calls setRealm() below, and
+                    // `realm` is in this effect's deps, so the effect re-runs and
+                    // writes a second time. Storing the requested realm here would
+                    // leave the landing row holding the same player twice, one of
+                    // them under a realm that account does not exist in; storing the
+                    // resolved realm makes both writes the same identity, which the
+                    // store's move-to-front dedup collapses to one entry.
+                    rememberLastViewedPlayer(data.name || playerName, isCrossRealm ? resolved : realm);
                     setInitialPending(parsePendingHeader(headers[PLAYER_REFRESH_PENDING_HEADER]));
                     setInitialNextRefresh(parseNextRefreshHeader(headers[PLAYER_NEXT_REFRESH_HEADER]));
 
@@ -124,8 +137,7 @@ const PlayerRouteView: React.FC<PlayerRouteViewProps> = ({ playerName }) => {
                     // realm re-runs this effect once on the resolved realm (a
                     // DB-cache hit that reports resolved == requested, so it does
                     // not loop). Rewrite ?realm= so a reload/share is direct.
-                    const resolved = (headers[RESOLVED_REALM_HEADER] || '').toLowerCase() as Realm;
-                    if (resolved && resolved !== realm && VALID_REALMS.includes(resolved)) {
+                    if (isCrossRealm) {
                         setFallbackNotice({ from: realm, to: resolved, name: data.name || playerName });
                         setRealm(resolved);
                         notifyRealmAutoSwitch();
