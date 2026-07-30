@@ -69,14 +69,15 @@ slices for 7 and 30 are unchanged, and 45 becomes available.
 ### 3. The window range bracket
 
 A new `WindowRangeBracket` renders directly beneath `InlineSparkline` in its own
-`<svg viewBox="0 0 100 7" preserveAspectRatio="none" width="100%">`. Sharing the
+`<svg viewBox="0 0 100 9" preserveAspectRatio="none" width="100%">`, sitting
+5px clear of the strip baseline with `overflow: visible`. Sharing the
 chart's 0–100 x domain and its non-uniform stretch makes the bracket ends land
 exactly on bar edges at any container width. It is `aria-hidden`: the card header
 already announces the window in words ("Last 7 days").
 
 **Geometry.** The bracket is drawn once as a unit — a horizontal rule with a short
-vertical tick at each end, spanning x=0→100 — and then placed by one group
-transform:
+vertical tick at each end at 3px stroke, spanning x=0→100 — and then placed by one
+group transform:
 
 ```
 left      = (STRIP_DOMAIN_DAYS − spanDays) × (barW + gap)   // exact bar-edge math

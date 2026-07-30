@@ -172,6 +172,29 @@ body {
   }
 }
 
+/* Window range bracket beneath the BattleHistoryCard sparkline. The bracket is
+   drawn once spanning the full strip domain and placed by a transitioned
+   transform, so `transform-box: view-box` + `transform-origin: 0 0` are load-
+   bearing: the initial values would scale it about the viewBox centre and throw
+   the left edge off the bar it is supposed to mark. Transform and opacity share
+   one curve, so widening to the full domain and dissolving are a single motion —
+   and reverse exactly. Duration tracks the bar-rise (410ms) so the strip and its
+   bracket feel like one object. */
+.window-range-bracket {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transition:
+    transform 420ms ease-out,
+    opacity 420ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Snap between spans — the end states still read correctly. */
+  .window-range-bracket {
+    transition: none;
+  }
+}
+
 /* Attention glow for the player-detail insight tabs (Activity, Ships, Profile,
    Ranked, …). The tab strip gets overlooked, so we pull the eye to it: a bright
    accent ring+halo flashes ONCE across all tabs together when the page loads,
