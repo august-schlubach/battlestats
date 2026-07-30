@@ -3532,6 +3532,31 @@
                 "core-audience-kpi-superseded",
                 "growth-instrumentation-retired"
             ]
+        },
+        "agents/runbooks/runbook-django-6-upgrade-2026-07-30.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "django 6 upgrade",
+                "django 6.0",
+                "django 5.2 lts",
+                "django upgrade plan",
+                "asgiref django 6"
+            ],
+            "tags": [
+                "django",
+                "upgrade",
+                "dependencies",
+                "security",
+                "drf",
+                "python"
+            ],
+            "archive_on": [
+                "django-60-deployed"
+            ]
         }
     }
 }
