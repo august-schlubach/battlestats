@@ -16,6 +16,7 @@ _Method: full sweep of `client/app/` for `trackEvent(...)` call sites (all route
 1. **Tracker injection** — `client/app/layout.tsx` renders `<script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848">` **only when `enableUmami`** (`NODE_ENV === "production"`). `npm run dev` injects nothing — there is no local analytics.
 2. **Same-origin proxy** — `/umami/script.js` and the beacon `/umami/api/send` are nginx-proxied to the self-hosted Umami app (`127.0.0.1:3002`, systemd `umami.service` at `/opt/umami`). The frontend never talks to a third-party analytics origin.
 3. **Wrapper** — every event goes through `trackEvent(name, data?)` in `client/app/lib/umami.ts`. It is SSR-safe (no-ops when `window.umami` is absent: SSR, flag off, ad-blocked) and swallows tracker errors — analytics can never throw into the UI. Convention: **kebab-case names, small low-cardinality payloads** (Umami event-data drives dashboard breakdowns, not high-cardinality lookups). Unit tests: `client/app/lib/__tests__/umami.test.ts`.
+3b. **Visitor identity (added 2026-07-29)** — `client/app/components/VisitorIdentity.tsx` hands a durable opaque UUID (`bs-vid` in localStorage, minted by `client/app/lib/visitorId.ts`) to the tracker via `identifyVisitor()` → `window.umami.identify(id)`, which persists it as `session.distinct_id`. Because the tag is `defer`red, the component polls for `window.umami` on a **bounded** 200 ms × 25 schedule and gives up silently. Without it, "returning visitor" is unmeasurable: `session_id` is a salted IP+UA hash and rotates on its own. Runbook: `runbook-audience-growth-instrumentation-2026-07-29.md`.
 4. **Storage** — the managed-PG cluster's separate `umami` database. Custom events are `website_event` rows with `event_type = 2` (pageviews are `event_type = 1`); `trackEvent` props land in `event_data`. Umami connects as the least-privilege `umami_app` role (see hardening runbook).
 5. **Dashboard** — `/umami/` UI, IP-allowlisted to the operator home IP at nginx; only `script.js` + `api/send` are public.
 
@@ -67,6 +68,7 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `treemap-ship` | `{ship_id, ship_name, mode:'random'\|'ranked', realm, target:'leaderboard'\|'route'}` | Click a ship tile in the landing realm treemap | `RealmTopShipsTreemapSVG.tsx:208,211` | ✅ 124 (37) |
 | `treemap-random` | `{realm}` | Click the treemap "Random" mode button | `RealmTopShipsTreemapSVG.tsx:288` | ✅ 38 (23) |
 | `treemap-ranked` | `{realm}` | Click the treemap "Ranked" mode button | `RealmTopShipsTreemapSVG.tsx:288` | ✅ 52 (34) |
+| `landing-last-player` | `{realm}` | Click the "Last viewed &lt;name&gt;" link at the top of the landing page. Only rendered when this browser has opened a profile before (`bs-last-player` in localStorage), so it is invisible to first-time visitors — a low count is the expected shape | `LastViewedPlayerLink.tsx` | 🟡 added 2026-07-29, pending deploy+captures |
 
 ### Player detail
 
@@ -94,14 +96,14 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 | `randoms-filter` | `{realm, control:'type'\|'tier'\|'min_wr'\|'min_battles'\|'activity_mode', value}` | "Ships" insights tab controls: type/tier pills (or "All"; `value` = type name, tier number, or `'all'`), the Min WR / min-battles sliders (fire on release, `value` = the released number), and the Activity radio (`value` ∈ `all\|recent\|window`) | `RandomsSVG.tsx` | ✅ working (slider/radio controls added v3.5.x) |
 | `ranked-seasons-sort` | `{realm, key, direction}` | Click a column header in the ranked-seasons table (Ranked tab). `key` ∈ `season\|highestRank\|battles\|wins\|winRate` | `RankedSeasons.tsx` (handleSort) | 🟡 added 2026-07-15, pending deploy+captures |
 | `ship-banner-click` | `{ship_id, ship_name, rank, realm}` | Click a top-3 ship card in the profile banner above Battle History → `/ship/<id>` | `ShipTopPlayerBanner.tsx` | 🟡 added 2026-07-15, pending deploy+captures (previously only visible as a `ship-page-view`) |
-| `player-share` | `{realm}` | ~~Click "Share" on a player detail page~~ | — | ❌ **removed v2.15.0** (Share button deleted globally 2026-06-24) |
+| `player-share` | `{realm}` | Click "Share" in the player-detail header; copies the realm-qualified canonical URL | `CopyLinkButton.tsx` (via `PlayerDetail.tsx`) | 🟡 **restored 2026-07-29**, pending deploy+captures (removed v2.15.0 → 06-24; 14 events / 12 visitors in its first life) |
 
 ### Clan detail
 
 | Event | Payload | Trigger & reproduction | Source | Status (30d) |
 |---|---|---|---|---|
 | `clan-member-click` | `{realm, source:'clan'\|'player'}` | Click a roster member name. One leaf attach point (`ClanMembers.tsx`); `source` distinguishes the clan page (`'clan'`) from the player-page clan section (`'player'`) — no double-count with the landing player grid | `ClanMembers.tsx:138` | ✅ working; `source` added v2.5.0 |
-| `clan-share` | `{realm}` | ~~Click "Share" on a clan detail page~~ | — | ❌ **removed v2.15.0** (Share button deleted globally 2026-06-24) |
+| `clan-share` | `{realm}` | Click "Share" in the clan-detail header; copies the realm-qualified canonical URL | `CopyLinkButton.tsx` (via `ClanDetail.tsx`) | 🟡 **restored 2026-07-29**, pending deploy+captures (removed v2.15.0 → 06-24; **zero captures across its entire first life** — expect single-digit usage, that is not a bug) |
 | `clan-chart-2d` | `{realm}` | Click the "2D" chart toggle (desktop) | `ClanDetail.tsx:148` | ✅ 23 (16) |
 | `clan-chart-3d` | `{realm}` | Click the "3D" chart toggle (desktop, when 3D data present) | `ClanDetail.tsx:158` | ✅ 38 (23) |
 | `clan-chart-linear` | `{realm}` | Switch the clan efficiency chart to linear scale | `ClanSVG.tsx:629` | ✅ 136 (78) |

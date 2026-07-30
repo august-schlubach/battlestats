@@ -174,6 +174,24 @@ describe('ClanDetail clan roster hydration wiring', () => {
         expect(screen.getByText('12 members')).toBeInTheDocument();
     });
 
+    // Restored 2026-07-29; the copy behaviour itself is covered in
+    // CopyLinkButton.test.tsx, this only guards the wiring.
+    it('offers the clan copy-link control in the header', () => {
+        render(
+            <ClanDetail
+                clan={{
+                    clan_id: 5555,
+                    name: 'Fixture Clan',
+                    tag: 'FX',
+                    members_count: 12,
+                }}
+                onSelectMember={() => undefined}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: 'Copy shareable clan URL' })).toBeInTheDocument();
+    });
+
     it('wires member selection controls', () => {
         render(
             <ClanDetail

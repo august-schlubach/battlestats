@@ -23,6 +23,9 @@ export async function generateMetadata({ params, searchParams }: ShipPageProps):
     const label = decoded.replace(/^\d+-?/, '').replace(/-/g, ' ').trim() || decoded;
     const titleLabel = label.replace(/\b\w/g, (c) => c.toUpperCase());
     const url = getSiteUrl(`/ship/${shipSlug}?realm=${realmParam}`);
+    const ogImage = getSiteUrl(
+        `/og?kind=ship&label=${encodeURIComponent(titleLabel)}&realm=${realmParam}`,
+    );
 
     return {
         title: `Best ${titleLabel} players — Ship — WoWs Battlestats`,
@@ -34,11 +37,13 @@ export async function generateMetadata({ params, searchParams }: ShipPageProps):
             url,
             siteName: 'WoWs Battlestats',
             type: 'website',
+            images: [{ url: ogImage, width: 1200, height: 630, alt: `Best ${titleLabel} players — WoWs Battlestats` }],
         },
         twitter: {
-            card: 'summary',
+            card: 'summary_large_image',
             title: `Best ${titleLabel} players — WoWs Battlestats`,
             description: `Top players in the ${titleLabel} on World of Warships.`,
+            images: [ogImage],
         },
     };
 }

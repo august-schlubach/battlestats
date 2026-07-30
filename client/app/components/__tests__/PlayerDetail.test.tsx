@@ -207,6 +207,14 @@ describe('PlayerDetail efficiency-rank icon', () => {
         expect(status).toHaveClass('rainbow-text');
     });
 
+    // Restored 2026-07-29; copy behaviour itself is covered in
+    // CopyLinkButton.test.tsx, this only guards the wiring.
+    it('offers the player copy-link control in the header', () => {
+        render(<PlayerDetail player={basePlayer} />);
+
+        expect(screen.getByRole('button', { name: 'Copy shareable player URL' })).toBeInTheDocument();
+    });
+
     it('shows the cooldown countdown in minutes', () => {
         render(
             <PlayerDetail

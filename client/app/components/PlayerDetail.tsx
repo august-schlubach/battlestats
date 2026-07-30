@@ -12,6 +12,7 @@ import RankedPlayerIcon from './RankedPlayerIcon';
 import ClanBattleShieldIcon from './ClanBattleShieldIcon';
 import ShipTopPlayerBanner, { ShipBadge } from './ShipTopPlayerBanner';
 import TopShipBadges from './TopShipBadges';
+import CopyLinkButton from './CopyLinkButton';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
 import wrColor from '../lib/wrColor';
@@ -250,6 +251,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                                 {!player.is_hidden && <TopShipBadges badges={player.ship_badges} realm={player.realm} size="header" />}
                             </div>
+                            <CopyLinkButton eventName="player-share" ariaLabel="Copy shareable player URL" />
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-3">
                             <p className="text-sm text-[var(--accent-light)]">

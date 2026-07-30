@@ -3501,6 +3501,37 @@
                 "tier-type-rework-shipped",
                 "correlation-warmer-superseded"
             ]
+        },
+        "agents/runbooks/runbook-audience-growth-instrumentation-2026-07-29.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "frontend",
+            "aliases": [
+                "audience growth instrumentation",
+                "core audience kpi",
+                "visitor distinct_id",
+                "og share cards",
+                "word of mouth surfaces",
+                "traffic readout 2026-07-29"
+            ],
+            "tags": [
+                "analytics",
+                "umami",
+                "distinct_id",
+                "open-graph",
+                "seo",
+                "share",
+                "landing-page",
+                "growth",
+                "frontend",
+                "kpi"
+            ],
+            "archive_on": [
+                "core-audience-kpi-superseded",
+                "growth-instrumentation-retired"
+            ]
         }
     }
 }
