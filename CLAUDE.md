@@ -29,7 +29,8 @@ docker compose up -d                              # Start all services
 
 ```bash
 cd server
-python -m pytest warships/tests/ --tb=short  # Full release gate (~820 tests, ~15s on Postgres / ~7s sqlite)
+# Full suite — 850 tests, ~5s. sqlite needs --nomigrations (migrations error out on it).
+DJANGO_SECRET_KEY=k DB_ENGINE=sqlite3 python -m pytest warships/tests/ --nomigrations --tb=short
 python -m pytest warships/tests/test_views.py::TestPlayerViewSet::test_player_detail -x  # Single test
 python manage.py makemigrations && python manage.py migrate
 ```
@@ -44,6 +45,8 @@ npm run lint         # ESLint
 npm test             # Lean frontend release gate
 npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single file
 ```
+
+`server/conftest.py` defaults `CELERY_BROKER_URL=memory://` for every test run. Without it settings falls back to `amqp://localhost:5672`, no RabbitMQ is listening, and each task-dispatching test pays a connection-retry timeout — **1020s vs 5.1s** for the same 850 tests, with no failure to show for it. Set it explicitly only to exercise a real broker. It cannot cover `DJANGO_SECRET_KEY`: pytest-django imports settings before conftest runs, so anything read at settings-import time must come from the command line. CI is Postgres + migrations (~24s) and sets its own values.
 
 ### Database / Deploy / Release
 

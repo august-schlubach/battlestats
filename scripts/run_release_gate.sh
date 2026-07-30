@@ -10,6 +10,17 @@ fi
 
 PYTHON_BIN="${PYTHON_BIN:-${DEFAULT_PYTHON_BIN}}"
 
+# The FULL backend suite, not a curated subset. It ran as a hand-picked 3-file
+# slice (142 tests) back when the suite took ~17 minutes locally — a cost that
+# turned out to be RabbitMQ connection-retry timeouts, not real work (see
+# server/conftest.py). With the in-memory broker the whole 850-test suite
+# finishes in ~5s, so the subset bought nothing and left ~700 tests out of the
+# gate. This now matches what CI runs, so the gate and CI can no longer
+# disagree about what "green" means.
+#
+# No -x: surface every failure in one pass, same as CI. The env below is
+# belt-and-braces — conftest.py defaults the Celery values now — but it
+# documents intent at the call site and survives that file changing.
 run_backend_release_tests() {
   local sqlite_dir="${ROOT_DIR}/.tmp"
   local sqlite_db="${sqlite_dir}/release-gate.sqlite3"
@@ -27,10 +38,8 @@ run_backend_release_tests() {
     CELERY_BROKER_URL=memory:// \
     CELERY_RESULT_BACKEND=cache+memory:// \
       "${PYTHON_BIN}" -m pytest --nomigrations \
-        warships/tests/test_views.py \
-        warships/tests/test_realm_isolation.py \
-        warships/tests/test_data_product_contracts.py \
-        -x --tb=short
+        warships/tests/ \
+        --tb=short
   )
 }
 
