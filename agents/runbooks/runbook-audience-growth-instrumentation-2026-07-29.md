@@ -414,13 +414,30 @@ each of the two component suites.
 `PlayerRouteView` **after** the fetch resolves, so a 404 or an abandoned load never becomes the
 landing page's offer. `LastViewedPlayerLink.tsx` reads it after mount (a localStorage read during
 render would be a hydration mismatch), renders nothing and reserves no space for a first-time
-visitor, and emits the new `landing-last-player` event. **D2 remains deferred.**
+visitor, and emits the `landing-last-player` event. **D2 remains deferred.**
 
-**Still owed before deploy.** Playwright cannot install chromium on this box
-(`ubuntu26.04-x64` unsupported), so the two new in-page controls — the header Share button and the
-landing "Last viewed" line — have **not** been visually verified in a browser. The OG cards were.
-Look at both surfaces in light and dark before shipping; lint, build and CI do not catch visual
-regressions.
+**D1 widened to three entries (2026-07-30).** The key now holds an **array**, most recent first,
+capped at 3; the row reads `Last viewed:` with names separated by `·` (middle dot) and **no realm tag**. Identity
+is `(realm, name.toLowerCase())` and a re-view **moves to front**, so repeat visits to one player
+cannot fill every slot. The read is shape-tolerant (`Array.isArray`), so the legacy single-object
+value survives the deploy rather than dropping the affordance for exactly the returning visitors it
+serves. `landing-last-player` keeps its name (history stays comparable) and gains a 1-based
+`position` prop — the only way slots 2 and 3 can later be shown to earn their space. Spec:
+`agents/work-items/landing-recent-players-spec.md`.
+
+The same change fixed a latent **cross-realm double-write**: `PlayerRouteView` wrote with the
+*requested* realm, then the fallback branch called `setRealm(resolved)`, and `realm` sits in the load
+effect's deps, so the effect re-ran and wrote a second time. One slot masked it; three slots would
+have shown the same player twice, one entry under a realm that account does not exist in. The write
+now stores the **resolved** realm, making both writes one identity that dedup collapses. Regression
+test: `PlayerRouteView.test.tsx`, "remembers a cross-realm player once".
+
+**Visual verification (2026-07-30).** The landing "Last viewed" row **has now been checked** in
+light and dark, plus the empty state, via Playwright against the live API. The blocker recorded
+below was the bundled `playwright-core` looking for chromium build 1208; this box has **1234**
+installed at `/home/august/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`, so pass that
+as `executablePath` instead of `chromium.executablePath()`. The header **Share button remains
+visually unverified**.
 
 ## 9. Assertion ledger (QA)
 
@@ -449,9 +466,12 @@ Verified 2026-07-29 against the working tree at `203f34e` and the live tracker.
 
 ## 10. Follow-ups
 
-- [ ] **Visually verify the Share button and the landing "Last viewed" line** in a browser, light
-      and dark, before deploying. Blocked on this box: Playwright has no chromium build for
-      Ubuntu 26.04.
+- [x] ~~Visually verify the landing "Last viewed" line~~ — done 2026-07-30, light + dark + empty
+      state. The block was a build-number mismatch, not a missing browser: point `executablePath`
+      at the installed `chromium-1234` (see section 8).
+- [ ] **Visually verify the Share button** in a browser, light and dark, before deploying.
+- [ ] After the 3-entry row has run a while, check `landing-last-player` by `position`: if slots 2
+      and 3 draw ~no clicks, the row should shrink back rather than keep the space.
 - [ ] Confirm `session.distinct_id` actually fills after deploy (query in section 3). If it stays
       NULL, switch to the event-property fallback rather than debugging Umami internals.
 - [ ] D2: landing-page seeded example. Deferred by decision 5; revisit only if the bounce segment

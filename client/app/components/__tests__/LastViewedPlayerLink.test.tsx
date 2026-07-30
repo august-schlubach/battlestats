@@ -28,7 +28,43 @@ describe('LastViewedPlayerLink', () => {
         const link = screen.getByTestId('last-viewed-player-link');
         expect(link).toHaveTextContent('Nagashino_SB_Nori');
         expect(link).toHaveAttribute('href', '/player/Nagashino_SB_Nori?realm=asia');
-        expect(screen.getByText('asia')).toBeInTheDocument();
+    });
+
+    it('does not label the realm', () => {
+        // Dropped deliberately: the realm rides in the href, and the row reads as a
+        // list of names rather than a table of qualified entries.
+        rememberLastViewedPlayer('Nagashino_SB_Nori', 'asia');
+
+        render(<LastViewedPlayerLink />);
+
+        expect(screen.queryByText('asia')).not.toBeInTheDocument();
+    });
+
+    it('offers every remembered player, most recent first', () => {
+        rememberLastViewedPlayer('Oldest', 'na');
+        rememberLastViewedPlayer('Middle', 'eu');
+        rememberLastViewedPlayer('Newest', 'asia');
+
+        render(<LastViewedPlayerLink />);
+
+        const links = screen.getAllByTestId('last-viewed-player-link');
+        expect(links.map((link) => link.textContent)).toEqual(['Newest', 'Middle', 'Oldest']);
+        expect(links[0]).toHaveAttribute('href', '/player/Newest?realm=asia');
+        expect(links[2]).toHaveAttribute('href', '/player/Oldest?realm=na');
+    });
+
+    it('separates the names but never leads or trails with a separator', () => {
+        rememberLastViewedPlayer('First', 'na');
+        rememberLastViewedPlayer('Second', 'na');
+        rememberLastViewedPlayer('Third', 'na');
+
+        render(<LastViewedPlayerLink />);
+
+        // Three names, two separators.
+        const separators = screen.getAllByTestId('last-viewed-separator');
+        expect(separators).toHaveLength(2);
+        // Middle dot, not an asterisk. Pinned so the glyph cannot drift silently.
+        separators.forEach((separator) => expect(separator).toHaveTextContent('·'));
     });
 
     it('url-encodes names that need it', () => {
@@ -42,12 +78,23 @@ describe('LastViewedPlayerLink', () => {
         );
     });
 
-    it('tracks the click so the affordance can be measured', () => {
+    it('tracks the click with its slot so later slots can be shown to earn their space', () => {
         rememberLastViewedPlayer('lasna', 'eu');
+        rememberLastViewedPlayer('second', 'na');
 
         render(<LastViewedPlayerLink />);
-        fireEvent.click(screen.getByTestId('last-viewed-player-link'));
+        const links = screen.getAllByTestId('last-viewed-player-link');
 
-        expect(mockTrackEvent).toHaveBeenCalledWith('landing-last-player', { realm: 'eu' });
+        fireEvent.click(links[0]);
+        expect(mockTrackEvent).toHaveBeenCalledWith('landing-last-player', {
+            realm: 'na',
+            position: 1,
+        });
+
+        fireEvent.click(links[1]);
+        expect(mockTrackEvent).toHaveBeenCalledWith('landing-last-player', {
+            realm: 'eu',
+            position: 2,
+        });
     });
 });
