@@ -24,7 +24,16 @@ click.
 
 `BattleHistoryCard` opens on `fortyfive` instead of `month`.
 
-Two call sites key off the old default and must follow it:
+Three call sites key off the old default and must follow it:
+
+- `prefetchBattleHistory` (fired from `PlayerRouteView` to move the battle-history
+  round-trip off the serial critical path) inherits `window` from the
+  `battleHistoryFetchUrl` / `battleHistoryCacheKey` default parameter, which is
+  `'month'`. Left alone it would warm a window the card no longer opens on: the
+  prefetch becomes dead weight, the card's own first fetch goes cold, and every
+  player view costs a second query against the endpoint family whose DB is the
+  stated binding constraint. Both builder defaults move to `'fortyfive'`, keeping
+  the prefetch and the card's opening fetch on one cache key.
 
 - The standalone-hide guard (`!hasBattles && window === 'month' && !userPickedWindow`).
   Left on `'month'` it can never fire again, because `window` now starts as
@@ -79,7 +88,19 @@ leftward into the past, matching the trailing-window semantics of every pill. Th
 rule and both ticks carry `vectorEffect="non-scaling-stroke"` so neither the
 `scaleX` nor the viewBox stretch fattens them.
 
-Spans per pill: `day` 1, `week` 7, `month` 30, `fortyfive` 45.
+Spans per pill: `day` 1, `week` 7, `month` 30, `fortyfive` 45. The span is clamped
+to `STRIP_DOMAIN_DAYS`, so the still-typed-but-unexposed `year` window cannot drive
+`left` negative and overflow the strip.
+
+**The bracket is permanently mounted.** It is never conditionally rendered and its
+render must not piggyback on `days.length < 2` or the `hasBattleData` entrance key.
+CSS transitions do not run on initial render, so a conditionally-mounted bracket
+would pop in without motion on `45d → month` — destroying the one transition this
+feature exists for. Only `opacity` and `transform` are driven from state.
+
+Because the transform is CSS-transitioned, the class sets `transform-box: view-box`
+and `transform-origin: 0 0`. The initial values place the origin at the viewBox
+centre, which would break the `left` math.
 
 **Motion.** A single CSS class transitions `transform` and `opacity` on one shared
 curve (~420ms ease-out, matching the existing 410ms `sparkline-bar-rise`). Opacity
@@ -110,13 +131,21 @@ against `playedShipCount` are unchanged, as is the non-persistence of the choice
 
 - The explicit `initial fetch uses window=month (default)` test, plus the comments
   and active-pill assertions that assume Month is the default, move to `45d`.
+- The `prefetchBattleHistory` canonical-URL test moves to `?window=fortyfive`.
 - New: bracket span per pill (assert the group transform), right-anchoring, and the
-  full-width zero-opacity state at `45d`.
+  full-width **zero-opacity** state at `45d` — asserting opacity, never absence,
+  since the element is always mounted.
 - New: the `fortyfive` pill dims when the trailing 45 days are empty.
 - Existing dedup helper keys on the fetch `label`, not the URL, so it survives the
   main and strip fetches sharing a URL.
 
 **`BattleHistoryTreemaps.test.tsx`** — default tile count 25 → 15.
+
+**Browser verification (jsdom cannot discharge this).** Unit tests pin only the two
+end states; the motion itself exists only in a real browser. On the dev server,
+click `month ↔ 45d ↔ week` and confirm the expand-while-dissolving transition and
+its exact reverse, and that the bracket ends sit on bar edges at two container
+widths.
 
 ## Docs to reconcile
 
