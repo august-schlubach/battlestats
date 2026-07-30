@@ -133,18 +133,7 @@ it must not compete with the WR overlay line's `--accent-secondary-mid`.
 At the new `45d` default the bracket is absent on first paint. It materializes only
 when the user narrows — the affordance appears at the moment it carries meaning.
 
-### 4. The selected date range, in words
-
-Right of the pill row, a muted `DDMMM - DDMMM` label names the span the bracket
-marks (`30JUL`, `24JUL - 30JUL`). A one-day span collapses to a single date.
-
-It is derived from the **same trailing slice of the same strip days** the bracket
-is placed from (`stripRangeLabel(stripDays, spanDays)`), so the words and the mark
-cannot disagree. Formatting slices the ISO day key rather than constructing a
-`Date`: the strip's keys are UTC calendar dates (the backend buckets that way), and
-a local-timezone parse would shift the label off the bar the bracket points at.
-
-### 5. `has_recent_24h_activity` becomes mode-scoped (backend)
+### 4. `has_recent_24h_activity` becomes mode-scoped (backend)
 
 **Bug.** The Day pill stayed lit on the random Activity tab for a player whose only
 battles in the last 24h were **ranked** (found on `WorldWarNEIO`, whose last random
@@ -173,7 +162,7 @@ so the pill's enabled state cannot drift from what clicking it shows.
 **Cache contract.** The payload cache key goes `v9` → `v10`: cached v9 entries hold
 the mode-blind flag and must not be served.
 
-### 6. Ships treemap default scope
+### 5. Ships treemap default scope
 
 `DEFAULT_TOP_N` in `BattleHistoryTreemaps.tsx` drops 25 → 15 (the Activity-tab ships
 map: tiles sized by battles, colored by win rate). The slider range and the clamp
