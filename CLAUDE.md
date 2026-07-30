@@ -48,6 +48,8 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single file
 
 `server/conftest.py` defaults `CELERY_BROKER_URL=memory://` for every test run. Without it settings falls back to `amqp://localhost:5672`, no RabbitMQ is listening, and each task-dispatching test pays a connection-retry timeout — **1020s vs 5.1s** for the same 850 tests, with no failure to show for it. Set it explicitly only to exercise a real broker. It cannot cover `DJANGO_SECRET_KEY`: pytest-django imports settings before conftest runs, so anything read at settings-import time must come from the command line. CI is Postgres + migrations (~24s) and sets its own values.
 
+**Dependency security.** CI gates production dependencies on `npm audit --omit=dev --audit-level=critical`. Dev-scope advisories are excluded deliberately (eslint/jest transitives that never ship; npm's suggested fixes are major downgrades). The threshold is `critical` not `high` solely because **sharp <0.35.0 has high libvips CVEs and 0.35.0 has no stable release** — only RCs. Exposure is bounded: the app never uses `next/image` and sets no `images.remotePatterns`, so attacker-controlled bytes cannot reach libvips. **Raise the gate to `high` when sharp 0.35.0 ships stable.**
+
 ### Database / Deploy / Release
 
 ```bash
