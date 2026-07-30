@@ -4,9 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_PYTHON_BIN="python"
 
-if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
-  DEFAULT_PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
-fi
+# This project's venv lives at server/.venv (see CLAUDE.md), not the repo root, so
+# the root-only lookup never matched and the gate silently fell back to whatever
+# `python` the shell resolved — here a pyenv 3.14.6 with no pytest, which failed
+# the release at step 4 of 4, after the client build had already run. Root stays
+# first for any checkout that does place a venv there.
+for candidate in "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/server/.venv/bin/python"; do
+  if [[ -x "${candidate}" ]]; then
+    DEFAULT_PYTHON_BIN="${candidate}"
+    break
+  fi
+done
 
 PYTHON_BIN="${PYTHON_BIN:-${DEFAULT_PYTHON_BIN}}"
 
