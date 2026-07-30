@@ -477,7 +477,10 @@ const WindowRangeBracket: React.FC<{ spanDays: number }> = ({ spanDays }) => {
             // Sits 5px clear of the strip's baseline so it reads as a separate
             // measure line rather than a chart axis. `overflow: visible` keeps
             // the end ticks whole: they are centred on x=0 and x=100, so half
-            // of each 3px stroke would otherwise be clipped by the viewport.
+            // of each 2px stroke would otherwise be clipped by the viewport.
+            // The 1px that hangs past each edge does not reach a scrolling
+            // ancestor (verified at 900px and 480px) — padding the viewBox
+            // instead would break the bracket's exact bar-edge alignment.
             style={{ marginTop: 5, overflow: 'visible' }}
         >
             {/* Drawn once as a unit spanning the full domain, then placed by a
@@ -492,7 +495,7 @@ const WindowRangeBracket: React.FC<{ spanDays: number }> = ({ spanDays }) => {
                     opacity: spanDays >= STRIP_DOMAIN_DAYS ? 0 : 1,
                 }}
                 stroke="var(--text-muted)"
-                strokeWidth={3}
+                strokeWidth={2}
                 strokeLinecap="round"
                 vectorEffect="non-scaling-stroke"
             >

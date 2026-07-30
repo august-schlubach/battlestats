@@ -42,9 +42,22 @@ Three call sites key off the old default and must follow it:
   data 45 days deep, the `fortyfive` pill's emptiness becomes derivable like
   week/month.
 
-**Accepted behavior change:** the standalone card now hides only when a player has
-no battles in 45 days, where before it was 30. It therefore appears for a slightly
-larger set of players. This is intended.
+**Accepted behavior changes**, both following from the first resolved payload now
+covering 45 days rather than 30:
+
+- The standalone card hides only when a player has no battles in 45 days, where
+  before it was 30, so it appears for a slightly larger set of players.
+- `battleHistoryIndicatesActivity` reads that same first payload, so a player whose
+  only battles are 31–45 days old now lights the Activity tab where it previously
+  went dark.
+
+Both are intended: the card and the tab should reflect the window the card opens on.
+
+**Cost note for deploy.** Request count is unchanged — the prefetch/strip/main dedup
+still collapses to one call — but every player view's default battle-history query
+now aggregates a 45-day span instead of 30, roughly 50% more `PlayerDailyShipStats`
+rows on the hottest path, against the 2-vCPU managed Postgres. Deliberate, and worth
+watching as its own lever at deploy time.
 
 ### 2. The strip domain is pinned at 45 days for every window
 
@@ -76,7 +89,7 @@ exactly on bar edges at any container width. It is `aria-hidden`: the card heade
 already announces the window in words ("Last 7 days").
 
 **Geometry.** The bracket is drawn once as a unit — a horizontal rule with a short
-vertical tick at each end at 3px stroke, spanning x=0→100 — and then placed by one
+vertical tick at each end at 2px stroke, spanning x=0→100 — and then placed by one
 group transform:
 
 ```
