@@ -2535,10 +2535,12 @@
             "section": "feature",
             "owner": "data",
             "aliases": [
-                "ship leaderboard window 30 days",
-                "SHIP_LEADERBOARD_WINDOW_DAYS 14 to 30",
+                "ship leaderboard window",
+                "SHIP_LEADERBOARD_WINDOW_DAYS live value",
                 "ship standings rolling window widen",
-                "30 day ship window"
+                "ship window 14 to 30 to 45",
+                "45 day ship window",
+                "advance ship leaderboard window to 60 or 90"
             ],
             "tags": [
                 "ship-leaderboard",
@@ -2550,7 +2552,7 @@
                 "data"
             ],
             "archive_on": [
-                "ship-leaderboard-window-30d-superseded"
+                "ship-leaderboard-window-reaches-90d-and-stops-advancing"
             ]
         },
         "agents/runbooks/runbook-shipleaderboard-warm-before-evict-2026-06-18.md": {

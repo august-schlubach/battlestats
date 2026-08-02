@@ -2126,8 +2126,12 @@ def record_ranked_observation_and_diff(player_id: int, realm: str) -> Dict[str, 
 #     bounded count query and the per-batch deletes carry SET LOCAL timeouts.
 # ---------------------------------------------------------------------------
 
-# Must stay comfortably above SHIP_LEADERBOARD_WINDOW_DAYS (30): the nightly
+# Must stay comfortably above SHIP_LEADERBOARD_WINDOW_DAYS: the nightly
 # ship-standings snapshot aggregates BattleEvent over that trailing window.
+# That window is env-pinned per environment (prod=45 as of 2026-07-24; the
+# data.py default of 30 is NOT the live value) and is walking toward 90 — see
+# agents/runbooks/runbook-ship-leaderboard-window-30d-2026-06-29.md. Prod pins
+# BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS=105 in the deploy script.
 ARCHIVE_RETENTION_DAYS_DEFAULT = 92
 ARCHIVE_BATCH_SIZE_DEFAULT = 2000
 ARCHIVE_STATEMENT_TIMEOUT_DEFAULT = 180

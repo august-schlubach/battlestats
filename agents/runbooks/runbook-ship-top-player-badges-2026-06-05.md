@@ -4,7 +4,7 @@
 > The ranking algorithm, population guards, composite score, tier scope, and storage shape
 > below are still accurate. What changed: the snapshot is no longer a fixed bi-weekly season
 > finalized at a boundary — it recomputes **every night** over a trailing
-> `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window, `captured_on` is the **run date**, badges are
+> `SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) window, `captured_on` is the **run date**, badges are
 > worn **only while held**, and the durable `ShipAward` ledger / **Ship Honors panel was
 > removed entirely** (the HELD-awards banner below is historical). `SHIP_AWARD_LEDGER_ENABLED`,
 > the `backfill_ship_seasons` command, and `is_season_boundary` are gone. **As of 2026-06-15
@@ -72,7 +72,7 @@ rows. Two surfaces read that snapshot:
 ## Data source: `BattleEvent` (not `PlayerDailyShipStats`)
 
 Aggregates `BattleEvent` random-battle deltas grouped by `(ship_id, player)` over a trailing
-`SHIP_LEADERBOARD_WINDOW_DAYS` (14) `detected_at` window — the **inverse** grouping of
+`SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) `detected_at` window — the **inverse** grouping of
 `compute_realm_top_ships()`. Why `BattleEvent`:
 - **Proven-populated in prod** (the live treemap reads it). The `PlayerDailyShipStats` rollup depends
   on `BATTLE_HISTORY_ROLLUP_ENABLED`, whose prod state could not be verified (a prod read was
@@ -259,7 +259,7 @@ Registered unconditionally; the **task** is the no-op gate (not folded under `EN
 | `SHIP_BADGE_RETENTION_DAYS` | `21` | Prune rows older than this. |
 | `SHIP_BADGE_SNAPSHOT_DAY_OF_WEEK` / `SHIP_BADGE_SNAPSHOT_HOUR` | `1` / `2` | Weekly cron (Mon 02:xx UTC base; per-realm offset). |
 
-`SHIP_LEADERBOARD_WINDOW_DAYS` (14) and `SHIP_LEADERBOARD_CACHE_TTL` (900) are module constants in
+`SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) and `SHIP_LEADERBOARD_CACHE_TTL` (900) are module constants in
 `data.py`.
 
 ## Test plan

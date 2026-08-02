@@ -165,8 +165,10 @@ class ArchiveBattleHistoryTests(TestCase):
 
     def test_default_retention_is_92_days(self):
         # Raised 32 -> 92 on 2026-07-20 (DB disk 60 -> 80 GiB). Must stay
-        # above SHIP_LEADERBOARD_WINDOW_DAYS (30) or the nightly ship
-        # standings would aggregate over pruned rows.
+        # above SHIP_LEADERBOARD_WINDOW_DAYS or the nightly ship standings
+        # would aggregate over pruned rows. That window is env-pinned (prod=45,
+        # walking toward 90); the data.py default of 30 is not the live value.
+        # Prod pins retention itself to 105 in the deploy script.
         self.assertEqual(ARCHIVE_RETENTION_DAYS_DEFAULT, 92)
 
     def test_command_disabled_without_force_is_noop(self):

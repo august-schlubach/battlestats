@@ -126,7 +126,9 @@ window, lose the badge on the next snapshot.
 
 ## Env knobs (defaults)
 
-`SHIP_BADGE_SNAPSHOT_ENABLED` (kill switch) · `SHIP_LEADERBOARD_WINDOW_DAYS=30` ·
+`SHIP_BADGE_SNAPSHOT_ENABLED` (kill switch) · `SHIP_LEADERBOARD_WINDOW_DAYS` (code
+default 30, **prod pins 45** in `server/deploy/deploy_to_droplet.sh` — see
+`runbook-ship-leaderboard-window-30d-2026-06-29.md` for the live value) ·
 `SHIP_LEADERBOARD_CACHE_TTL=900` · `SHIP_BADGE_TIERS` (prod 8,9,10) ·
 `SHIP_BADGE_TOP_N=3` · `SHIP_BADGE_LIST_SIZE=15` · `SHIP_BADGE_RETENTION_DAYS=5` ·
 `SHIP_BADGE_MIN_BATTLES=15` · `SHIP_BADGE_MIN_SHIP_POPULATION=20` (CV 10 / sub 12) ·
