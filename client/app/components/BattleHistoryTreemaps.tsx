@@ -251,6 +251,10 @@ interface BattleHistoryTreemapsProps {
     byShip: BattleHistoryByShip[];
     selectedShipId?: number | null;
     onShipClick?: (row: BattleHistoryByShip) => void;
+    // Identity the color-metric pick is remembered against — `<realm>:<player>`
+    // from BattleHistoryCard. Omitted (tests, any future non-player host) means
+    // the pick is session-only: nothing is read, nothing is written.
+    prefScope?: string | null;
 }
 
 // Aggregate rows into one tile per group (type or tier); WR = wins ÷ battles
@@ -342,9 +346,47 @@ const aggregateTiles = (
 };
 
 // Color metric shared by all three maps. Size is always battles; this picks
-// what the tile fill (and the tooltip's colored row) encodes. Not persisted —
-// every load starts on 'wr', matching the slider's reset-to-default behavior.
+// what the tile fill (and the tooltip's colored row) encodes. Remembered
+// PER PLAYER in localStorage (see COLOR_METRIC_PREF_KEY): a visitor who reads
+// one player in dmg and another in WR gets each back the way they left it.
 type ShipsColorMetric = 'dmg' | 'kills' | 'wr';
+
+const DEFAULT_COLOR_METRIC: ShipsColorMetric = 'wr';
+
+const isColorMetric = (value: unknown): value is ShipsColorMetric => (
+    value === 'dmg' || value === 'kills' || value === 'wr'
+);
+
+// Per-player color-metric pick, keyed `bs:bh-ships-color:<realm>:<player>`
+// (mirrors ClanSVG's per-clan `bs:clan-scale:<id>` scale pref). Scoped per
+// player rather than globally because the metric that reads best is a property
+// of the account being examined, not a standing visitor preference; a player
+// with no stored pick opens on DEFAULT_COLOR_METRIC.
+const COLOR_METRIC_PREF_KEY = 'bs:bh-ships-color';
+
+const readColorMetricPref = (scope: string | null | undefined): ShipsColorMetric | null => {
+    if (!scope || typeof window === 'undefined') {
+        return null;
+    }
+    try {
+        const stored = window.localStorage.getItem(`${COLOR_METRIC_PREF_KEY}:${scope}`);
+        return isColorMetric(stored) ? stored : null;
+    } catch {
+        // storage unavailable (private mode / disabled) — fall back to default
+        return null;
+    }
+};
+
+const writeColorMetricPref = (scope: string | null | undefined, metric: ShipsColorMetric): void => {
+    if (!scope || typeof window === 'undefined') {
+        return;
+    }
+    try {
+        window.localStorage.setItem(`${COLOR_METRIC_PREF_KEY}:${scope}`, metric);
+    } catch {
+        // ignore storage failures (private mode / quota)
+    }
+};
 
 // Pill order follows key order: WR% first (the default), then dmg, then Kills.
 const COLOR_METRIC_LABEL: Record<ShipsColorMetric, string> = {
@@ -379,13 +421,23 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     byShip,
     selectedShipId = null,
     onShipClick,
+    prefScope = null,
 }) => {
     // Shared color metric (wr | dmg | kills) for ALL THREE maps — one pill row
     // in the ships-panel header drives the ships, type, and tier fills alike.
-    // Not persisted; every load starts on 'wr'. One analytics event per switch.
-    const [colorMetric, setColorMetric] = useState<ShipsColorMetric>('wr');
+    // Persisted per player (prefScope); one analytics event per switch.
+    const [colorMetric, setColorMetric] = useState<ShipsColorMetric>(DEFAULT_COLOR_METRIC);
+    // Hydrate this player's stored pick after mount, not in the useState
+    // initializer: a localStorage read during render is invisible to the server
+    // and would mismatch on hydration. Re-runs on a player/realm switch, and
+    // resets to the default when the new player has no stored pick (so one
+    // player's choice never leaks onto the next).
+    useEffect(() => {
+        setColorMetric(readColorMetricPref(prefScope) ?? DEFAULT_COLOR_METRIC);
+    }, [prefScope]);
     const chooseColorMetric = (m: ShipsColorMetric) => {
         setColorMetric(m);
+        writeColorMetricPref(prefScope, m);
         trackEvent('battle-history-ships-color', { metric: m });
     };
     const typeTiles = useMemo(

@@ -752,6 +752,17 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     captionLeading,
 }) => {
     const requestSignal = usePlayerRequestSignal();
+    // Identity the treemaps remember their color-metric pick against. Realm is
+    // part of the key because the same name can be a different account on
+    // another realm; the name is lowercased so a link that differs only in case
+    // still resolves to the one stored pick. Mode is in the key because the
+    // player page mounts this card twice (Activity = random, Ranked = ranked)
+    // over different data — and the dmg baseline is random-only, so the metric
+    // that reads best genuinely differs between the two.
+    const treemapPrefScope = useMemo(
+        () => `${realm}:${playerName.toLowerCase()}:${mode}`,
+        [realm, playerName, mode],
+    );
     const [payload, setPayload] = useState<BattleHistoryPayload | null>(null);
     const [stripByDay, setStripByDay] = useState<BattleHistoryByDay[]>([]);
     // True once the month fetch below has resolved for the current
@@ -1284,6 +1295,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         byShip={payload.by_ship ?? []}
                         selectedShipId={selectedShip?.ship_id ?? null}
                         onShipClick={(row) => toggleShip(row, 'treemap')}
+                        prefScope={treemapPrefScope}
                     />
                 </div>
             )}
