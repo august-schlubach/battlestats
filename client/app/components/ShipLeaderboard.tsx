@@ -172,10 +172,13 @@ interface ShipLeaderboardPayload {
 const LIST_FETCH_TTL_MS = 3_600_000;
 const BOARD_FETCH_TTL_MS = 900_000; // 15 min, matching the /ship page.
 
+// Section header, matching the treemap's <h2> directly above (same size/weight/
+// tracking, muted rather than accent) so the two landing sections read as a pair.
 const HEADING_CLASS =
-    'mr-2 text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]';
-// Compact enough that the full filter row (Ships · Tier ×3 · Type ×5 · WR ≥ ×3
-// · info hint) fits on one line inside the 850px site column's content box.
+    'text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]';
+// Compact enough that the filter row (Tier ×3 · Type ×5 · WR ≥ ×3) fits on one
+// line inside the 850px site column's content box. The section title and its
+// info hint sit on their own line above, so they cost the row nothing.
 const PILL_BASE =
     'inline-flex items-center rounded-md border px-2 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors';
 const PILL_ON = 'border-[var(--accent-mid)] bg-[var(--accent-mid)] text-white';
@@ -308,10 +311,13 @@ const dataBasisHint = (windowDays: number | null): string =>
 // Info affordance with a hover/focus tooltip — styled to match the circle-info
 // buttons in the Players/Clans landing sections below (FontAwesomeIcon + the
 // same accent-light icon button + `hidden group-hover:block` tooltip). Reveal is
-// CSS-only so it works without JS state. The tooltip is right-anchored because
-// this icon sits at the right edge of the filter row.
+// CSS-only so it works without JS state. Deliberately NOT `relative`: the panel
+// resolves its `absolute left-0 top-full` against the header block instead, so
+// it always drops under the header flush with the column's left edge. Anchoring
+// it to the icon would trail the icon wherever the title's last line ends and
+// push the panel off-screen once the title wraps on a phone.
 const InfoHint: React.FC<{ text: string }> = ({ text }) => (
-    <div className="group relative inline-flex items-center">
+    <span className="group inline-flex items-center align-middle">
         <button
             type="button"
             aria-label={text}
@@ -319,13 +325,13 @@ const InfoHint: React.FC<{ text: string }> = ({ text }) => (
         >
             <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
         </button>
-        <div
+        <span
             role="tooltip"
-            className="pointer-events-none absolute right-0 top-full z-20 mt-2 hidden w-60 max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-2 text-left text-xs normal-case leading-snug tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block"
+            className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-60 max-w-[calc(100vw-2rem)] whitespace-normal rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-2 text-left text-xs normal-case leading-snug tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block"
         >
             {text}
-        </div>
-    </div>
+        </span>
+    </span>
 );
 
 const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(({ onBucket }, ref) => {
@@ -590,12 +596,57 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
 
     const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
 
+    // Window length in days, derived from the served payload's date bounds so the
+    // header and the info tooltip always name the actual standings window
+    // (30/45/60/90 as SHIP_LEADERBOARD_WINDOW_DAYS advances) rather than a
+    // hardcoded number. Null until the first payload resolves — callers drop the
+    // window clause entirely rather than render a placeholder.
+    const windowDays = useMemo(() => {
+        if (!listWindow.start || !listWindow.end) return null;
+        const startMs = Date.parse(listWindow.start);
+        const endMs = Date.parse(listWindow.end);
+        if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
+        return Math.round((endMs - startMs) / 86_400_000);
+    }, [listWindow]);
+
+    const headingLabel = `Ship leaderboard${windowDays ? ` · last ${windowDays} days rolling` : ''}`;
+
     return (
         <section ref={sectionRef} className="mt-2 pt-8" aria-label="Ship leaderboard">
             {/* Filter bar + results fill the site column (layout.tsx owns the width). */}
             <div>
+            {/* Section header: title · standings window · info hint. Mirrors the
+                treemap header above it (h2 + circle-info affordance on its own
+                line) so the two landing sections read as siblings; the filter
+                pills get the whole next row to themselves.
+                Inline flow rather than flex: the title wraps to two lines on a
+                phone, and inline keeps the icon trailing the last word instead
+                of stranding it against the right edge. `relative` here is the
+                anchor InfoHint's panel drops from. */}
+            <div className="relative mb-2">
+                {/* The icon lives inside the heading purely for line-breaking
+                    (see the nowrap group below); `aria-label` pins the heading's
+                    accessible name to the title so the hint's long tooltip text
+                    is not announced as part of it. The button keeps its own
+                    label and stays independently reachable. */}
+                <h2
+                    className={`${HEADING_CLASS} inline align-middle`}
+                    aria-label={headingLabel}
+                >
+                    {windowDays ? <>Ship leaderboard &middot; last {windowDays} days </> : <>Ship </>}
+                    {/* The last word and the icon share a nowrap group so the
+                        icon can never orphan onto a line of its own — which it
+                        does at the widths where the title exactly fills the
+                        column (~375px). */}
+                    <span className="whitespace-nowrap">
+                        {windowDays ? 'rolling' : 'leaderboard'}
+                        <span className="ml-2">
+                            <InfoHint text={dataBasisHint(windowDays)} />
+                        </span>
+                    </span>
+                </h2>
+            </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                <h3 className={HEADING_CLASS}>Ships</h3>
                 <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Tier</span>
                     {TIERS.map((t) => (
@@ -652,13 +703,6 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                             ))}
                         </>
                     )}
-                    {/* Data-basis hint sits at the end of the row. Window length
-                        is derived from the served payload's date bounds. */}
-                    <InfoHint text={dataBasisHint(
-                        listWindow.start && listWindow.end
-                            ? Math.round((Date.parse(listWindow.end) - Date.parse(listWindow.start)) / 86_400_000)
-                            : null,
-                    )} />
                 </div>
             </div>
 
