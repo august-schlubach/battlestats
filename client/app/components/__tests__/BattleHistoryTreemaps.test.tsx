@@ -50,7 +50,12 @@ describe('BattleHistoryTreemaps (presentational)', () => {
     const realRO = globalThis.ResizeObserver;
     beforeAll(() => { globalThis.ResizeObserver = WidthReportingResizeObserver as unknown as typeof ResizeObserver; });
     afterAll(() => { globalThis.ResizeObserver = realRO; });
-    beforeEach(() => { mockTrackEvent.mockClear(); });
+    beforeEach(() => {
+        mockTrackEvent.mockClear();
+        // Preferences persist per player/slider in localStorage; clear between
+        // tests so one test's stored pick can't satisfy another's assertion.
+        window.localStorage.clear();
+    });
 
     it('renders the three panels with aggregate tiles from by_ship rows', () => {
         render(
@@ -160,6 +165,55 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         expect(screen.getByText('kills / battle')).toBeInTheDocument();
         // "1.20" appears twice: the tile sub-line and the tooltip value.
         expect(screen.getAllByText('1.20').length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('remembers the color metric per player and restores it on a later visit', () => {
+        const scope = 'na:vermontfan:random';
+        window.localStorage.removeItem(`bs:bh-ships-color:${scope}`);
+        const { unmount } = render(<BattleHistoryTreemaps byShip={[row({})]} prefScope={scope} />);
+
+        // Default until the visitor picks something.
+        expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'true');
+        fireEvent.click(screen.getByRole('button', { name: 'Kills' }));
+        expect(window.localStorage.getItem(`bs:bh-ships-color:${scope}`)).toBe('kills');
+        unmount();
+
+        // Same player again: the stored pick is restored, not the default.
+        render(<BattleHistoryTreemaps byShip={[row({})]} prefScope={scope} />);
+        expect(screen.getByRole('button', { name: 'Kills' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('scopes the stored pick per player: another player opens on the default', () => {
+        window.localStorage.setItem('bs:bh-ships-color:na:vermontfan:random', 'dmg');
+        window.localStorage.removeItem('bs:bh-ships-color:na:someoneelse:random');
+        const { rerender } = render(
+            <BattleHistoryTreemaps byShip={[row({})]} prefScope="na:vermontfan:random" />,
+        );
+        expect(screen.getByRole('button', { name: 'dmg' })).toHaveAttribute('aria-pressed', 'true');
+
+        // A soft-nav to a player with no stored pick resets rather than
+        // inheriting the previous player's metric.
+        rerender(<BattleHistoryTreemaps byShip={[row({})]} prefScope="na:someoneelse:random" />);
+        expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'true');
+        // ...and the realm is part of the key, so a same-name account elsewhere
+        // is a distinct pick.
+        rerender(<BattleHistoryTreemaps byShip={[row({})]} prefScope="eu:vermontfan:random" />);
+        expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('without a prefScope the pick is session-only (nothing stored)', () => {
+        render(<BattleHistoryTreemaps byShip={[row({})]} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Kills' }));
+        // The pick still applies for this mount; it just leaves no trace.
+        expect(screen.getByRole('button', { name: 'Kills' })).toHaveAttribute('aria-pressed', 'true');
+        expect(window.localStorage.length).toBe(0);
+        // An empty-string scope takes the same session-only path as an omitted
+        // one, so a half-built key can never be written.
+        const { unmount } = render(<BattleHistoryTreemaps byShip={[row({})]} prefScope="" />);
+        fireEvent.click(screen.getAllByRole('button', { name: 'dmg' })[1]);
+        expect(window.localStorage.length).toBe(0);
+        unmount();
     });
 
     it('small roster shows everything by default; the slider zooms but does not persist', () => {
