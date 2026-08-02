@@ -34,7 +34,7 @@ unrelated systems; do not conflate them.
 ### Data source
 
 - **Model:** `ShipTopPlayerSnapshot` (`server/warships/models.py`) — ephemeral, recomputed
-  per realm over a trailing `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window. One `captured_on`
+  per realm over a trailing `SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) window. One `captured_on`
   date per realm per run. Holds `player`, `ship_id`, `ship_name`, `rank`, `win_rate`,
   `battles`, `damage`. Gated by `SHIP_BADGE_SNAPSHOT_ENABLED`.
 - **Read path:** `data.get_player_ship_badges(player)` (single) /

@@ -23,8 +23,8 @@ The read path does **no live aggregation**. `get_ship_leaderboard()` (`server/wa
 Those snapshot rows are written by `snapshot_ship_top_players_task` (`server/warships/tasks.py`):
 
 - Runs **nightly** per realm (Beat `ship-top-player-snapshot-{realm}`, striped by `REALM_CRAWL_CRON_HOURS`, ~02:30 + realm offset UTC). Each run recomputes the whole trailing window and overwrites that night's rows — there is no season boundary and no "finalize once" gate.
-- `SHIP_LEADERBOARD_WINDOW_DAYS = 14` (`data.py`) is the lookback span (operator-tunable). The fixed `SHIP_SEASON_*` epoch/length and `is_season_boundary()` are gone.
-- The displayed board is the latest `captured_on` (a **run date**); its window is `[captured_on - 14d, captured_on)`. Badges are worn **only while held** — a player who drops out of the top 3 loses the badge on the next nightly run.
+- `SHIP_LEADERBOARD_WINDOW_DAYS` (`data.py` default, overridable per-environment) is the lookback span (operator-tunable). It was 14 when this runbook was written; for the live value see the **Current value** banner in `runbook-ship-leaderboard-window-30d-2026-06-29.md`. The fixed `SHIP_SEASON_*` epoch/length and `is_season_boundary()` are gone.
+- The displayed board is the latest `captured_on` (a **run date**); its window is `[captured_on - SHIP_LEADERBOARD_WINDOW_DAYS, captured_on)`. Badges are worn **only while held** — a player who drops out of the top 3 loses the badge on the next nightly run.
 
 **Implication:** the numbers advance **every day**. A trailing 14-day window shares ~93% of its data night to night, so turnover is gradual (a few ships/night), not churn — but it is no longer static. The displayed stats (`win_rate`, `battles`, `avg_damage`, `kills_per_battle`) are delta-sums over the trailing 14-day window — the same basis as the profile ship badges. (Survival% / KDR are intentionally omitted: per-battle survival isn't available for a multi-battle window, so it would undercount.)
 

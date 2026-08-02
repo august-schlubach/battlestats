@@ -103,7 +103,7 @@ droplet via `/opt/battlestats-server/venv/bin/python manage.py shell` with
 
 ### Backend — roll the snapshot
 - `server/warships/data.py` `compute_ship_top_player_snapshot` (~5949): default window
-  = trailing `SHIP_LEADERBOARD_WINDOW_DAYS` (14) ending today; `captured_on` = run date;
+  = trailing `SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) ending today; `captured_on` = run date;
   keep explicit-window kwargs for `backfill_ship_seasons`. Wrap the aggregation read in
   `_elevated_work_mem()`. NOTE: `SHIP_LEADERBOARD_WINDOW_DAYS` is today a plain module
   constant at `data.py:5863` and `SHIP_SEASON_LENGTH_DAYS` (5880) aliases it — to make
@@ -155,7 +155,7 @@ droplet via `/opt/battlestats-server/venv/bin/python manage.py shell` with
 ### Kill switches (post-change)
 - `SHIP_BADGE_SNAPSHOT_ENABLED` (prod=1) — master gate for the nightly snapshot task.
 - `SHIP_BADGE_TIERS` (prod="8,9,10") — tiers eligible for badges.
-- `SHIP_LEADERBOARD_WINDOW_DAYS` (14) — trailing window length / evolution speed.
+- `SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) — trailing window length / evolution speed.
 - `SHIP_BADGE_RETENTION_DAYS` (~3–7) — nightly snapshot retention.
 - `SHIP_AWARD_LEDGER_ENABLED` — **removed**.
 

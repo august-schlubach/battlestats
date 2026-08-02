@@ -1,9 +1,29 @@
-# Runbook — Ship-leaderboard rolling window 14 → 30 days
+# Runbook — Ship-leaderboard rolling window (14 → 30 → 45 → 60/90)
 
-**Date:** 2026-06-29
-**Status:** active (rollout)
+**Date:** 2026-06-29 (14→30); extended 2026-08-02 to cover 30→45 and the advance procedure
+**Status:** active — this is the single reference for the window's live value and how to advance it
 **Owner:** data
-**Area:** `SHIP_LEADERBOARD_WINDOW_DAYS` (`data.py`), nightly `snapshot_ship_top_players_task`, treemap / inline ship list / `/ship/<id>` board / profile ship badges, treemap header copy
+**Area:** `SHIP_LEADERBOARD_WINDOW_DAYS` (`data.py` default / deploy-script pin), nightly `snapshot_ship_top_players_task`, treemap / inline ship list / `/ship/<id>` board / profile ship badges, header copy
+
+## Current value — read this first
+
+> **Production runs a 45-day window** (since 2026-07-24). It is pinned by
+> `set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 45` in
+> `server/deploy/deploy_to_droplet.sh` — git-tracked, so it survives a deploy from
+> any checkout.
+>
+> **The code default in `data.py` is 30 and is deliberately NOT the live value.**
+> Reading `data.py` alone will tell you 30 and be wrong. The deploy script is the
+> source of truth for prod; `.env.cloud` is not (it is gitignored and the deploy's
+> `set_env_value` clobbers it).
+>
+> Any doc elsewhere in this repo that names a number for this window — `(14)`, `(30)`
+> — is a historical record of the era it was written in. This banner is authoritative.
+
+The end state is a single **90-day rolling** leaderboard. 45 and 60 are disposable
+stepping stones gated on battle-history retention depth, **not** a user-facing
+selector. Next foothold 60d (~mid-Aug 2026), then 90d (~late Sept 2026, once the
+live window backfills to full depth).
 
 ## Purpose
 
@@ -135,16 +155,72 @@ the backend deploy:
   client/app` (the only residual is `shipSeason.ts`'s "fixed-fortnight model was
   retired" — correct history).
 
+## 2026-07-24 — 30 → 45 days (SHIPPED, live)
+
+Executed as "Lever B" of the 90d-window arc, alongside raising
+`BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` 92 → 105 (Lever C).
+
+- **Path B this time, not Path A.** Pinned in the **deploy script** via
+  `set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 45`, leaving the `data.py` default at
+  30. Rationale: the deploy script is git-tracked, so the pin survives a deploy from
+  any checkout. A first attempt that set it in `.env.cloud` failed — that file is
+  local-only and gitignored, and the deploy's own `set_env_value` overwrites it.
+- **Retention coupling holds with room.** `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` is
+  105 (prod) against `ARCHIVE_RETENTION_DAYS_DEFAULT = 92`; a 45-day window sits far
+  inside both. The thin-margin warning above applied to the 30-vs-32 era and is no
+  longer the binding constraint. It becomes one again only if retention is ever cut
+  back toward the window.
+- **The recompute is what makes it live, and it does not happen by itself.** The env
+  flip **relabels** boards (`window_days=45`) before the snapshot rebuilds, so for a
+  window between the two, boards advertise 45 over 30 days of data. NA was rebuilt
+  synchronously (~636s / 10.6 min for 575 ships; droplet load stayed ~1.0, PG not
+  saturated). EU + ASIA did **not** produce a snapshot on the expected nightly and
+  were rebuilt the next morning via
+  `snapshot_ship_top_players_task.apply_async(args=[realm], queue='background')`
+  (~300s / ~206s).
+- **Force-warm the grid directly; do not wait for the queued warm.** The
+  warm-before-evict re-warm lagged 20+ minutes behind NA's rebuild (queued behind a
+  backlogged `background` worker), so the landing treemap kept serving the last-good
+  30d `:published` payload. Call
+  `compute_realm_ships_by_tier_type(realm, tier, ship_type, wr_pct=None, use_cache=False)`
+  then `wr_pct=50` (materializes 50 & 25) per (tier, type), T10 first — ~20–135s per
+  bucket under load.
+- **`/ship/<id>` boards lag up to 15 min** after a rebuild: the per-ship Redis
+  read-cache (`{realm}:ship-lb:{ship_id}`) is not invalidated by the snapshot.
+- Verified: NA Shimakaze board `window_days=45`, #1 changed from
+  TranspicuousSeaTurtle (30d) to Shadowlaww (45d), matching the read-only prediction.
+
+## 2026-08-02 — header copy stopped naming a hardcoded number (v4.9.2)
+
+The landing `ShipLeaderboard` gained a proper section header,
+`Ship leaderboard · last N days rolling` + the data-basis info hint, where **N is
+derived from the served payload's `window_start`/`window_end` bounds** — the same
+technique the treemap header and the `/ship` page already used since v4.4.0. The
+frontend therefore carries **no hardcoded window number anywhere**, and the 60d and
+90d footholds need no client change to relabel: bump the pin, rebuild the snapshots,
+and every surface follows.
+
+## How to advance the window (60d, 90d)
+
+1. Bump `set_env_value SHIP_LEADERBOARD_WINDOW_DAYS <N>` in
+   `server/deploy/deploy_to_droplet.sh`; confirm
+   `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` still comfortably exceeds `<N>`.
+2. Check disk headroom first — the retention tier is the cost, not the window.
+3. Deploy backend; verify the value landed in `/etc/battlestats-server.env`.
+4. Rebuild snapshots **per realm**: `compute_ship_top_player_snapshot(realm=X)` on the
+   droplet (needs `SHIP_BADGE_SNAPSHOT_ENABLED=1`). Note `manage.py shell < file` sets
+   `argv[1]='shell'` — pass the realm via an **env var**, not `sys.argv`.
+5. Force-warm the tier×type grid directly (above) rather than relying on the queued
+   warm.
+6. No frontend change and no copy edit: every window label is payload-derived.
+
 ## Follow-ups
 
-- Reconcile durable docs that name the window as "(14)": `CLAUDE.md` caching section,
-  `runbook-ship-badges-rolling-2026-06-14.md`,
-  `runbook-ship-list-wr-percentile-2026-06-23.md`,
-  `runbook-ship-top-player-badges-2026-06-05.md`,
-  `runbook-landing-medals-filter-2026-06-17.md`, and the `agents/diagrams/` ship
-  references.
-- If the nightly warm pass runs hot, consider raising the WR-pct warm lock timeout or
-  bumping retention to 35 to fully decouple from the prune.
+- If the nightly warm pass runs hot, consider raising the WR-pct warm lock timeout.
+- Docs naming `(14)` or `(30)` for this window were reconciled on 2026-08-02 to point
+  at this runbook's **Current value** banner instead of restating a number that goes
+  stale on every advance. Keep that convention: cite the banner, do not copy the
+  number.
 
 ## Related runbooks
 

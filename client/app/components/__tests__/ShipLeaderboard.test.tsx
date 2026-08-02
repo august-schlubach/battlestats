@@ -106,6 +106,48 @@ describe('ShipLeaderboard', () => {
         expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
     });
 
+    // The section header names the standings window, derived from the served
+    // payload's bounds rather than a hardcoded number — so it follows
+    // SHIP_LEADERBOARD_WINDOW_DAYS (prod pins 45; the code default is 30) as it
+    // advances toward the 90d end state without a frontend change.
+    it('names the standings window in the header, derived from the payload bounds', async () => {
+        mockFetch.mockImplementation((url: string) => {
+            if (url.includes('/ships?')) {
+                return Promise.resolve({
+                    data: { ...listFixture, window_start: '2026-06-18', window_end: '2026-08-02' },
+                } as never);
+            }
+            return routeFetch(url);
+        });
+        render(<ShipLeaderboard />);
+        expect(
+            await screen.findByRole('heading', { name: 'Ship leaderboard · last 45 days rolling' }),
+        ).toBeInTheDocument();
+    });
+
+    it('drops the window clause from the header until the bounds resolve', async () => {
+        // listFixture carries no window_start/window_end — the header must read
+        // as a bare title rather than render a placeholder or "NaN days".
+        render(<ShipLeaderboard />);
+        await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+        expect(screen.getByRole('heading', { name: 'Ship leaderboard' })).toBeInTheDocument();
+    });
+
+    it('carries the data-basis hint beside the header, naming the derived window', async () => {
+        mockFetch.mockImplementation((url: string) => {
+            if (url.includes('/ships?')) {
+                return Promise.resolve({
+                    data: { ...listFixture, window_start: '2026-06-18', window_end: '2026-08-02' },
+                } as never);
+            }
+            return routeFetch(url);
+        });
+        render(<ShipLeaderboard />);
+        expect(
+            await screen.findByRole('button', { name: /rolling trailing 45-day window/i }),
+        ).toBeInTheDocument();
+    });
+
     it('switching type re-fetches and renders the list WR-desc', async () => {
         render(<ShipLeaderboard />);
         selectTierAndType('DD');

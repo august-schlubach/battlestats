@@ -13,7 +13,7 @@ pill: `WR  [All] [50%] [25%]`.
 
 - **All** is the prior behavior — each ship's stats (battles, avg damage,
   kills/battle, win rate) are realm-wide aggregates over the rolling trailing
-  `SHIP_LEADERBOARD_WINDOW_DAYS` (14) window.
+  `SHIP_LEADERBOARD_WINDOW_DAYS` (14 at the time of writing; live value in `runbook-ship-leaderboard-window-30d-2026-06-29.md`) window.
 - **50% / 25%** re-pool each ship's stats over only the **top N% of that ship's
   players by window win rate**, answering "how are good/great players doing with
   these ships?".
