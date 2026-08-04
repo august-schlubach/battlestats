@@ -21,9 +21,7 @@ describe('dictionaries', () => {
             const pct = Math.round((Object.keys(dict).length / total) * 100);
             // Visible in test output: the translation residue is a number.
             console.log(`i18n coverage ${name}: ${Object.keys(dict).length}/${total} (${pct}%)`);
-            // Relaxed to >=0 for Task 1: ko/ja are empty partials at this stage.
-            // Task 7 populates the dictionaries and tightens this back to toBeGreaterThan(0).
-            expect(pct).toBeGreaterThanOrEqual(0);
+            expect(pct).toBeGreaterThan(0);
         }
     });
 
