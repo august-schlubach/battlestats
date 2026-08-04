@@ -10,3 +10,11 @@
 // de-waterfall incident — ship behind a visual verify.
 export const isPlayerDewaterfallEnabled = (): boolean =>
     process.env.NEXT_PUBLIC_PLAYER_DEWATERFALL === '1';
+
+// Header language selector (en/ko/ja). Off unless explicitly enabled, so the
+// control ships dark while ko/ja dictionaries are still filling in. The flag
+// gates the SELECTOR ONLY — LocaleContext, the dictionaries, and every t() call
+// ship live regardless, so ?lang=ko previews the real thing in prod without
+// exposing a control. Set NEXT_PUBLIC_LOCALE_SELECTOR=1 to reveal it.
+export const isLocaleSelectorEnabled = (): boolean =>
+    process.env.NEXT_PUBLIC_LOCALE_SELECTOR === '1';

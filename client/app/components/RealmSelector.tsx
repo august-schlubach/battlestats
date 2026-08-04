@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faGlobe } from '@fortawesome/free-solid-svg-icons';
 import { useRealm, useDisplayRealm, type Realm } from '../context/RealmContext';
+import { useT } from '../context/LocaleContext';
 import { useRouter } from 'next/navigation';
 import { trackEvent } from '../lib/umami';
 
@@ -28,6 +29,7 @@ const RealmSelector: React.FC = () => {
     // active-option check below uses the live `realm` since it only renders
     // once open (post-mount).
     const displayRealm = useDisplayRealm();
+    const t = useT();
     const [open, setOpen] = useState(false);
     const [flash, setFlash] = useState(false);
     const flashPrimedRef = useRef(false);
@@ -111,7 +113,7 @@ const RealmSelector: React.FC = () => {
             {open && (
                 <div
                     role="listbox"
-                    aria-label="Select realm"
+                    aria-label={t('nav.selectRealm')}
                     className="absolute right-0 z-50 mt-1 rounded-lg shadow-lg"
                     style={{
                         width: '100px',

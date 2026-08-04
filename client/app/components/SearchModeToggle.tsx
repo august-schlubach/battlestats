@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { useT } from "../context/LocaleContext";
 
 interface SearchModeToggleProps {
     mode: "player" | "clan";
@@ -8,8 +9,9 @@ interface SearchModeToggleProps {
 }
 
 const SearchModeToggle: React.FC<SearchModeToggleProps> = ({ mode, onToggle }) => {
+    const t = useT();
     const isClan = mode === "clan";
-    const tooltip = isClan ? "Search Clans" : "Search Players";
+    const tooltip = isClan ? t("nav.searchClan") : t("nav.searchPlayer");
 
     return (
         <button

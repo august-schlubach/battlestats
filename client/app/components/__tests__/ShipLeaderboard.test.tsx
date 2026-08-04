@@ -131,6 +131,42 @@ describe('ShipLeaderboard', () => {
         render(<ShipLeaderboard />);
         await waitFor(() => expect(mockFetch).toHaveBeenCalled());
         expect(screen.getByRole('heading', { name: 'Ship leaderboard' })).toBeInTheDocument();
+        // Same plain string routes the <section> aria-label — no second
+        // hardcoded "Ship leaderboard" literal.
+        expect(document.querySelector('section')).toHaveAttribute('aria-label', 'Ship leaderboard');
+    });
+
+    // `getByRole('heading', { name })` resolves against the ACCESSIBLE NAME
+    // (the aria-label) and would keep passing even if the VISIBLE text stayed
+    // hardcoded English while the name went through t() — that was exactly
+    // the bug (aria-label and the JSX text diverged silently). These assert
+    // the visible copy directly, stripping the info-hint's tooltip text (real
+    // DOM content of the h2, but never actually shown — it appears only on
+    // hover/focus) so "what a reader sees" is what's checked.
+    const visibleHeadingText = (heading: HTMLElement): string => {
+        const tooltip = heading.querySelector('[role="tooltip"]');
+        return heading.textContent!.replace(tooltip?.textContent ?? '', '');
+    };
+
+    it('renders the header VISIBLE text — not just its accessible name — with the window clause', async () => {
+        mockFetch.mockImplementation((url: string) => {
+            if (url.includes('/ships?')) {
+                return Promise.resolve({
+                    data: { ...listFixture, window_start: '2026-06-18', window_end: '2026-08-02' },
+                } as never);
+            }
+            return routeFetch(url);
+        });
+        render(<ShipLeaderboard />);
+        const heading = await screen.findByRole('heading', { name: 'Ship leaderboard · last 45 days rolling' });
+        expect(visibleHeadingText(heading)).toBe('Ship leaderboard · last 45 days rolling');
+    });
+
+    it('renders the header VISIBLE text — not just its accessible name — as a bare title', async () => {
+        render(<ShipLeaderboard />);
+        await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+        const heading = screen.getByRole('heading', { name: 'Ship leaderboard' });
+        expect(visibleHeadingText(heading)).toBe('Ship leaderboard');
     });
 
     it('carries the data-basis hint beside the header, naming the derived window', async () => {

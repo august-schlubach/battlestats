@@ -41,6 +41,10 @@ describe('RealmSelector', () => {
         );
 
         fireEvent.click(screen.getByRole('button', { name: /realm:/i }));
+        // The listbox's aria-label is migrated through t() — exact match through a
+        // real render (not a translate()-only check), since an aria-label is
+        // invisible to sighted visual QA and had no assertion anywhere before.
+        expect(screen.getByRole('listbox', { name: 'Select realm' })).toBeInTheDocument();
         fireEvent.click(screen.getByRole('option', { name: 'EU' }));
 
         expect(replaceMock).toHaveBeenCalledWith('/?realm=eu');

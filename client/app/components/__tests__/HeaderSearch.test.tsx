@@ -26,6 +26,7 @@ jest.mock('../../lib/umami', () => ({
 }));
 
 import HeaderSearch from '../HeaderSearch';
+import { LocaleProvider } from '../../context/LocaleContext';
 
 const buildOkResponse = (payload: unknown) => ({
     ok: true,
@@ -170,5 +171,37 @@ describe('HeaderSearch toggle', () => {
             fireEvent.click(screen.getByRole('switch'));
         });
         expect(screen.queryByRole('listbox')).toBeNull();
+    });
+});
+
+describe('HeaderSearch submit button (nav.searchSubmit)', () => {
+    beforeEach(() => {
+        localStorage.clear();
+        fetchMock = jest.fn(() => Promise.resolve(buildOkResponse([])));
+        global.fetch = fetchMock as unknown as typeof fetch;
+    });
+
+    // Regression net: en.ts must render byte-identically to the literal `Go`
+    // the button used to hardcode. A real render, not a dictionary assertion —
+    // this fails if the wiring ever falls back to a raw key or a placeholder.
+    it('renders the literal "Go" in English by default', () => {
+        render(<HeaderSearch />);
+        expect(screen.getByRole('button', { name: 'Go' })).toBeInTheDocument();
+        expect(screen.queryByText('검색')).not.toBeInTheDocument();
+        expect(screen.queryByText('検索')).not.toBeInTheDocument();
+    });
+
+    it('renders the corpus-attested Korean search verb, not "Go"', () => {
+        localStorage.setItem('bs-locale', 'ko');
+        render(<LocaleProvider><HeaderSearch /></LocaleProvider>);
+        expect(screen.getByRole('button', { name: '검색' })).toBeInTheDocument();
+        expect(screen.queryByText('Go')).not.toBeInTheDocument();
+    });
+
+    it('renders the corpus-attested Japanese search verb, not "Go"', () => {
+        localStorage.setItem('bs-locale', 'ja');
+        render(<LocaleProvider><HeaderSearch /></LocaleProvider>);
+        expect(screen.getByRole('button', { name: '検索' })).toBeInTheDocument();
+        expect(screen.queryByText('Go')).not.toBeInTheDocument();
     });
 });

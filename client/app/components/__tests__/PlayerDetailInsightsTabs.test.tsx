@@ -125,6 +125,10 @@ describe('PlayerDetailInsightsTabs', () => {
         // Ships is the tab to its right and is NOT active on load.
         expect(screen.getByRole('tab', { name: 'Activity' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
+        // The tablist's aria-label is migrated through t() too — exact match
+        // through a real render, not a translate()-only check, since this
+        // aria-label is invisible to sighted visual QA.
+        expect(screen.getByRole('tablist', { name: 'Player insight tabs' })).toBeInTheDocument();
         // The heavy chart lanes stay inactive until selected.
         expect(screen.queryByText('Loading profile charts...')).not.toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
@@ -489,12 +493,22 @@ describe('PlayerDetailInsightsTabs', () => {
         });
         fireEvent.click(screen.getByRole('button', { name: 'History' }));
         expect(screen.getByText('Ranked Games vs Win Rate')).toBeInTheDocument();
+        // Renders alongside the heatmap (showRankedHeatmap stays true here — no
+        // visibility callback flips it false in this test) — exact match, not a
+        // dictionary-only check, since it's a migrated SectionHeadingWithTooltip
+        // title with no other assertion anywhere in the suite.
+        expect(screen.getByText('Ranked Season Timeline')).toBeInTheDocument();
         expect(screen.getByText('Ranked Seasons')).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'Ships' })).toHaveAttribute('aria-selected', 'false');
 
         fireEvent.click(screen.getByRole('tab', { name: 'Profile' }));
         expect(screen.getByText('Loading profile charts...')).toBeInTheDocument();
         expect(screen.queryByText('Ranked Seasons')).not.toBeInTheDocument();
+        // The population row (Win Rate vs Survival + the gated Battles Played
+        // Distribution) renders independent of the tier/type payload's own load
+        // state — pvpBattles=800 clears the >=150 gate for the histogram.
+        expect(screen.getByText('Win Rate vs Survival')).toBeInTheDocument();
+        expect(screen.getByText('Battles Played Distribution')).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('tab', { name: 'Efficiency' }));
         expect(screen.getByText('Efficiency Badges')).toBeInTheDocument();
@@ -502,6 +516,8 @@ describe('PlayerDetailInsightsTabs', () => {
 
         fireEvent.click(screen.getByRole('tab', { name: 'Clan Battles' }));
         expect(screen.getByText('Clan Battles vs Win Rate')).toBeInTheDocument();
+        // Renders unconditionally alongside the (gateable) population heatmap.
+        expect(screen.getByText('Clan Season Timeline')).toBeInTheDocument();
         expect(screen.queryByText('Efficiency Badges')).not.toBeInTheDocument();
         expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();
         expect(screen.queryByText(/Random Battles by Tier/)).not.toBeInTheDocument();

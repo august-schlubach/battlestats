@@ -17,6 +17,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { fetchSharedJson } from '../lib/sharedJsonFetch';
 import { useRealm } from '../context/RealmContext';
+import { useT } from '../context/LocaleContext';
 import { shipClass } from '../lib/shipIdentity';
 import NationFlag from './NationFlag';
 import ShipToolLink from './ShipToolLink';
@@ -336,6 +337,7 @@ const InfoHint: React.FC<{ text: string }> = ({ text }) => (
 
 const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(({ onBucket }, ref) => {
     const { realm } = useRealm();
+    const t = useT();
     const sectionRef = useRef<HTMLElement>(null);
     // Mirror onBucket into a ref so the emit effect doesn't depend on the parent
     // passing a stable callback identity (it re-emits on real state change only).
@@ -609,10 +611,34 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
         return Math.round((endMs - startMs) / 86_400_000);
     }, [listWindow]);
 
-    const headingLabel = `Ship leaderboard${windowDays ? ` · last ${windowDays} days rolling` : ''}`;
+    // Plain form (no window clause) — the <section>'s aria-label and the
+    // fallback heading text share this rather than a second hardcoded
+    // "Ship leaderboard" literal.
+    const baseHeadingLabel = t('landing.shipLeaderboard.heading', { suffix: '' });
+    const headingLabel = windowDays
+        ? t('landing.shipLeaderboard.heading', { suffix: ` · last ${windowDays} days rolling` })
+        : baseHeadingLabel;
+    // The key now drives BOTH the visible text and the accessible name — it
+    // used to drive only the aria-label below while the JSX rendered
+    // hardcoded English literals, which would have shipped a translated
+    // accessible name over untranslated visible text the moment anyone
+    // populated this key in ko/ja. The trailing word ("rolling"/"leaderboard")
+    // still gets its own nowrap group so the info-hint icon can never orphan
+    // onto its own line (see the comment on that group below); splitting at
+    // the LAST SPACE derives that word from the template's own output instead
+    // of a second, hand-maintained literal, so the two can't drift again. No
+    // dictionary translates this key today (structural blocker recorded in
+    // the research doc), so in practice this only ever splits the English
+    // string above. If it's ever translated into a language with no ASCII
+    // space before the final token, lastSpaceIdx stays -1 and the whole
+    // heading renders inside the nowrap span with the icon — safe, just not
+    // split at a natural word boundary.
+    const lastSpaceIdx = headingLabel.lastIndexOf(' ');
+    const headingLead = lastSpaceIdx === -1 ? '' : headingLabel.slice(0, lastSpaceIdx + 1);
+    const headingLastWord = lastSpaceIdx === -1 ? headingLabel : headingLabel.slice(lastSpaceIdx + 1);
 
     return (
-        <section ref={sectionRef} className="mt-2 pt-8" aria-label="Ship leaderboard">
+        <section ref={sectionRef} className="mt-2 pt-8" aria-label={baseHeadingLabel}>
             {/* Filter bar + results fill the site column (layout.tsx owns the width). */}
             <div>
             {/* Section header: title · standings window · info hint. Mirrors the
@@ -633,13 +659,13 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                     className={`${HEADING_CLASS} inline align-middle`}
                     aria-label={headingLabel}
                 >
-                    {windowDays ? <>Ship leaderboard &middot; last {windowDays} days </> : <>Ship </>}
+                    {headingLead}
                     {/* The last word and the icon share a nowrap group so the
                         icon can never orphan onto a line of its own — which it
                         does at the widths where the title exactly fills the
                         column (~375px). */}
                     <span className="whitespace-nowrap">
-                        {windowDays ? 'rolling' : 'leaderboard'}
+                        {headingLastWord}
                         <span className="ml-2">
                             <InfoHint text={dataBasisHint(windowDays)} />
                         </span>

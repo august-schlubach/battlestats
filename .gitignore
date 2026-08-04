@@ -54,3 +54,6 @@ meta/
 
 # SuperLocalMemory auto-generated adapter for the Antigravity harness
 .agent/
+
+# Firecrawl scratch (i18n terminology research)
+.firecrawl/

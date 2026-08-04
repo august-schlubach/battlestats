@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { buildPlayerPath } from '../lib/entityRoutes';
+import { useT } from '../context/LocaleContext';
 import { trackEvent } from '../lib/umami';
 import { readLastViewedPlayers, type LastViewedPlayer } from '../lib/lastViewedPlayer';
 
@@ -26,6 +27,7 @@ import { readLastViewedPlayers, type LastViewedPlayer } from '../lib/lastViewedP
 const SEPARATOR = '\u00B7';
 
 const LastViewedPlayerLink: React.FC = () => {
+    const t = useT();
     const [lastViewed, setLastViewed] = useState<LastViewedPlayer[]>([]);
 
     useEffect(() => {
@@ -38,7 +40,7 @@ const LastViewedPlayerLink: React.FC = () => {
 
     return (
         <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-secondary)]">
-            <span>Last viewed:</span>
+            <span>{t('footer.lastViewed')}</span>
             {lastViewed.map((entry, index) => (
                 <React.Fragment key={`${entry.realm}:${entry.name.toLowerCase()}`}>
                     {index > 0 && (
