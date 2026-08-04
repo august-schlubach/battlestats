@@ -35,7 +35,21 @@ export type StringKey =
     // — landing —
     | 'landing.treemap.heading'
     | 'landing.treemap.ariaLabel'
+    | 'landing.treemap.topPct'
+    | 'landing.treemap.windowPhraseWithDays'
+    | 'landing.treemap.windowPhraseNoDays'
+    | 'landing.treemap.viewTreemap'
+    | 'landing.treemap.viewScatterplot'
     | 'landing.shipLeaderboard.heading'
+    | 'landing.shipLeaderboard.windowSuffix'
+    // — ship-class plurals (reusable vocabulary — headings/labels that name a
+    // bucket of ships by class, not treemap-specific) —
+    | 'shipClass.destroyers'
+    | 'shipClass.cruisers'
+    | 'shipClass.battleships'
+    | 'shipClass.aircraftCarriers'
+    | 'shipClass.submarines'
+    | 'shipClass.ships'
     // — shared controls —
     | 'common.all'
     | 'common.tier'

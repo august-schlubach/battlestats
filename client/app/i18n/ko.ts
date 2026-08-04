@@ -25,6 +25,26 @@ export const ko: Partial<Record<StringKey, string>> = {
     'player.section.rankedSeasons': '랭크전 시즌',
     'player.section.randomBattlesByTier': '티어별 랜덤전',
 
+    // Composed-template blocker (see the research doc + spec's "Known traps"
+    // section): the clauses below are resolved through t() in the components,
+    // so these two multi-part templates can now ship translated.
+    'landing.treemap.heading': '{realm} 서버에서 가장 많이 플레이한 {bucket}{suffix}',
+    'landing.treemap.ariaLabel': '{realm} 서버에서 {windowPhrase} 동안 가장 많이 플레이한 {bucket}을 {view} 형태로 표시',
+    'landing.treemap.topPct': '상위 {pct}%',
+    'landing.treemap.windowPhraseWithDays': '최근 {days}일간의 함선 순위 집계 기간',
+    'landing.treemap.windowPhraseNoDays': '함선 순위 집계 기간',
+    'landing.treemap.viewTreemap': '트리맵',
+    'landing.treemap.viewScatterplot': '전투 수 대비 승률 산점도',
+    'landing.shipLeaderboard.heading': '함선 리더보드{suffix}',
+    'landing.shipLeaderboard.windowSuffix': '최근 {days}일',
+
+    'shipClass.destroyers': '구축함',
+    'shipClass.cruisers': '순양함',
+    'shipClass.battleships': '전함',
+    'shipClass.aircraftCarriers': '항공모함',
+    'shipClass.submarines': '잠수함',
+    'shipClass.ships': '함선',
+
     'common.all': '전체',
     'common.tier': '티어',
     'common.battles': '전투 수',
@@ -56,20 +76,17 @@ export const ko: Partial<Record<StringKey, string>> = {
     //   player.section.rankedSeasonTimeline, player.section.clanSeasonTimeline,
     //   player.section.battlesPlayedDistribution
     //
-    // Word order judged too risky for a template with multiple moving parts:
-    //   landing.treemap.heading, landing.treemap.ariaLabel
-    //
-    // Structural blocker, not a vocabulary gap: `{suffix}` in
-    // landing.shipLeaderboard.heading is a hardcoded English literal built in
-    // ShipLeaderboard.tsx (`· last N days rolling`) that never passes through
-    // t(). This fix round made the key drive the VISIBLE text too, not just
-    // the aria-label (they used to diverge — see ShipLeaderboard.tsx), but
-    // that only fixed the wiring; the suffix clause itself is still an
-    // English literal built in the component, so translating this key alone
-    // would still render a mixed-language string
-    // ("함선 리더보드 · last 45 days rolling") on the landing page. Needs the
-    // suffix clause to become its own key before this one can honestly ship:
-    //   landing.shipLeaderboard.heading
+    // RESOLVED (composed-template blocker, follow-on #1): landing.treemap.heading,
+    // landing.treemap.ariaLabel, and landing.shipLeaderboard.heading used to sit
+    // here — either "word order too risky" or, for the ship-leaderboard heading,
+    // a hardcoded English literal (`· last N days rolling`) built in
+    // ShipLeaderboard.tsx that never passed through t(). Every interpolated
+    // clause (the ship-class plurals, "top N%", the window phrase, the
+    // map/plot view name, and the "last N days rolling" suffix) now has its own
+    // key, resolved through t() in the component before being handed to the
+    // outer template as a var — see landing.treemap.topPct/windowPhraseWithDays/
+    // windowPhraseNoDays/viewTreemap/viewScatterplot, landing.shipLeaderboard.
+    // windowSuffix, and shipClass.* above. All three templates ship translated.
     //
     // Generic UI chrome outside the research doc's WoWS-jargon remit. Two-tier
     // standard (see the research doc's "Generic UI chrome" section): everyday

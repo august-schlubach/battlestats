@@ -24,9 +24,9 @@ import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import * as d3 from 'd3';
 import { useDisplayRealm, useRealm } from '../context/RealmContext';
 import { useT } from '../context/LocaleContext';
+import type { StringKey } from '../i18n';
 import { buildShipPath } from '../lib/entityRoutes';
 import { formatSeasonLabel } from '../lib/shipSeason';
-import { shipClass } from '../lib/shipIdentity';
 import wrColor from '../lib/wrColor';
 import { formatCompactCount } from '../lib/chartTheme';
 import { trackEvent } from '../lib/umami';
@@ -63,11 +63,28 @@ const TYPE_LABEL: Record<string, string> = {
     Submarine: 'SS',
 };
 
-// Plural class label for the heading ("Battleships", "Aircraft Carriers").
-const pluralTypeLabel = (type: ShipType | null): string => {
-    if (!type) return 'ships';
-    const label = shipClass(type)?.label ?? type;
-    return label.endsWith('s') ? label : `${label}s`;
+// Ship class → its plural-label dictionary key. Ko/ja don't pluralize (see
+// shipClass.* in app/i18n/en.ts), so this is really "the bucket noun for this
+// class", English happens to need an -s. Keyed by the exact `ShipType` values
+// SHIP_TYPES/shipClass use ('AirCarrier', not 'Aircraft Carrier').
+const SHIP_CLASS_PLURAL_KEY: Record<string, StringKey> = {
+    Destroyer: 'shipClass.destroyers',
+    Cruiser: 'shipClass.cruisers',
+    Battleship: 'shipClass.battleships',
+    AirCarrier: 'shipClass.aircraftCarriers',
+    Submarine: 'shipClass.submarines',
+};
+
+// Plural class label for the heading ("Battleships", "Aircraft Carriers"),
+// resolved through t() — the composed-template blocker this closes: the
+// clause used to be an English literal built here and handed to
+// landing.treemap.heading/ariaLabel as an opaque {bucket} string, which no
+// dictionary could ever untranslate. `t` is passed in rather than called here
+// (useT() must stay a top-level hook call in the component).
+const pluralTypeLabel = (t: ReturnType<typeof useT>, type: ShipType | null): string => {
+    if (!type) return t('shipClass.ships');
+    const key = SHIP_CLASS_PLURAL_KEY[type];
+    return key ? t(key) : type;
 };
 
 interface HoverState {
@@ -194,14 +211,23 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
         if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
         return Math.round((endMs - startMs) / 86_400_000);
     }, [windowStart, windowEnd]);
+    // Translated — feeds the (in-scope) SVG aria-label below.
     const windowPhrase = windowDays
+        ? t('landing.treemap.windowPhraseWithDays', { days: windowDays })
+        : t('landing.treemap.windowPhraseNoDays');
+    // Same wording, kept as an English literal for the info-tooltip paragraph
+    // below. Info-tooltip descriptions are out of scope for localization (see
+    // the client-locale-toggle spec's Scope section); reusing the translated
+    // `windowPhrase` there would leak a translated fragment into an otherwise
+    // fully-English paragraph the moment ko/ja is active.
+    const windowPhraseTooltip = windowDays
         ? `rolling, trailing ${windowDays}-day ship-standings window`
         : 'rolling ship-standings window';
 
     const bucketLabel = useMemo(() => {
         if (tier == null || type == null) return null;
-        return `T${tier} ${pluralTypeLabel(type)}`;
-    }, [tier, type]);
+        return `T${tier} ${pluralTypeLabel(t, type)}`;
+    }, [tier, type, t]);
 
     // Dim the current view while a filter switch / cold percentile bucket is in
     // flight so the redraw reads as an update rather than a flash of the previous
@@ -406,8 +432,8 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                         {t('landing.treemap.heading', {
                             realm: displayRealm.toUpperCase(),
-                            bucket: bucketLabel || 'ships',
-                            suffix: `${wrPct ? ` · top ${wrPct}%` : ''}${windowLabel ? ` · ${windowLabel}` : ''}`,
+                            bucket: bucketLabel || t('shipClass.ships'),
+                            suffix: `${wrPct ? ` · ${t('landing.treemap.topPct', { pct: wrPct })}` : ''}${windowLabel ? ` · ${windowLabel}` : ''}`,
                         })}
                     </h2>
                     <div className="group relative inline-flex items-center">
@@ -421,7 +447,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                         <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-[27rem] max-w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--bg-page)] px-3 py-3 text-left text-xs normal-case tracking-normal text-[var(--text-primary)] shadow-lg group-hover:block group-focus-within:block">
                             <p className="font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Ship {view === 'plot' ? 'scatterplot' : 'treemap'}</p>
                             <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">The most-played ships of the tier &amp; type selected below. <span className="font-semibold text-[var(--accent-mid)]">Map</span> draws each as a tile sized by battles; <span className="font-semibold text-[var(--accent-mid)]">Plot</span> charts each by battles (x) and win rate (y). Both color by win rate and follow the filters (tier, type, WR) below; tap a ship to open its leaderboard.</p>
-                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a {windowPhrase} recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
+                            <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]"><span className="font-semibold text-[var(--accent-mid)]">Eligibility window:</span> a {windowPhraseTooltip} recomputed nightly — the same window the ship leaderboards and profile medals read. The dates shown are its current bounds.</p>
                         </div>
                     </div>
                 </div>
@@ -460,9 +486,9 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                     role="img"
                     aria-label={t('landing.treemap.ariaLabel', {
                         realm: displayRealm,
-                        bucket: bucketLabel ?? 'ships',
+                        bucket: bucketLabel ?? t('shipClass.ships'),
                         windowPhrase,
-                        view: view === 'plot' ? 'battles-vs-win-rate scatterplot' : 'treemap',
+                        view: view === 'plot' ? t('landing.treemap.viewScatterplot') : t('landing.treemap.viewTreemap'),
                     })}
                     style={{ opacity: dim ? 0.55 : 1, transition: 'opacity 150ms ease' }}
                 />

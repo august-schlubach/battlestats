@@ -113,6 +113,46 @@ Keys admitted under the generic-chrome tier, with their values:
 | `insights.tabs.efficiency` | 효율 | 効率 |
 | `notFound.title` | 페이지를 찾을 수 없습니다 | ページが見つかりません |
 | `notFound.body` | 요청하신 페이지를 찾을 수 없습니다. | お探しのページは見つかりませんでした。 |
+| `landing.treemap.topPct` | 상위 {pct}% | 上位{pct}% |
+| `landing.treemap.windowPhraseWithDays` | 최근 {days}일간의 함선 순위 집계 기간 | 直近{days}日間の艦艇ランキング集計期間 |
+| `landing.treemap.windowPhraseNoDays` | 함선 순위 집계 기간 | 艦艇ランキング集計期間 |
+| `landing.treemap.viewTreemap` | 트리맵 | ツリーマップ |
+| `landing.treemap.viewScatterplot` | 전투 수 대비 승률 산점도 | 戦闘数と勝率の散布図 |
+| `landing.shipLeaderboard.windowSuffix` | 최근 {days}일 | 直近{days}日間 |
+| `landing.treemap.heading` (template) | {realm} 서버에서 가장 많이 플레이한 {bucket}{suffix} | {realm}サーバーで最もプレイされた{bucket}{suffix} |
+| `landing.treemap.ariaLabel` (template) | {realm} 서버에서 {windowPhrase} 동안 가장 많이 플레이한 {bucket}을 {view} 형태로 표시 | {realm}サーバーで{windowPhrase}に最もプレイされた{bucket}を{view}として表示 |
+| `landing.shipLeaderboard.heading` (template) | 함선 리더보드{suffix} | 艦艇リーダーボード{suffix} |
+
+**Added 2026-08-04 (follow-on #1, the composed-template blocker).** The client-
+locale-toggle spec named three `en.ts` keys whose `{}` clauses were built as
+English literals inside components, never passed through `t()` — translating
+the outer template alone would have shipped a mixed-language string like
+`함선 리더보드 · last 45 days rolling`. Each clause now has its own key,
+resolved through `t()` in the component before being handed to the outer
+template as a var. Two kinds of new key:
+
+- **Compositions of already-attested terms**, no new admission needed:
+  `shipClass.destroyers`/`cruisers`/`battleships`/`aircraftCarriers`/
+  `submarines`/`ships` reuse the individual ship-class nouns from the Verified
+  terms table above (전함/戦艦, 순양함/巡洋艦, 구축함/駆逐艦, 항공모함/空母,
+  잠수함/潜水艦, 함선/艦艇). Neither Korean nor Japanese pluralizes, so each
+  value equals the singular noun already verified there — there is no new
+  vocabulary claim being made, only a new call site (the treemap heading's
+  bucket label) for nouns this document already clears.
+- **New generic-chrome admissions**, added to the table above: `top {pct}%`,
+  the two window-phrase variants ("rolling[, trailing N-day] ship-standings
+  window"), `treemap`/`scatterplot`, and "last {days} days rolling" (as
+  `landing.shipLeaderboard.windowSuffix`). These are exactly the class the
+  "Generic UI chrome" section above describes — sort/filter/view-mode chrome
+  with no plausible-but-wrong WoWS jargon to introduce, since none of them are
+  WoWS jargon. The two composed heading/ariaLabel **templates** themselves
+  (`landing.treemap.heading`/`landing.treemap.ariaLabel`/
+  `landing.shipLeaderboard.heading`) are listed too, since this is also the
+  point their word order was decided (previously blocked as "too risky") —
+  KO/JA both keep the bucket/suffix clauses in the same relative position as
+  English, adding a possessive/locative connective (`서버에서`/`サーバーで`,
+  "at the {realm} server") rather than reordering, since the source order
+  already reads naturally in both target languages for this sentence shape.
 
 Added 2026-08-04 (Task 8b, closing the header's last two untranslated words —
 the `Go` submit button and the theme chip's `Light`/`Dark`/`Theme: …`).

@@ -34,18 +34,51 @@ export const en: Record<StringKey, string> = {
     'player.section.efficiencyBadges': 'Efficiency Badges',
 
     // Composed at runtime; word order differs per language, so the whole
-    // sentence is one template rather than concatenated fragments.
+    // sentence is one template rather than concatenated fragments. {bucket}
+    // and {suffix} are themselves resolved through t() in the component
+    // before being passed in — see landing.treemap.topPct/viewTreemap/
+    // viewScatterplot/windowPhraseWithDays/windowPhraseNoDays and the
+    // shipClass.* keys below (the composed-template blocker, closed).
     'landing.treemap.heading': '{realm} most-played {bucket}{suffix}',
     // The treemap SVG's accessible name (role="img" aria-label). Lifted verbatim
     // from RealmTopShipsTreemapSVG.tsx's prior hardcoded template so the
     // accessible name keeps pace with the visible <h2> above it, which already
     // went through t() in Task 6 — added in Task 6b, the gap that left this one
-    // sentence untranslated in the same header row.
+    // sentence untranslated in the same header row. {windowPhrase} and {view}
+    // are resolved through t() in the component, not built as English literals.
     'landing.treemap.ariaLabel': '{realm} most-played {bucket} over the {windowPhrase}, shown as a {view}',
+    // The " · top {pct}%" clause in landing.treemap.heading's {suffix}. Generic
+    // UI chrome (no WoWS jargon), admitted per the research doc's two-tier
+    // standard — see agents/work-items/i18n-terminology-research.md.
+    'landing.treemap.topPct': 'top {pct}%',
+    // The "over the {windowPhrase}" clause in landing.treemap.ariaLabel, and
+    // (kept English-only, see RealmTopShipsTreemapSVG.tsx) the same wording in
+    // the component's out-of-scope info-tooltip paragraph.
+    'landing.treemap.windowPhraseWithDays': 'rolling, trailing {days}-day ship-standings window',
+    'landing.treemap.windowPhraseNoDays': 'rolling ship-standings window',
+    // The "{view}" clause in landing.treemap.ariaLabel.
+    'landing.treemap.viewTreemap': 'treemap',
+    'landing.treemap.viewScatterplot': 'battles-vs-win-rate scatterplot',
     // Live source (ShipLeaderboard.tsx) carries no realm in this heading — it's
     // always "Ship leaderboard", with an optional " · last N days rolling"
-    // clause once the served window is known. {suffix} carries that clause.
+    // clause once the served window is known. {suffix} carries that clause,
+    // itself built from landing.shipLeaderboard.windowSuffix resolved through
+    // t() in the component (not an English literal).
     'landing.shipLeaderboard.heading': 'Ship leaderboard{suffix}',
+    // The "last {days} days rolling" clause inside that suffix.
+    'landing.shipLeaderboard.windowSuffix': 'last {days} days rolling',
+
+    // Reusable ship-class vocabulary (plural form, for headings that name a
+    // bucket of ships by class — not treemap-specific). The individual class
+    // nouns are corpus-attested (see the research doc's Verified terms table);
+    // neither ko nor ja pluralizes, so their values below equal the singular.
+    'shipClass.destroyers': 'Destroyers',
+    'shipClass.cruisers': 'Cruisers',
+    'shipClass.battleships': 'Battleships',
+    'shipClass.aircraftCarriers': 'Aircraft Carriers',
+    'shipClass.submarines': 'Submarines',
+    // Generic fallback when no class filter is active.
+    'shipClass.ships': 'ships',
 
     'common.all': 'All',
     'common.tier': 'Tier',

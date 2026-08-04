@@ -615,8 +615,16 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
     // fallback heading text share this rather than a second hardcoded
     // "Ship leaderboard" literal.
     const baseHeadingLabel = t('landing.shipLeaderboard.heading', { suffix: '' });
+    // The "· last N days rolling" clause used to be an English literal built
+    // right here — the composed-template blocker: translating the outer
+    // landing.shipLeaderboard.heading key alone would still have shipped
+    // "함선 리더보드 · last 45 days rolling". landing.shipLeaderboard.windowSuffix
+    // resolves the clause through t() first, so the whole heading is one
+    // translated sentence in any locale.
     const headingLabel = windowDays
-        ? t('landing.shipLeaderboard.heading', { suffix: ` · last ${windowDays} days rolling` })
+        ? t('landing.shipLeaderboard.heading', {
+            suffix: ` · ${t('landing.shipLeaderboard.windowSuffix', { days: windowDays })}`,
+        })
         : baseHeadingLabel;
     // The key now drives BOTH the visible text and the accessible name — it
     // used to drive only the aria-label below while the JSX rendered

@@ -367,26 +367,76 @@ dictionaries with the most obvious call sites — resolve the casing question
 (new title-case key vs. a per-site `.toUpperCase()`/CSS transform vs.
 reconciling the four sites to sentence case) before wiring any of the four.
 
-### The composed-template blocker is bounded to exactly three keys
+### The composed-template blocker — RESOLVED (follow-on #1, 2026-08-04)
 
-Three `en.ts` values contain `{}` tokens whose interpolated clause is built as
-an **English literal inside the component**, never passed through `t()`:
+Three `en.ts` values used to contain `{}` tokens whose interpolated clause was
+built as an **English literal inside the component**, never passed through
+`t()`:
 
-- `landing.shipLeaderboard.heading` — `{suffix}` is ` · last N days rolling`,
-  built in `ShipLeaderboard.tsx`. (This fix round made the key drive the
+- `landing.shipLeaderboard.heading` — `{suffix}` was ` · last N days rolling`,
+  built in `ShipLeaderboard.tsx`. (A prior fix round made the key drive the
   visible heading text as well as the aria-label — they used to diverge — but
-  did not touch the suffix clause itself, so the blocker stands.)
-- `landing.treemap.heading` — `{bucket}`/`{suffix}` carry ship-bucket labels,
-  WR-percentile clauses, and window phrases built in
+  did not touch the suffix clause itself, so the blocker stood until now.)
+- `landing.treemap.heading` — `{bucket}`/`{suffix}` carried ship-bucket
+  labels, WR-percentile clauses, and window phrases built in
   `RealmTopShipsTreemapSVG.tsx`.
 - `landing.treemap.ariaLabel` — same component, same English-literal clauses
   (`{bucket}`, `{windowPhrase}`, `{view}`).
 
-Translating any of these three keys alone would ship a mixed-language string
-(e.g. `함선 리더보드 · last 45 days rolling`). One refactor — give each
-interpolated clause its own key, resolved through `t()` in the component
-before being passed as a template var — unblocks all three at once; it is not
-three separate problems.
+Translating any of these three keys alone would have shipped a mixed-language
+string (e.g. `함선 리더보드 · last 45 days rolling`). The fix was one refactor
+across both components: give every interpolated clause its own dictionary
+key, resolved through `t()` **in the component** before being handed to the
+outer template as a var, so the outer template only ever composes already-
+translated fragments — never an opaque English one.
+
+**New keys, each resolved at its own call site:**
+
+- `shipClass.destroyers`/`cruisers`/`battleships`/`aircraftCarriers`/
+  `submarines`/`ships` — the treemap heading's bucket label
+  (`T{tier} {class}`); reusable vocabulary (not treemap-specific), so it lives
+  in its own top-level `shipClass.*` namespace rather than under `landing.*`.
+  `RealmTopShipsTreemapSVG.tsx`'s `pluralTypeLabel` now takes `t` as a
+  parameter (a plain function call, not a hook — `useT()` stays a single
+  top-level call in the component) and looks up the class's key instead of
+  pluralizing an English label string.
+- `landing.treemap.topPct` (`top {pct}%`) — the WR-percentile clause in the
+  heading's `{suffix}`.
+- `landing.treemap.windowPhraseWithDays` / `windowPhraseNoDays` — the
+  `{windowPhrase}` clause in the aria-label, with/without a known window
+  length.
+- `landing.treemap.viewTreemap` / `viewScatterplot` — the `{view}` clause in
+  the aria-label.
+- `landing.shipLeaderboard.windowSuffix` (`last {days} days rolling`) — the
+  clause inside `ShipLeaderboard.tsx`'s heading `{suffix}`.
+
+`landing.treemap.heading`, `landing.treemap.ariaLabel`, and
+`landing.shipLeaderboard.heading` themselves now ship translated in `ko`/`ja`
+— the word-order concern that had blocked them (a template with several
+moving parts) resolved to "keep the same relative order as English, add a
+locative connective" (`{realm} 서버에서 …`/`{realm}サーバーで…`, "at the
+{realm} server") rather than reordering, since the English sentence shape
+reads naturally in both target languages once every clause is itself
+translated. Terminology + the full admission reasoning (which keys reuse
+already-attested nouns vs. are new generic-chrome admissions):
+`agents/work-items/i18n-terminology-research.md`.
+
+**Deliberately preserved, not touched by this fix:** the info-tooltip
+paragraph in `RealmTopShipsTreemapSVG.tsx` that also names the standings
+window (info-tooltip descriptions are out of scope for localization per this
+spec's Scope section) keeps its own English-literal copy of the window phrase
+(`windowPhraseTooltip`) rather than sharing the now-translated `windowPhrase`
+variable — sharing it would have leaked a translated fragment into an
+otherwise fully-English paragraph the moment ko/ja is active, a regression to
+an area this work item does not claim.
+
+**Test coverage:** `RealmTopShipsTreemapSVGLocale.test.tsx` and
+`ShipLeaderboardLocale.test.tsx` render under real `ko`/`ja` dictionaries
+(no `translate()` mock) and assert the whole composed heading/aria-label is in
+the target language — no surviving English clause word, no literal `{token}`
+— covering both branches of every conditional clause (bucket present/absent,
+every ship class, WR-percentile present/absent, window-days known/unknown,
+map/plot view).
 
 **`{}` alone is not the signal — `nav.themeCurrent` has one and is NOT
 blocked.** `'nav.themeCurrent': 'Theme: {label}'` also interpolates, but
@@ -409,5 +459,7 @@ token.
 5. Wire the landing filter bar and `EfficiencyBadgeTable.tsx` to the
    already-populated `common.*` keys, once `Nation`/`Award`/umbrella-`Type` are
    attested (see *Corrected against what actually shipped* under Scope).
-   Resolve the `common.winRate` casing trap and the composed-template blocker
-   above before or during this pass — both sit directly in its path.
+   Resolve the `common.winRate` casing trap above before or during this pass —
+   it still sits directly in its path. (The composed-template blocker that
+   used to sit alongside it was resolved 2026-08-04 — see above — and no
+   longer blocks this follow-on.)
