@@ -107,11 +107,28 @@ single file to fill in).
 - `en.ts` — `Record<StringKey, string>`, the source of truth. English is not a
   translation: strings are lifted **verbatim** from the components, so the `en`
   render is byte-identical to today.
-- `ko.ts`, `ja.ts` — `Record<StringKey, string>` typed against the same union,
-  populated from the terminology research. Strings with no in-game source carry a
-  `// NEEDS-NATIVE-CHECK` comment and hold the English text deliberately. Because
-  the type is shared, a key added to `en.ts` and forgotten elsewhere is a **build
-  failure**, not a blank label in production.
+- `ko.ts`, `ja.ts` — **`Partial<Record<StringKey, string>>`**, populated from the
+  terminology research. An untranslated string is expressed as **absence**, not as
+  a duplicated English value.
+
+**Why `Partial` rather than a total `Record`.** A total record would make a
+forgotten key a build failure, which is attractive. But it forces "untranslated"
+to be written as a copy of the English string, which is indistinguishable from
+"translated, and identical by coincidence." Coverage then becomes uncountable —
+and the `NEEDS-NATIVE-CHECK` residue is the entire subject of the follow-on work,
+so being unable to answer *how much of `ko` is real* costs more than the build
+gate is worth. With `Partial`:
+
+- untranslated = omitted, and `NEEDS-NATIVE-CHECK` is simply a comment beside the
+  omission;
+- the runtime English fallback becomes live and load-bearing rather than dead code
+  reachable only by casting past the type;
+- coverage is `Object.keys(ko).length / Object.keys(en).length`, asserted and
+  printed by the parity test.
+
+**Accepted cost:** a key added to `en.ts` and never translated renders English
+silently instead of failing the build. `en.ts` itself stays a **total**
+`Record<StringKey, string>`, so the source of truth can never have a hole.
 - `index.ts` — locale registry + `resolveDictionary(locale)`.
 
 **Key style is semantic and namespaced** (`insights.tabs.activity`), not
@@ -145,6 +162,26 @@ The inline `<head>` script in `app/layout.tsx` already reads `bs-theme` and
 This puts the correct `lang` on the served document before React runs (screen
 readers and crawlers read the attribute) and gives CSS a `:root[data-lang="ko"]`
 hook. `<html>` already carries `suppressHydrationWarning`.
+
+**The provider must re-stamp on every change — do not copy `RealmContext` here.**
+`RealmProvider.setRealm` writes state and localStorage but never re-stamps
+`documentElement.dataset.realm`; nothing depends on that attribute after load, so
+it is harmless there. Copying it faithfully would break this feature twice:
+
+1. **After a switch.** The head script runs once. Switching to `ko` would leave
+   `data-lang="en"`, so the typography rule never applies and Korean renders with
+   `uppercase` + `tracking-wide` still in force — precisely the defect that rule
+   exists to prevent.
+2. **On a `?lang=ko` first visit.** The head script reads *only* localStorage, so
+   a cold `?lang=` arrival — the prod preview path this spec names — stamps
+   nothing. The preview would show Korean text with English typography and
+   misrepresent what shipping looks like.
+
+`LocaleProvider` therefore carries a `useEffect` keyed on `locale` that writes both
+`documentElement.lang` and `documentElement.dataset.lang`, running on the initial
+resolve as well as on every subsequent change. Covered by a test asserting
+`document.documentElement.dataset.lang` after a switch and after a `?lang=` cold
+load.
 
 ### Feature flag
 
@@ -243,9 +280,12 @@ megabytes, against a client that currently ships one Latin subset.
 
 - **Locale resolution:** precedence (`?lang=` > localStorage > `'en'`), persistence
   on switch, invalid value ignored.
-- **Dictionary parity:** `Object.keys(ko)` and `Object.keys(ja)` equal
-  `Object.keys(en)` — belt alongside the type, and it catches a dictionary loaded
-  from any future non-typed source.
+- **Dictionary parity + coverage:** every `ko`/`ja` key is a subset of `en` (no
+  orphans), and the test **prints coverage** (`Object.keys(ko).length /
+  Object.keys(en).length`) so the translation residue is a number, not a feeling.
+- **`data-lang` stamping:** `document.documentElement.dataset.lang` and `lang`
+  track the locale after a switch, and after a `?lang=ko` cold load with empty
+  localStorage.
 - **Selector:** renders three options, switches locale, persists, emits
   `locale-switch` with the locale **id**.
 - **`t()` fallback:** a dictionary missing a key yields the English string, not the
