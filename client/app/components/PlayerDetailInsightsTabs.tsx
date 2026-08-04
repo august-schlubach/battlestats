@@ -21,6 +21,8 @@ import { decrementChartFetches, fetchSharedJson, incrementChartFetches, isAbortE
 import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import { useTheme } from '../context/ThemeContext';
 import { useRealm } from '../context/RealmContext';
+import { useT } from '../context/LocaleContext';
+import type { StringKey } from '../i18n';
 import { withRealm } from '../lib/realmParams';
 import { trackEvent } from '../lib/umami';
 
@@ -121,7 +123,9 @@ const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import
     loading: () => <LoadingPanel label="Loading battles distribution..." minHeight={284} />,
 });
 
-const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; minHeight: number; }> = [
+// Labels are keys, not strings: a module-level constant cannot call a hook, so
+// resolution happens at render.
+const TAB_CONFIG: Array<{ id: InsightsTabId; labelKey: StringKey; panelLabelKey: StringKey; minHeight: number; }> = [
     // Order reflects measured Umami tab-click demand (90d, 2026-07-08): Activity
     // stays first as the default landing tab; the remaining tabs are ranked by
     // click volume — Ships > Profile > Efficiency > Ranked > Clan Battles. The
@@ -129,12 +133,12 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; label: string; panelLabel: string; 
     // minHeight is only a loading-stability floor (roughly the tab's
     // LoadingPanel stack) — panels size to content since 2026-07-15, so a
     // large floor just recreates the dead space the content-sizing removed.
-    { id: 'activity', label: 'Activity', panelLabel: 'Recent battle activity', minHeight: 420 },
-    { id: 'ships', label: 'Ships', panelLabel: 'Ship insights', minHeight: 560 },
-    { id: 'profile', label: 'Profile', panelLabel: 'Profile insights', minHeight: 360 },
-    { id: 'badges', label: 'Efficiency', panelLabel: 'Efficiency insights', minHeight: 360 },
-    { id: 'ranked', label: 'Ranked', panelLabel: 'Ranked insights', minHeight: 280 },
-    { id: 'career', label: 'Clan Battles', panelLabel: 'Clan battles insights', minHeight: 280 },
+    { id: 'activity', labelKey: 'insights.tabs.activity', panelLabelKey: 'insights.panel.activity', minHeight: 420 },
+    { id: 'ships', labelKey: 'insights.tabs.ships', panelLabelKey: 'insights.panel.ships', minHeight: 560 },
+    { id: 'profile', labelKey: 'insights.tabs.profile', panelLabelKey: 'insights.panel.profile', minHeight: 360 },
+    { id: 'badges', labelKey: 'insights.tabs.efficiency', panelLabelKey: 'insights.panel.efficiency', minHeight: 360 },
+    { id: 'ranked', labelKey: 'insights.tabs.ranked', panelLabelKey: 'insights.panel.ranked', minHeight: 280 },
+    { id: 'career', labelKey: 'insights.tabs.clanBattles', panelLabelKey: 'insights.panel.clanBattles', minHeight: 280 },
 ];
 
 // Height CAP (px) for the battle-table insight views — the Activity tab and
@@ -208,6 +212,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
 }) => {
     const { theme } = useTheme();
     const { realm } = useRealm();
+    const t = useT();
     const requestSignal = usePlayerRequestSignal();
     const [activeTab, setActiveTab] = useState<InsightsTabId>('activity');
     // Drill-down from the Profile tab's tier figure into the Ships tab. The
@@ -596,7 +601,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
             <div className="-mx-4 -mt-4 mb-4 rounded-t-lg border-b border-[var(--border)]">
                 <div
                     role="tablist"
-                    aria-label="Player insight tabs"
+                    aria-label={t('insights.tabsAriaLabel')}
                     className="-mb-px flex flex-nowrap gap-0 overflow-x-auto sm:overflow-visible"
                 >
                 {TAB_CONFIG.map((tab) => {
@@ -641,7 +646,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             }}
                             className={`${base} ${stateClass}${isDisabled ? '' : ` tab-attention-glow${glowArmed ? ' tab-attention-glow--armed' : ''}`}`}
                         >
-                            {tab.label}
+                            {t(tab.labelKey)}
                         </button>
                     );
                 })}
@@ -757,7 +762,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             <div className={`mb-3 flex items-start gap-3 pt-2.5 pl-[15px] ${showRankedHeatmap ? 'justify-between' : 'justify-end'}`}>
                                 {showRankedHeatmap ? (
                                     <SectionHeadingWithTooltip
-                                        title="Ranked Games vs Win Rate"
+                                        title={t('player.section.rankedGamesVsWinRate')}
                                         description="Each tile represents a pocket of ranked players grouped by total ranked games and overall ranked win rate. The outlined marker shows where this player lands inside that broader field."
                                     />
                                 ) : null}
@@ -810,7 +815,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             {showRankedHeatmap ? (
                                 <div className="mt-2">
                                     <SectionHeadingWithTooltip
-                                        title="Ranked Season Timeline"
+                                        title={t('player.section.rankedSeasonTimeline')}
                                         description="Every ranked season Wargaming has run, in order — one box each. A filled box is a season this player played, colored by that season's win rate; an empty box is a season they sat out. A mark above a box is the highest league reached that season: a silver diamond for Silver, a gold star for Gold or above. Spacing is by season, not by date, so the year labels below fall wherever the calendar rolls over."
                                         className="mb-2 pl-[15px]"
                                     />
@@ -834,7 +839,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     x as the Ranked Games vs Win Rate header above); the
                                     table also pulls in 20px on the right. */}
                                 <SectionHeadingWithTooltip
-                                    title="Ranked Seasons"
+                                    title={t('player.section.rankedSeasons')}
                                     description="This table summarizes the player's historical ranked-season results, including total battles, win rate, and the best league finish reached in each season."
                                     className="mb-3 pl-[15px]"
                                 />
@@ -859,7 +864,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         ) : profileChartPayload ? (
                             <>
                                 <SectionHeadingWithTooltip
-                                    title="Random Battles by Tier"
+                                    title={t('player.section.randomBattlesByTier')}
                                     description="Where this captain spends their random battles, and how they do there. Each bar is one tier and ship class: its length is the battle count, on a single scale shared across the whole chart, and its colour is the win rate. Colour fades toward grey where too few battles have been played for the win rate to mean much, so a lucky handful of games cannot pose as a strength. Totals for each class run along the bottom."
                                     className="mb-2 pt-2.5 pl-[15px]"
                                 />
@@ -893,7 +898,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             <div className={`grid grid-cols-1 gap-6 ${populationGridColsClass}`}>
                                 <div className="min-w-0 pl-[15px]">
                                     <SectionHeadingWithTooltip
-                                        title="Win Rate vs Survival"
+                                        title={t('player.section.winRateVsSurvival')}
                                         description="This scatter plot shows how this player's win rate and survival rate compare to the broader tracked player base. Each dot represents a player, positioned by PvP win rate on the x-axis and PvP survival rate on the y-axis. Darker areas indicate denser player clusters, and the outlined marker shows where this player sits in that field."
                                         className="mb-2"
                                     />
@@ -903,7 +908,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                 {showBattlesDistribution ? (
                                     <div className="min-w-0 pl-[15px]">
                                         <SectionHeadingWithTooltip
-                                            title="Battles Played Distribution"
+                                            title={t('player.section.battlesPlayedDistribution')}
                                             description="This distribution shows where the player's total PvP battle count falls relative to the broader tracked player population. It is a population-position view, not a quality score."
                                             className="mb-2"
                                         />
@@ -926,7 +931,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                         {hasClan ? (
                             <div>
                                 <SectionHeadingWithTooltip
-                                    title="Clan Battles vs Win Rate"
+                                    title={t('player.section.clanBattlesVsWinRate')}
                                     description="Where this player sits in the tracked population by total clan battles and overall win rate (the heatmap: each tile is a pocket of players, the outlined marker is this player), followed by their own per-season battles and win rate below."
                                     className="mb-[18px] pt-2.5 pl-[15px]"
                                 />
@@ -955,7 +960,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                                     seasons cluster in time. */}
                                 <div className="mb-4">
                                     <SectionHeadingWithTooltip
-                                        title="Clan Season Timeline"
+                                        title={t('player.section.clanSeasonTimeline')}
                                         description="Where the player's clan battle seasons fall in time. Each marker is one season, positioned by year, sized by battles played (relative to the player's own range), and colored by season win rate."
                                         className="mb-2 pl-[15px]"
                                     />

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import InfoTooltip from './InfoTooltip';
 import EfficiencyBadgeTable, { type EfficiencyBadgeDot } from './EfficiencyBadgeTable';
 import { useTheme } from '../context/ThemeContext';
+import { useT } from '../context/LocaleContext';
 
 interface EfficiencyRowInput {
     ship_id?: number | null;
@@ -106,6 +107,7 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
     maxTableHeightPx,
 }) => {
     const { theme } = useTheme();
+    const t = useT();
     const dots = useMemo(() => normalizeBadgeDots(efficiencyRows), [efficiencyRows]);
 
     return (
@@ -113,9 +115,9 @@ const PlayerEfficiencyBadges: React.FC<PlayerEfficiencyBadgesProps> = ({
             {/* pt-2.5/pl-[15px] is the shared tab-top header spot across the
                 Profile/Efficiency/Clan Battles insight tabs. */}
             <div className="mb-3 flex items-start gap-x-3 pt-2.5 pl-[15px]">
-                <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">Efficiency Badges</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--accent-mid)]">{t('player.section.efficiencyBadges')}</h3>
                 <InfoTooltip
-                    label="Efficiency Badges"
+                    label={t('player.section.efficiencyBadges')}
                     description="Efficiency badges mark a player's best qualifying ship performances in Tier V+ Random Battles. This table lists each badged ship with its tier, nation, class, and award grade (Expert, I, II, III). Click any column header to sort."
                     align="right"
                     className="ml-auto"

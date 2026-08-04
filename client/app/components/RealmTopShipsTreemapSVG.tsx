@@ -23,6 +23,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import * as d3 from 'd3';
 import { useDisplayRealm, useRealm } from '../context/RealmContext';
+import { useT } from '../context/LocaleContext';
 import { buildShipPath } from '../lib/entityRoutes';
 import { formatSeasonLabel } from '../lib/shipSeason';
 import { shipClass } from '../lib/shipIdentity';
@@ -117,6 +118,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
     useEffect(() => { onSelectRef.current = onSelect; });
     // Hydration-safe realm for the heading/aria-label rendered in the SSG shell.
     const displayRealm = useDisplayRealm();
+    const t = useT();
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
@@ -402,7 +404,11 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-                        {displayRealm.toUpperCase()} most-played{bucketLabel ? ` ${bucketLabel}` : ' ships'}{wrPct ? ` · top ${wrPct}%` : ''}{windowLabel ? ` · ${windowLabel}` : ''}
+                        {t('landing.treemap.heading', {
+                            realm: displayRealm.toUpperCase(),
+                            bucket: bucketLabel || 'ships',
+                            suffix: `${wrPct ? ` · top ${wrPct}%` : ''}${windowLabel ? ` · ${windowLabel}` : ''}`,
+                        })}
                     </h2>
                     <div className="group relative inline-flex items-center">
                         <button
