@@ -332,7 +332,7 @@ const HeaderSearch: React.FC = () => {
             </div>
             <button
                 type="submit"
-                className={`min-h-[44px] rounded-md px-4 py-2 text-sm font-medium text-white transition-colors ${searchMode === "clan" ? "bg-emerald-500 hover:bg-emerald-600" : "bg-[var(--accent-mid)] hover:bg-[var(--accent-dark)]"}`}
+                className={`min-h-[44px] whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium text-white transition-colors ${searchMode === "clan" ? "bg-emerald-500 hover:bg-emerald-600" : "bg-[var(--accent-mid)] hover:bg-[var(--accent-dark)]"}`}
             >
                 {t("nav.searchSubmit")}
             </button>

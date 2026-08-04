@@ -85,7 +85,14 @@ const ThemeToggle: React.FC = () => {
                 aria-haspopup="listbox"
             >
                 <FontAwesomeIcon icon={currentIcon} style={{ fontSize: '13px', color: currentIconColor }} aria-hidden="true" />
-                <span style={{ fontSize: '13px' }}>{currentLabel}</span>
+                {/* whitespace-nowrap unconditionally: CJK text has no spaces, so a
+                    browser may break between any two characters once the flex row
+                    squeezes this chip below its content width (the default
+                    flex-shrink lets that happen even with room to spare elsewhere
+                    in the row). English never exposed this — "Light"/"Dark" are
+                    single unbreakable tokens either way — but a one-word control
+                    label should never wrap in any language. */}
+                <span className="whitespace-nowrap" style={{ fontSize: '13px' }}>{currentLabel}</span>
                 <FontAwesomeIcon icon={faChevronDown} style={{ fontSize: '10px', marginLeft: '4px', opacity: 0.35 }} aria-hidden="true" />
             </button>
 
@@ -141,7 +148,7 @@ const ThemeToggle: React.FC = () => {
                                         : 'transparent';
                                 }}
                             >
-                                <span className="inline-flex items-center gap-2" style={{ fontSize: '13px' }}>
+                                <span className="inline-flex items-center gap-2 whitespace-nowrap" style={{ fontSize: '13px' }}>
                                     <FontAwesomeIcon icon={optionIcon} style={{ fontSize: '13px', color: optionIconColor }} aria-hidden="true" />
                                     {t(option.labelKey)}
                                 </span>
