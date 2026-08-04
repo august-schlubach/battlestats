@@ -105,7 +105,15 @@ Keys admitted under the generic-chrome tier, with their values:
 | `common.all` | 전체 | すべて |
 | `nav.selectTheme` | 테마 선택 | テーマ選択 |
 
-This tier is deliberately narrow. `common.clear`, `common.close`, and `common.type`
-remain omitted even though they are also generic — they belong to table/filter chrome
-scoped to a separate follow-on task, not this admission list. Do not extend this tier
-without a matching entry here.
+This tier is deliberately narrow. `common.clear` and `common.close` remain omitted
+even though they are generic — they belong to table/filter chrome scoped to a separate
+follow-on task, not this admission list. Do not extend this tier without a matching
+entry here.
+
+`common.type` is a different case and does **not** belong in the paragraph above:
+"type" here means ship class (Battleship / Cruiser / Destroyer / …), which is
+game-category vocabulary, not generic interface chrome. It is blocked under the
+**absolute** tier — omitted for lack of corpus attestation of the umbrella category
+word itself, the same status as `common.tier`/`common.avgDamage` would carry if this
+corpus hadn't attested them. It is not scoped to a follow-on task the way
+`common.clear`/`common.close` are; it is scoped to whoever runs the next corpus pass.
