@@ -4,7 +4,9 @@ import type { StringKey } from './keys';
 // how JP players write it (Tier10, T9), evidenced in the research doc.
 export const ja: Partial<Record<StringKey, string>> = {
     'nav.selectRealm': 'サーバー選択',
+    'nav.realmCurrent': 'サーバー: {realm}',
     'nav.language': '言語',
+    'nav.languageCurrent': '言語: {language}',
     'nav.selectTheme': 'テーマ選択',
     'nav.searchPlayer': 'プレイヤー検索',
     'nav.searchClan': 'クラン検索',
@@ -35,6 +37,11 @@ export const ja: Partial<Record<StringKey, string>> = {
     'landing.treemap.viewScatterplot': '戦闘数と勝率の散布図',
     'landing.shipLeaderboard.heading': '艦艇リーダーボード{suffix}',
     'landing.shipLeaderboard.windowSuffix': '直近{days}日間',
+
+    'landing.treemap.chartSectionLabel': 'サーバー艦艇チャート',
+    'landing.treemap.chartViewGroup': 'チャート表示',
+    'landing.treemap.toggleMap': 'ツリーマップ',
+    'landing.treemap.togglePlot': '散布図',
 
     'shipClass.destroyers': '駆逐艦',
     'shipClass.cruisers': '巡洋艦',
@@ -107,4 +114,8 @@ export const ja: Partial<Record<StringKey, string>> = {
     // Category label unattested (individual ship-class nouns are attested;
     // the umbrella word "type"/"class" is not):
     //   common.type
+    //
+    // Out of scope by the spec's own rule, not by attestation gap — see
+    // ko.ts for the full reasoning:
+    //   landing.treemap.infoLabel
 };

@@ -123,13 +123,41 @@ describe('RealmTopShipsTreemapSVG — locale coverage (composed-template blocker
 
         it('names the view as the Korean scatterplot phrase once Plot is selected, with no window days known', () => {
             renderTreemap({});
-            fireEvent.click(screen.getByRole('button', { name: 'Plot' }));
+            // The toggle button itself is translated now too (landing.treemap.togglePlot) —
+            // '산점도', not the English 'Plot'.
+            fireEvent.click(screen.getByRole('button', { name: '산점도' }));
             const label = screen.getByRole('img').getAttribute('aria-label');
             expect(label).toBe(
                 'na 서버에서 함선 순위 집계 기간 동안 가장 많이 플레이한 함선을 전투 수 대비 승률 산점도 형태로 표시',
             );
             expect(label).not.toMatch(RAW_TOKEN_LEAK);
             expect(label).not.toMatch(ENGLISH_CLAUSE_LEAK);
+        });
+
+        it('translates the section aria-label, the chart-view group aria-label, and the Map/Plot toggle labels', () => {
+            renderTreemap({});
+            // The <section> gets an implicit ARIA "region" role because it carries
+            // an aria-label (landing.treemap.chartSectionLabel).
+            expect(screen.getByRole('region', { name: '서버 함선 차트' })).toBeInTheDocument();
+            // Map/Plot toggle group aria-label (landing.treemap.chartViewGroup).
+            expect(screen.getByRole('group', { name: '차트 보기' })).toBeInTheDocument();
+            // The toggle buttons themselves (landing.treemap.toggleMap/togglePlot) —
+            // compact vocabulary reused from viewTreemap/a short scatterplot word,
+            // NOT the untranslated English "Map"/"Plot".
+            expect(screen.getByRole('button', { name: '트리맵' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '산점도' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Map' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Plot' })).not.toBeInTheDocument();
+        });
+
+        it('falls back to the English info-hint label (landing.treemap.infoLabel is deliberately untranslated)', () => {
+            renderTreemap({});
+            // Out of scope per the spec: the tooltip panel this button opens is
+            // English-only prose, so the trigger's accessible name stays English
+            // too rather than promise a Korean label for an English panel.
+            expect(screen.getByRole('button', {
+                name: 'About the ship treemap and its eligibility window',
+            })).toBeInTheDocument();
         });
     });
 
@@ -185,13 +213,41 @@ describe('RealmTopShipsTreemapSVG — locale coverage (composed-template blocker
 
         it('names the view as the Japanese scatterplot phrase once Plot is selected, with no window days known', () => {
             renderTreemap({});
-            fireEvent.click(screen.getByRole('button', { name: 'Plot' }));
+            // The toggle button itself is translated now too (landing.treemap.togglePlot) —
+            // '散布図', not the English 'Plot'.
+            fireEvent.click(screen.getByRole('button', { name: '散布図' }));
             const label = screen.getByRole('img').getAttribute('aria-label');
             expect(label).toBe(
                 'naサーバーで艦艇ランキング集計期間に最もプレイされた艦艇を戦闘数と勝率の散布図として表示',
             );
             expect(label).not.toMatch(RAW_TOKEN_LEAK);
             expect(label).not.toMatch(ENGLISH_CLAUSE_LEAK);
+        });
+
+        it('translates the section aria-label, the chart-view group aria-label, and the Map/Plot toggle labels', () => {
+            renderTreemap({});
+            // The <section> gets an implicit ARIA "region" role because it carries
+            // an aria-label (landing.treemap.chartSectionLabel).
+            expect(screen.getByRole('region', { name: 'サーバー艦艇チャート' })).toBeInTheDocument();
+            // Map/Plot toggle group aria-label (landing.treemap.chartViewGroup).
+            expect(screen.getByRole('group', { name: 'チャート表示' })).toBeInTheDocument();
+            // The toggle buttons themselves (landing.treemap.toggleMap/togglePlot) —
+            // compact vocabulary reused from viewTreemap/a short scatterplot word,
+            // NOT the untranslated English "Map"/"Plot".
+            expect(screen.getByRole('button', { name: 'ツリーマップ' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '散布図' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Map' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Plot' })).not.toBeInTheDocument();
+        });
+
+        it('falls back to the English info-hint label (landing.treemap.infoLabel is deliberately untranslated)', () => {
+            renderTreemap({});
+            // Out of scope per the spec: the tooltip panel this button opens is
+            // English-only prose, so the trigger's accessible name stays English
+            // too rather than promise a Japanese label for an English panel.
+            expect(screen.getByRole('button', {
+                name: 'About the ship treemap and its eligibility window',
+            })).toBeInTheDocument();
         });
     });
 });

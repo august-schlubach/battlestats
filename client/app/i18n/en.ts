@@ -3,7 +3,17 @@ import type { StringKey } from './keys';
 // Total by type: `en` can never have a hole. Every other dictionary is Partial.
 export const en: Record<StringKey, string> = {
     'nav.selectRealm': 'Select realm',
+    // The collapsed chip's accessible name — announces the CURRENT realm, not
+    // just the affordance to change it (nav.selectRealm is the open listbox's
+    // label, unchanged). Closes a recorded gap: the language chip didn't do
+    // this either until nav.languageCurrent below.
+    'nav.realmCurrent': 'Realm: {realm}',
     'nav.language': 'Language',
+    // The collapsed chip's accessible name, mirroring nav.realmCurrent —
+    // {language} is filled with the option's NATIVE name (English/한국어/日本語),
+    // not a translated word for the language, matching how the open menu
+    // already labels its rows (see LocaleSelector.tsx).
+    'nav.languageCurrent': 'Language: {language}',
     'nav.searchPlayer': 'Search Players',
     'nav.searchClan': 'Search Clans',
     'nav.searchSubmit': 'Go',
@@ -67,6 +77,35 @@ export const en: Record<StringKey, string> = {
     'landing.shipLeaderboard.heading': 'Ship leaderboard{suffix}',
     // The "last {days} days rolling" clause inside that suffix.
     'landing.shipLeaderboard.windowSuffix': 'last {days} days rolling',
+
+    // The <section>'s aria-label. Generic chart chrome plus the corpus-attested
+    // "ship" noun — see i18n-terminology-research.md.
+    'landing.treemap.chartSectionLabel': 'Realm ship chart',
+    // The map/plot toggle group's aria-label. Generic UI chrome, no WoWS
+    // jargon (same tier as landing.treemap.viewTreemap/viewScatterplot).
+    'landing.treemap.chartViewGroup': 'Chart view',
+    // The two toggle-button labels themselves. Separate keys from
+    // landing.treemap.viewTreemap/viewScatterplot (used in the aria-label's
+    // "shown as a {view}" clause) because those values ("treemap",
+    // "battles-vs-win-rate scatterplot") are not compact enough for a pill
+    // button — reusing them here would either change the visible English text
+    // (viewTreemap's English value is lowercase "treemap", not "Map") or wrap
+    // a two-line label into a 28px-tall toggle. ko/ja reuse the SAME
+    // vocabulary as viewTreemap/viewScatterplot (트리맵/ツリーマップ for the
+    // map; a bare "scatterplot" word, not the full "battles vs win rate"
+    // phrase, for the plot) rather than inventing new terms.
+    'landing.treemap.toggleMap': 'Map',
+    'landing.treemap.togglePlot': 'Plot',
+    // Kept in en.ts/keys.ts (so the structure is complete for a future pass)
+    // but DELIBERATELY OMITTED from ko.ts/ja.ts. This is the info-hint
+    // button's long descriptive tooltip-trigger label; the tooltip panel it
+    // opens is out of scope for localization per the client-locale-toggle
+    // spec's Scope section (info-tooltip descriptions), and this label
+    // names the same eligibility-window concept in the same register as
+    // that untranslated prose — translating the trigger alone while the
+    // panel it opens stays English would read as a broken promise, not a
+    // partial win.
+    'landing.treemap.infoLabel': 'About the ship treemap and its eligibility window',
 
     // Reusable ship-class vocabulary (plural form, for headings that name a
     // bucket of ships by class — not treemap-specific). The individual class

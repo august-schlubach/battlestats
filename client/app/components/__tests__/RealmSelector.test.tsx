@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import RealmSelector from '../RealmSelector';
 import { RealmProvider, useRealm } from '../../context/RealmContext';
+import { LocaleProvider } from '../../context/LocaleContext';
 
 // Tiny harness exposing the context's auto-switch notifier so a test can fire
 // it exactly the way cross-realm fallback does.
@@ -92,5 +93,43 @@ describe('RealmSelector', () => {
 
         const chip = screen.getByRole('button', { name: /realm:/i });
         expect(chip.className).not.toContain('realm-selector-glow--armed');
+    });
+
+    it('composes the chip\'s "Realm: <realm>" aria-label byte-identically to the old template in English', () => {
+        render(
+            <RealmProvider>
+                <RealmSelector />
+            </RealmProvider>
+        );
+
+        // nav.realmCurrent replaced a hardcoded `Realm: ${currentLabel}` template
+        // literal — this is the regression net proving the key's English value
+        // still composes to exactly what that literal produced.
+        expect(screen.getByRole('button', { name: 'Realm: NA' })).toBeInTheDocument();
+    });
+
+    it('renders the chip aria-label in Korean and Japanese, not English (nav.realmCurrent)', () => {
+        localStorage.setItem('bs-locale', 'ko');
+        const { unmount } = render(
+            <LocaleProvider>
+                <RealmProvider>
+                    <RealmSelector />
+                </RealmProvider>
+            </LocaleProvider>
+        );
+        expect(screen.getByRole('button', { name: '서버: NA' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Realm:/ })).not.toBeInTheDocument();
+        unmount();
+
+        localStorage.setItem('bs-locale', 'ja');
+        render(
+            <LocaleProvider>
+                <RealmProvider>
+                    <RealmSelector />
+                </RealmProvider>
+            </LocaleProvider>
+        );
+        expect(screen.getByRole('button', { name: 'サーバー: NA' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^Realm:/ })).not.toBeInTheDocument();
     });
 });

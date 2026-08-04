@@ -634,13 +634,16 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
     // still gets its own nowrap group so the info-hint icon can never orphan
     // onto its own line (see the comment on that group below); splitting at
     // the LAST SPACE derives that word from the template's own output instead
-    // of a second, hand-maintained literal, so the two can't drift again. No
-    // dictionary translates this key today (structural blocker recorded in
-    // the research doc), so in practice this only ever splits the English
-    // string above. If it's ever translated into a language with no ASCII
-    // space before the final token, lastSpaceIdx stays -1 and the whole
-    // heading renders inside the nowrap span with the icon — safe, just not
-    // split at a natural word boundary.
+    // of a second, hand-maintained literal, so the two can't drift again.
+    // ko and ja both translate `landing.shipLeaderboard.heading` as of this
+    // commit (see app/i18n/ko.ts, ja.ts), so the no-ASCII-space branch below
+    // is a LIVE path, not a hypothetical one: whenever windowDays hasn't
+    // resolved yet, headingLabel falls back to baseHeadingLabel with an empty
+    // suffix, which in Japanese is plain "艦艇リーダーボード" — no ASCII space
+    // anywhere, since Japanese does not word-space. lastSpaceIdx is -1 there,
+    // and the whole heading renders inside the nowrap span with the icon
+    // instead of splitting at a trailing word — correct behaviour, and the
+    // reason this branch must not be deleted as unreachable dead code.
     const lastSpaceIdx = headingLabel.lastIndexOf(' ');
     const headingLead = lastSpaceIdx === -1 ? '' : headingLabel.slice(0, lastSpaceIdx + 1);
     const headingLastWord = lastSpaceIdx === -1 ? headingLabel : headingLabel.slice(lastSpaceIdx + 1);

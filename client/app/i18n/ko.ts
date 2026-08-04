@@ -6,7 +6,9 @@ import type { StringKey } from './keys';
 // agents/work-items/i18n-terminology-research.md
 export const ko: Partial<Record<StringKey, string>> = {
     'nav.selectRealm': '서버 선택',
+    'nav.realmCurrent': '서버: {realm}',
     'nav.language': '언어',
+    'nav.languageCurrent': '언어: {language}',
     'nav.selectTheme': '테마 선택',
     'nav.searchPlayer': '플레이어 검색',
     'nav.searchClan': '클랜 검색',
@@ -37,6 +39,11 @@ export const ko: Partial<Record<StringKey, string>> = {
     'landing.treemap.viewScatterplot': '전투 수 대비 승률 산점도',
     'landing.shipLeaderboard.heading': '함선 리더보드{suffix}',
     'landing.shipLeaderboard.windowSuffix': '최근 {days}일',
+
+    'landing.treemap.chartSectionLabel': '서버 함선 차트',
+    'landing.treemap.chartViewGroup': '차트 보기',
+    'landing.treemap.toggleMap': '트리맵',
+    'landing.treemap.togglePlot': '산점도',
 
     'shipClass.destroyers': '구축함',
     'shipClass.cruisers': '순양함',
@@ -113,4 +120,11 @@ export const ko: Partial<Record<StringKey, string>> = {
     // 순양함, 구축함, 항공모함, 잠수함 — are attested, but the umbrella word
     // "type"/"class" itself is not):
     //   common.type
+    //
+    // Out of scope by the spec's own rule, not by attestation gap — the
+    // long info-tooltip paragraph this label opens is explicitly excluded
+    // from localization (client-locale-toggle-spec.md's Scope section), so
+    // translating just the trigger's accessible name would announce a
+    // Korean label for an English panel:
+    //   landing.treemap.infoLabel
 };

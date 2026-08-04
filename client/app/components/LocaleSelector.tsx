@@ -83,7 +83,7 @@ const LocaleSelector: React.FC = () => {
                     color: 'var(--text-secondary)',
                     cursor: 'pointer',
                 }}
-                aria-label={t('nav.language')}
+                aria-label={t('nav.languageCurrent', { language: current.nativeName })}
                 aria-expanded={open}
                 aria-haspopup="listbox"
             >
@@ -120,6 +120,16 @@ const LocaleSelector: React.FC = () => {
                                     color: isActive ? ACTIVE_OPTION_COLOR : INACTIVE_OPTION_COLOR,
                                     cursor: 'pointer',
                                     backgroundColor: isActive ? ACTIVE_OPTION_BACKGROUND : 'transparent',
+                                }}
+                                onMouseEnter={(e) => {
+                                    if (!isActive) {
+                                        (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--bg-hover)';
+                                    }
+                                }}
+                                onMouseLeave={(e) => {
+                                    (e.currentTarget as HTMLButtonElement).style.backgroundColor = isActive
+                                        ? ACTIVE_OPTION_BACKGROUND
+                                        : 'transparent';
                                 }}
                             >
                                 <span className="inline-flex items-center gap-2" style={{ fontSize: '13px', fontWeight: isActive ? 600 : 500 }}>

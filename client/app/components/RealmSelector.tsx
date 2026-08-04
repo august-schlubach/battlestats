@@ -101,7 +101,7 @@ const RealmSelector: React.FC = () => {
                     color: 'var(--text-secondary)',
                     cursor: 'pointer',
                 }}
-                aria-label={`Realm: ${currentLabel}`}
+                aria-label={t('nav.realmCurrent', { realm: currentLabel })}
                 aria-expanded={open}
                 aria-haspopup="listbox"
             >

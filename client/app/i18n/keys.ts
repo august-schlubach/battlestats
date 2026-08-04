@@ -5,7 +5,9 @@
 export type StringKey =
     // — header / footer chrome —
     | 'nav.selectRealm'
+    | 'nav.realmCurrent'
     | 'nav.language'
+    | 'nav.languageCurrent'
     | 'nav.searchPlayer'
     | 'nav.searchClan'
     | 'nav.searchSubmit'
@@ -42,6 +44,13 @@ export type StringKey =
     | 'landing.treemap.viewScatterplot'
     | 'landing.shipLeaderboard.heading'
     | 'landing.shipLeaderboard.windowSuffix'
+    | 'landing.treemap.chartSectionLabel'
+    | 'landing.treemap.chartViewGroup'
+    | 'landing.treemap.toggleMap'
+    | 'landing.treemap.togglePlot'
+    // Keyed but deliberately left untranslated in ko/ja — see the comment on
+    // this key in en.ts.
+    | 'landing.treemap.infoLabel'
     // — ship-class plurals (reusable vocabulary — headings/labels that name a
     // bucket of ships by class, not treemap-specific) —
     | 'shipClass.destroyers'

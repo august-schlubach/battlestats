@@ -66,12 +66,23 @@ const TYPE_LABEL: Record<string, string> = {
 // Ship class → its plural-label dictionary key. Ko/ja don't pluralize (see
 // shipClass.* in app/i18n/en.ts), so this is really "the bucket noun for this
 // class", English happens to need an -s. Keyed by the exact `ShipType` values
-// SHIP_TYPES/shipClass use ('AirCarrier', not 'Aircraft Carrier').
+// SHIP_TYPES/shipClass use ('AirCarrier', not 'Aircraft Carrier') — PLUS the
+// 'Aircraft Carrier' spelling itself. shipIdentity.ts's SHIP_CLASS map carries
+// both spellings deliberately (CLAUDE.md documents a live cross-payload
+// mismatch: some payloads say 'AirCarrier', others 'Aircraft Carrier'), so any
+// lookup keyed only on ship-class spelling should mirror that map rather than
+// assume one form. `type` is currently typed as `ShipType`, which only allows
+// 'AirCarrier' — so the alias below is unreachable through this component's
+// own prop today — but pluralTypeLabel is reusable vocabulary, not
+// treemap-specific, and the next caller passing the other spelling would
+// otherwise silently get a bare untranslated string back instead of a
+// translated one.
 const SHIP_CLASS_PLURAL_KEY: Record<string, StringKey> = {
     Destroyer: 'shipClass.destroyers',
     Cruiser: 'shipClass.cruisers',
     Battleship: 'shipClass.battleships',
     AirCarrier: 'shipClass.aircraftCarriers',
+    'Aircraft Carrier': 'shipClass.aircraftCarriers',
     Submarine: 'shipClass.submarines',
 };
 
@@ -425,7 +436,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
     return (
         <section
             className="w-full"
-            aria-label="Realm ship chart"
+            aria-label={t('landing.treemap.chartSectionLabel')}
         >
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                 <div className="flex items-center gap-3">
@@ -440,7 +451,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                         <button
                             type="button"
                             className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] text-[var(--accent-light)] transition-colors hover:text-[var(--accent-mid)] focus:outline-none focus-visible:text-[var(--accent-mid)]"
-                            aria-label="About the ship treemap and its eligibility window"
+                            aria-label={t('landing.treemap.infoLabel')}
                         >
                             <FontAwesomeIcon icon={faCircleInfo} className="text-[10px]" aria-hidden="true" />
                         </button>
@@ -456,7 +467,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                 <div
                     className="inline-flex items-center gap-0.5 rounded-md border border-[var(--border)] p-0.5"
                     role="group"
-                    aria-label="Chart view"
+                    aria-label={t('landing.treemap.chartViewGroup')}
                 >
                     {(['map', 'plot'] as const).map((mode) => (
                         <button
@@ -475,7 +486,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                                     : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
                             }`}
                         >
-                            {mode === 'map' ? 'Map' : 'Plot'}
+                            {t(mode === 'map' ? 'landing.treemap.toggleMap' : 'landing.treemap.togglePlot')}
                         </button>
                     ))}
                 </div>
