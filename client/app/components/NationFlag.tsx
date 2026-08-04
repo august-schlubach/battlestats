@@ -1,5 +1,6 @@
 import React from 'react';
 import { nationLabel } from '../lib/shipIdentity';
+import FlagImage from './FlagImage';
 
 // WoWS nation code -> bundled flag file in /public/flags. Real modern nations
 // use the lipis/flag-icons SVGs; the in-game nations without a modern flag
@@ -43,21 +44,12 @@ const NationFlag: React.FC<NationFlagProps> = ({ nation, className = '' }) => {
     if (!nation || !(nation in FLAG_FILE)) {
         return null;
     }
-    const label = nationLabel(nation) ?? nation;
     return (
-        // Decorative: the adjacent ship name is the accessible content, so the flag
-        // is aria-hidden (keeps the ship-link's accessible name clean). `title`
-        // still gives sighted users a hover tooltip of the nation.
-        // eslint-disable-next-line @next/next/no-img-element -- tiny static flag SVG; next/image optimization is unnecessary here
-        <img
-            src={`/flags/${FLAG_FILE[nation]}`}
-            alt=""
-            aria-hidden="true"
-            title={label}
-            width={16}
-            height={12}
-            loading="lazy"
-            className={`inline-block h-3 w-4 shrink-0 rounded-[1px] object-cover ${FLAG_POSITION[nation] ?? ''} ring-1 ring-black/25 ${className}`}
+        <FlagImage
+            file={FLAG_FILE[nation]}
+            title={nationLabel(nation) ?? nation}
+            positionClass={FLAG_POSITION[nation]}
+            className={className}
         />
     );
 };
