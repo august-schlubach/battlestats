@@ -36,6 +36,7 @@ export type StringKey =
     | 'player.section.efficiencyBadges'
     // — landing —
     | 'landing.treemap.heading'
+    | 'landing.treemap.ariaLabel'
     | 'landing.shipLeaderboard.heading'
     // — shared controls —
     | 'common.all'

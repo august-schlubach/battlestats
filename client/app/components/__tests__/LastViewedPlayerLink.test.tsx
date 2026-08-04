@@ -30,6 +30,17 @@ describe('LastViewedPlayerLink', () => {
         expect(link).toHaveAttribute('href', '/player/Nagashino_SB_Nori?realm=asia');
     });
 
+    it('renders the "Last viewed:" label through t(), exact match', () => {
+        // Exact match through a real render, not a translate()-only check: this
+        // is the regression net for footer.lastViewed wiring (Task 6b) — a wrong
+        // variable here would render a literal `{key}` or nothing at all.
+        rememberLastViewedPlayer('Nagashino_SB_Nori', 'asia');
+
+        render(<LastViewedPlayerLink />);
+
+        expect(screen.getByText('Last viewed:')).toBeInTheDocument();
+    });
+
     it('does not label the realm', () => {
         // Dropped deliberately: the realm rides in the href, and the row reads as a
         // list of names rather than a table of qualified entries.

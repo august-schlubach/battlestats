@@ -458,7 +458,12 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
                 <svg
                     ref={svgRef}
                     role="img"
-                    aria-label={`${displayRealm} most-played ${bucketLabel ?? 'ships'} over the ${windowPhrase}, shown as a ${view === 'plot' ? 'battles-vs-win-rate scatterplot' : 'treemap'}`}
+                    aria-label={t('landing.treemap.ariaLabel', {
+                        realm: displayRealm,
+                        bucket: bucketLabel ?? 'ships',
+                        windowPhrase,
+                        view: view === 'plot' ? 'battles-vs-win-rate scatterplot' : 'treemap',
+                    })}
                     style={{ opacity: dim ? 0.55 : 1, transition: 'opacity 150ms ease' }}
                 />
                 {activeCount === 0 && (

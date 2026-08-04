@@ -65,6 +65,43 @@ describe('RealmTopShipsTreemapSVG (presentational)', () => {
         expect(heading.textContent).toBe('NA most-played T10 Cruisers · top 50% · 1–30 Jun');
     });
 
+    it('gives the SVG an accessible name that names bucket, window and view — routed through t() (Task 6b)', () => {
+        render(
+            <RealmTopShipsTreemapSVG
+                ships={[ship({})]}
+                tier={10}
+                type="Cruiser"
+                wrPct={50}
+                windowStart="2026-06-01"
+                windowEnd="2026-07-31"
+            />,
+        );
+        // Exact match through a real render — the prior hardcoded English
+        // template was moved into en.ts (landing.treemap.ariaLabel) in Task 6b.
+        // A substring/`.toContain` check would pass even if the wiring dropped a
+        // variable and rendered a literal `{bucket}`.
+        expect(screen.getByRole('img')).toHaveAttribute(
+            'aria-label',
+            'na most-played T10 Cruisers over the rolling, trailing 60-day ship-standings window, shown as a treemap',
+        );
+    });
+
+    it('names the view as a scatterplot in the SVG accessible name once Plot is selected', () => {
+        render(
+            <RealmTopShipsTreemapSVG
+                ships={[ship({})]}
+                tier={null}
+                type={null}
+                wrPct={null}
+            />,
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Plot' }));
+        expect(screen.getByRole('img')).toHaveAttribute(
+            'aria-label',
+            'na most-played ships over the rolling ship-standings window, shown as a battles-vs-win-rate scatterplot',
+        );
+    });
+
     it('renders the bucket-absent heading exactly when no tier/type filter is active (the landing page default)', () => {
         render(
             <RealmTopShipsTreemapSVG

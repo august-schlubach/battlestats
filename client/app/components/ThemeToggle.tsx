@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faMoon, faSun } from '@fortawesome/free-solid-svg-icons';
 import { useTheme, type Theme } from '../context/ThemeContext';
+import { useT } from '../context/LocaleContext';
 import { trackEvent } from '../lib/umami';
 
 interface ThemeOption {
@@ -22,6 +23,7 @@ const ACTIVE_OPTION_COLOR = 'var(--text-primary)';
 
 const ThemeToggle: React.FC = () => {
     const { theme, setTheme } = useTheme();
+    const t = useT();
     const [open, setOpen] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
 
@@ -86,7 +88,7 @@ const ThemeToggle: React.FC = () => {
             {open && (
                 <div
                     role="listbox"
-                    aria-label="Select theme"
+                    aria-label={t('nav.selectTheme')}
                     className="absolute right-0 z-50 mt-1 rounded-lg shadow-lg"
                     style={{
                         width: '120px',

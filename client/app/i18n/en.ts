@@ -36,6 +36,12 @@ export const en: Record<StringKey, string> = {
     // Composed at runtime; word order differs per language, so the whole
     // sentence is one template rather than concatenated fragments.
     'landing.treemap.heading': '{realm} most-played {bucket}{suffix}',
+    // The treemap SVG's accessible name (role="img" aria-label). Lifted verbatim
+    // from RealmTopShipsTreemapSVG.tsx's prior hardcoded template so the
+    // accessible name keeps pace with the visible <h2> above it, which already
+    // went through t() in Task 6 — added in Task 6b, the gap that left this one
+    // sentence untranslated in the same header row.
+    'landing.treemap.ariaLabel': '{realm} most-played {bucket} over the {windowPhrase}, shown as a {view}',
     // Live source (ShipLeaderboard.tsx) carries no realm in this heading — it's
     // always "Ship leaderboard", with an optional " · last N days rolling"
     // clause once the served window is known. {suffix} carries that clause.
