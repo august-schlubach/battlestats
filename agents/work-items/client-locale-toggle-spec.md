@@ -98,26 +98,41 @@ component references them and deliberately kept them anyway (as opposed to
 a named owner and were deleted outright). Wiring the filter bar and the
 Efficiency table is that named owner.
 
-**What blocks wiring it now — the attestation gap.** Three of the labels on
-those two surfaces are game-category vocabulary the research corpus does not
-attest, not generic UI chrome:
+**What blocks wiring it now — narrowed by the 2026-08-04 corpus pass.** Three
+labels on those two surfaces were originally flagged as game-category
+vocabulary the research corpus did not attest, not generic UI chrome. A
+follow-up corpus pass against `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`
+(a fully localized ship-ranking table header) resolved two of the three:
 
-- **`Nation`** (ship nationality — expected 国家/국가, "not verified in this
-  corpus" per the research doc).
-- **`Award`** (badge-tier name — our own product taxonomy, no in-game source).
-- **`Type`**, the umbrella category word for ship class (Battleship / Cruiser
-  / Destroyer / …). The individual class nouns are attested (전함/戦艦,
-  순양함/巡洋艦, …) but the umbrella word itself is not — this is why
-  `common.type` sits in `ko.ts`/`ja.ts`'s absolute-tier omission list rather
-  than the generic-chrome admission table, even though `Tier`/`All`/`WR ≥` on
-  the same filter bar could ship today under the two-tier standard.
+- ~~**`Nation`**~~ (ship nationality) — **now attested**: 国家/국가 head the
+  nationality column in both locales' ship tables. See the research doc's
+  Verified terms table.
+- ~~**`Type`**~~, the umbrella category word for ship class — **now
+  attested**: 艦種/함종 head the class column in the same pair of tables. The
+  individual class nouns were already attested (전함/戦艦, 순양함/巡洋艦, …);
+  this closes the umbrella-word gap that used to keep `common.type` out of the
+  generic-chrome admission table.
+- **`Award`** (badge-tier name — our own product taxonomy, no in-game source)
+  remains the one unresolved label. It names a classification this site
+  invented, not something WoWS or its community ranks ships/players by, so no
+  stats-site corpus pass will ever attest it — the eventual call is whether a
+  reviewer admits it under the generic-chrome tier (an "award" concept is
+  common everyday vocabulary, if a strained fit for a WoWS-specific badge
+  taxonomy) or leaves it English.
 
-**Follow-on:** run a corpus pass on `Nation`/`Award`/umbrella-`Type`, wire the
-already-populated `common.*` keys into `ShipLeaderboard.tsx`'s filter bar and
-`EfficiencyBadgeTable.tsx`, and add `common.nation`/`common.award` once
-attested (or admitted under the generic-chrome tier, if a reviewer judges them
-as carrying no game-specific register risk — unlikely for `Nation`/`Award`
-given they name real game taxonomy, more plausible for the umbrella `Type`).
+**A future pass is no longer blocked on `Nation`/`Type`.** What remains before
+wiring `ShipLeaderboard.tsx`'s filter bar and `EfficiencyBadgeTable.tsx`:
+
+1. Resolve `Award` (attest, admit under generic-chrome, or leave English) and
+   populate `common.nation`/a new `common.type` value in `ko.ts`/`ja.ts` —
+   `common.type` is already scaffolded as a `StringKey`, `common.nation` is
+   not yet added.
+2. Resolve the `common.winRate` casing trap below — it sits directly in this
+   follow-on's path, since `ShipLeaderboard.tsx` is one of the four live sites
+   with the casing conflict.
+3. Wire the filter bars themselves. **Still explicitly deferred**: this
+   corpus pass closes the vocabulary gap, it does not wire anything — the
+   filter bars stay hardcoded English until that follow-on runs.
 
 ### Accepted inconsistency
 
@@ -457,9 +472,13 @@ token.
 4. If KR/JP engagement moves: localized route segments, `hreflang`, per-locale
    `generateMetadata`, sitemap × locales, and a CJK font for OG cards.
 5. Wire the landing filter bar and `EfficiencyBadgeTable.tsx` to the
-   already-populated `common.*` keys, once `Nation`/`Award`/umbrella-`Type` are
-   attested (see *Corrected against what actually shipped* under Scope).
-   Resolve the `common.winRate` casing trap above before or during this pass —
-   it still sits directly in its path. (The composed-template blocker that
-   used to sit alongside it was resolved 2026-08-04 — see above — and no
-   longer blocks this follow-on.)
+   already-populated `common.*` keys (see *Corrected against what actually
+   shipped* under Scope). A 2026-08-04 corpus pass attested `Nation` and the
+   umbrella `Type` (国家/국가, 艦種/함종 — see the research doc's Verified
+   terms table), so the blocker list has shrunk to just `Award` (our own
+   badge taxonomy, still no in-game source) plus the `common.winRate` casing
+   trap immediately below, which still sits directly in this follow-on's
+   path. (The composed-template blocker that used to sit alongside it was
+   resolved 2026-08-04 — see above — and no longer blocks this follow-on
+   either.) Wiring itself remains deferred — this pass closed the vocabulary
+   gap, not the surfaces.
