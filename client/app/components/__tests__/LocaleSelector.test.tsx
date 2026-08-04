@@ -51,4 +51,29 @@ describe('LocaleSelector', () => {
         });
         expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
     });
+
+    it('closes on a mousedown outside the selector', () => {
+        renderSelector();
+        act(() => { screen.getByRole('button').click(); });
+        expect(screen.queryByRole('listbox')).toBeInTheDocument();
+
+        const outside = document.createElement('div');
+        document.body.appendChild(outside);
+        act(() => {
+            outside.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        });
+        expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+        document.body.removeChild(outside);
+    });
+
+    it('stays open on a mousedown inside the selector', () => {
+        renderSelector();
+        act(() => { screen.getByRole('button').click(); });
+        expect(screen.queryByRole('listbox')).toBeInTheDocument();
+
+        act(() => {
+            screen.getByRole('listbox').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+        });
+        expect(screen.queryByRole('listbox')).toBeInTheDocument();
+    });
 });
