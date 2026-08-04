@@ -62,8 +62,8 @@ Flagged rather than guessed. These need a second pass or a native check before s
 
 - **Survival rate** — expected `生存率` / `생존율`; no corpus hit.
 - **Nation** (ship nationality) — expected `国家` / `국가`; no corpus hit.
-- **Efficiency** — not a WoWS term at all; it is our coinage. `効率` / `효율` are the literal renderings and may read as jargon-free but also as meaningless.
-- **Activity** (our tab) — no direct analogue in the corpus.
+- **Efficiency** — not a WoWS term at all; it is our coinage. `効率` / `효율` are the literal renderings and may read as jargon-free but also as meaningless. **Admitted anyway as the `insights.tabs.efficiency` TAB label** under the generic-UI-chrome tier — see the admission table below for the reasoning (the vagueness is symmetric: the English word carries the same ambiguity for an English reader, and a consistently-translated tab strip beats one that alternates languages tab to tab). `player.section.efficiencyBadges` (the section heading, a compound noun phrase rather than a bare tab label) stays unadmitted.
+- **Activity** (our tab) — no direct analogue in the corpus. **Admitted anyway as the `insights.tabs.activity` TAB label** under the generic-UI-chrome tier — see the admission table below.
 - **Reigning champion**, **Skill bracket**, **Compare vs** — our own product language, no in-game source.
 
 ## Resolved forks
@@ -108,6 +108,11 @@ Keys admitted under the generic-chrome tier, with their values:
 | `nav.themeLight` | 라이트 | ライト |
 | `nav.themeDark` | 다크 | ダーク |
 | `nav.themeCurrent` | 테마: {label} | テーマ: {label} |
+| `insights.tabs.activity` | 활동 | アクティビティ |
+| `insights.tabs.profile` | 프로필 | プロフィール |
+| `insights.tabs.efficiency` | 효율 | 効率 |
+| `notFound.title` | 페이지를 찾을 수 없습니다 | ページが見つかりません |
+| `notFound.body` | 요청하신 페이지를 찾을 수 없습니다. | お探しのページは見つかりませんでした。 |
 
 Added 2026-08-04 (Task 8b, closing the header's last two untranslated words —
 the `Go` submit button and the theme chip's `Light`/`Dark`/`Theme: …`).
@@ -119,15 +124,52 @@ interface toggles actually use. `nav.themeCurrent` composes the WHOLE button
 aria-label (`Theme: {label}`) as one template — keying only the theme word
 would leave the accessible name a mixed-language `Theme: 다크`.
 
-This tier is deliberately narrow. `common.clear` and `common.close` remain omitted
-even though they are generic — they belong to table/filter chrome scoped to a separate
-follow-on task, not this admission list. Do not extend this tier without a matching
-entry here.
+**Added 2026-08-04 (final fix round), backfilled onto keys the standard existed
+before but was never applied to.** `insights.tabs.activity`, `insights.tabs.profile`,
+and `insights.tabs.efficiency` are the three tab labels that were left English while
+`insights.tabs.ships`/`insights.tabs.ranked`/`insights.tabs.clanBattles` were
+translated — the two-tier standard was written (Task 7) and then applied forward to
+later keys, but never applied backward to close this gap, so the six-tab strip read
+as `Activity | 함선 | Profile | Efficiency | 랭크전 | 클랜전`: three of six adjacent
+labels flipping language, which reads as broken rather than as scoped. "Activity" and
+"Profile" are unambiguous everyday interface words with no WoWS register risk — the
+same class as `nav.language`/`common.all` above.
+
+**`insights.tabs.efficiency` (효율/効率) is the harder case, argued explicitly.** The
+"Not verified in this corpus" section above already flags `効率`/`효율` as literal
+renderings that "may read as jargon-free but also as meaningless" — that is true, and
+it is *equally* true of the English word "Efficiency" to an English reader: this is
+our own product coinage with no in-game source, so the vagueness is a property of the
+concept, not of the translation. Given that, leaving the label untranslated buys no
+extra precision, only inconsistency: a six-tab strip with three tabs in Korean and
+three in English is a worse experience than six tabs uniformly in Korean, even where
+one of those six is an admittedly-vague coinage. A consistent language beats a
+precise-but-alternating one. `player.section.efficiencyBadges` — the section heading,
+not the tab label — is a different case (a compound noun phrase, not a bare generic
+word) and stays unadmitted.
+
+`notFound.title`/`notFound.body` are the client's 404 copy ("Page Not Found" / "The
+requested page could not be found.") — generic application chrome with no game
+vocabulary in it at all, admitted for the same reason as `nav.language`.
+
+This tier is deliberately narrow. `common.clear`, `common.close`, and `common.clan`
+were considered for it and **rejected** — not deferred to a follow-on, deleted outright
+(final fix round): no call site in the client references any of the three, and no
+follow-on task claims them, so keeping them as translated-but-unwired scaffolding cost
+more than it delivered. `common.clan` in particular was translated in both locales with
+nowhere to land. Contrast the *other* nine `common.*` keys (`tier`, `type`, `all`,
+`battles`, `avgDamage`, `winRate`, `ship`, `player`, `season`), which stay as
+scaffolding because the client-locale-toggle spec's Scope section now names an actual
+follow-on for them (the landing filter bar + `EfficiencyBadgeTable.tsx`). Do not extend
+this tier without a matching entry here.
 
 `common.type` is a different case and does **not** belong in the paragraph above:
 "type" here means ship class (Battleship / Cruiser / Destroyer / …), which is
 game-category vocabulary, not generic interface chrome. It is blocked under the
 **absolute** tier — omitted for lack of corpus attestation of the umbrella category
 word itself, the same status as `common.tier`/`common.avgDamage` would carry if this
-corpus hadn't attested them. It is not scoped to a follow-on task the way
-`common.clear`/`common.close` are; it is scoped to whoever runs the next corpus pass.
+corpus hadn't attested them. Unlike `common.clear`/`common.close`/`common.clan`
+(deleted outright above), `common.type` is kept as scaffolding — the client-locale-toggle
+spec names the landing filter bar + `EfficiencyBadgeTable.tsx` as its follow-on owner —
+but is blocked on whoever runs the next corpus pass to attest the umbrella word, not on
+finding it a call site.

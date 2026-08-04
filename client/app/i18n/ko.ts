@@ -15,7 +15,10 @@ export const ko: Partial<Record<StringKey, string>> = {
     'nav.themeDark': '다크',
     'nav.themeCurrent': '테마: {label}',
 
+    'insights.tabs.activity': '활동',
     'insights.tabs.ships': '함선',
+    'insights.tabs.profile': '프로필',
+    'insights.tabs.efficiency': '효율',
     'insights.tabs.ranked': '랭크전',
     'insights.tabs.clanBattles': '클랜전',
 
@@ -29,8 +32,10 @@ export const ko: Partial<Record<StringKey, string>> = {
     'common.winRate': '승률',
     'common.ship': '함선',
     'common.player': '플레이어',
-    'common.clan': '클랜',
     'common.season': '시즌',
+
+    'notFound.title': '페이지를 찾을 수 없습니다',
+    'notFound.body': '요청하신 페이지를 찾을 수 없습니다.',
 
     // NEEDS-NATIVE-CHECK — every key below is omitted, not guessed. Grouped by
     // why the research doc doesn't clear it. `en.ts` grew past the brief's
@@ -38,10 +43,8 @@ export const ko: Partial<Record<StringKey, string>> = {
     // superset, not just the brief's original residue.
     //
     // Our own product coinage, no in-game/community term exists:
-    //   insights.tabs.efficiency, insights.panel.efficiency,
-    //   player.section.efficiencyBadges  ("efficiency" isn't a WoWS term)
-    //   insights.panel.activity, insights.panel.ships, insights.panel.profile,
-    //   insights.panel.ranked, insights.panel.clanBattles,
+    //   player.section.efficiencyBadges  ("efficiency" isn't a WoWS term — see
+    //   below for why the Efficiency TAB label ships anyway)
     //   insights.tabsAriaLabel  ("insights" as a UI concept is ours, not WG's)
     //
     // Flagged "not verified" in the research doc directly:
@@ -59,28 +62,38 @@ export const ko: Partial<Record<StringKey, string>> = {
     // Structural blocker, not a vocabulary gap: `{suffix}` in
     // landing.shipLeaderboard.heading is a hardcoded English literal built in
     // ShipLeaderboard.tsx (`· last N days rolling`) that never passes through
-    // t(). Translating the heading alone would render a mixed-language string
+    // t(). This fix round made the key drive the VISIBLE text too, not just
+    // the aria-label (they used to diverge — see ShipLeaderboard.tsx), but
+    // that only fixed the wiring; the suffix clause itself is still an
+    // English literal built in the component, so translating this key alone
+    // would still render a mixed-language string
     // ("함선 리더보드 · last 45 days rolling") on the landing page. Needs the
     // suffix clause to become its own key before this one can honestly ship:
     //   landing.shipLeaderboard.heading
     //
     // Generic UI chrome outside the research doc's WoWS-jargon remit. Two-tier
-    // standard (see the research doc's "Generic UI chrome" section, added
-    // after the fix-round-1 review): everyday interface vocabulary with no
-    // game-specific register risk may use standard translations even without
-    // a corpus hit (nav.selectRealm, nav.language, nav.selectTheme, common.all,
-    // and — added Task 8b — nav.searchSubmit/nav.themeLight/nav.themeDark/
-    // nav.themeCurrent above are that tier). footer.lastViewed, common.clear,
-    // common.close are
-    // NOT admitted here — they belong to table/filter/footer chrome a
-    // separate follow-on task owns, so they stay omitted for now:
-    //   footer.lastViewed, common.clear, common.close
+    // standard (see the research doc's "Generic UI chrome" section): everyday
+    // interface vocabulary with no game-specific register risk may use
+    // standard translations even without a corpus hit — nav.selectRealm,
+    // nav.language, nav.selectTheme, common.all, nav.searchSubmit,
+    // nav.themeLight/nav.themeDark/nav.themeCurrent above are that tier, and
+    // — this fix round, closing an inconsistency where the standard was
+    // applied to later keys but never backfilled to these three tab labels —
+    // so are insights.tabs.activity/insights.tabs.profile/
+    // insights.tabs.efficiency and notFound.title/notFound.body: "Activity",
+    // "Profile" and "Efficiency" are everyday interface words carrying no
+    // WoWS register risk (see the research doc's admission table for the
+    // reasoning on 효율 specifically — it's our own coinage in English too,
+    // and a consistently-translated tab strip beats one that alternates
+    // languages tab to tab). common.clear/common.close/common.clan were
+    // deleted outright this fix round rather than kept as unwired
+    // scaffolding — no call site references any of them anywhere in the
+    // client, and no follow-on task claims them (contrast common.type below
+    // and the surviving common.* keys, which Fix 4's spec amendment assigns
+    // to a named follow-on).
     //
     // Category label unattested (the individual ship-class nouns — 전함,
     // 순양함, 구축함, 항공모함, 잠수함 — are attested, but the umbrella word
     // "type"/"class" itself is not):
     //   common.type
-    //
-    // No in-game or community source in the corpus:
-    //   insights.tabs.activity, insights.tabs.profile, notFound.title, notFound.body
 };

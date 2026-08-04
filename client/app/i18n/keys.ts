@@ -21,12 +21,6 @@ export type StringKey =
     | 'insights.tabs.efficiency'
     | 'insights.tabs.ranked'
     | 'insights.tabs.clanBattles'
-    | 'insights.panel.activity'
-    | 'insights.panel.ships'
-    | 'insights.panel.profile'
-    | 'insights.panel.efficiency'
-    | 'insights.panel.ranked'
-    | 'insights.panel.clanBattles'
     | 'insights.tabsAriaLabel'
     // — player section headings —
     | 'player.section.rankedGamesVsWinRate'
@@ -44,7 +38,6 @@ export type StringKey =
     | 'landing.shipLeaderboard.heading'
     // — shared controls —
     | 'common.all'
-    | 'common.clear'
     | 'common.tier'
     | 'common.type'
     | 'common.battles'
@@ -52,9 +45,7 @@ export type StringKey =
     | 'common.winRate'
     | 'common.ship'
     | 'common.player'
-    | 'common.clan'
     | 'common.season'
-    | 'common.close'
     // — not found —
     | 'notFound.title'
     | 'notFound.body';

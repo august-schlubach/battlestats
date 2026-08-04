@@ -125,7 +125,7 @@ const BattlesDistributionSVG = dynamic(() => resilientDynamicImport(() => import
 
 // Labels are keys, not strings: a module-level constant cannot call a hook, so
 // resolution happens at render.
-const TAB_CONFIG: Array<{ id: InsightsTabId; labelKey: StringKey; panelLabelKey: StringKey; minHeight: number; }> = [
+const TAB_CONFIG: Array<{ id: InsightsTabId; labelKey: StringKey; minHeight: number; }> = [
     // Order reflects measured Umami tab-click demand (90d, 2026-07-08): Activity
     // stays first as the default landing tab; the remaining tabs are ranked by
     // click volume — Ships > Profile > Efficiency > Ranked > Clan Battles. The
@@ -133,12 +133,12 @@ const TAB_CONFIG: Array<{ id: InsightsTabId; labelKey: StringKey; panelLabelKey:
     // minHeight is only a loading-stability floor (roughly the tab's
     // LoadingPanel stack) — panels size to content since 2026-07-15, so a
     // large floor just recreates the dead space the content-sizing removed.
-    { id: 'activity', labelKey: 'insights.tabs.activity', panelLabelKey: 'insights.panel.activity', minHeight: 420 },
-    { id: 'ships', labelKey: 'insights.tabs.ships', panelLabelKey: 'insights.panel.ships', minHeight: 560 },
-    { id: 'profile', labelKey: 'insights.tabs.profile', panelLabelKey: 'insights.panel.profile', minHeight: 360 },
-    { id: 'badges', labelKey: 'insights.tabs.efficiency', panelLabelKey: 'insights.panel.efficiency', minHeight: 360 },
-    { id: 'ranked', labelKey: 'insights.tabs.ranked', panelLabelKey: 'insights.panel.ranked', minHeight: 280 },
-    { id: 'career', labelKey: 'insights.tabs.clanBattles', panelLabelKey: 'insights.panel.clanBattles', minHeight: 280 },
+    { id: 'activity', labelKey: 'insights.tabs.activity', minHeight: 420 },
+    { id: 'ships', labelKey: 'insights.tabs.ships', minHeight: 560 },
+    { id: 'profile', labelKey: 'insights.tabs.profile', minHeight: 360 },
+    { id: 'badges', labelKey: 'insights.tabs.efficiency', minHeight: 360 },
+    { id: 'ranked', labelKey: 'insights.tabs.ranked', minHeight: 280 },
+    { id: 'career', labelKey: 'insights.tabs.clanBattles', minHeight: 280 },
 ];
 
 // Height CAP (px) for the battle-table insight views — the Activity tab and

@@ -21,12 +21,6 @@ export const en: Record<StringKey, string> = {
     'insights.tabs.efficiency': 'Efficiency',
     'insights.tabs.ranked': 'Ranked',
     'insights.tabs.clanBattles': 'Clan Battles',
-    'insights.panel.activity': 'Recent battle activity',
-    'insights.panel.ships': 'Ship insights',
-    'insights.panel.profile': 'Profile insights',
-    'insights.panel.efficiency': 'Efficiency insights',
-    'insights.panel.ranked': 'Ranked insights',
-    'insights.panel.clanBattles': 'Clan battles insights',
     'insights.tabsAriaLabel': 'Player insight tabs',
 
     'player.section.rankedGamesVsWinRate': 'Ranked Games vs Win Rate',
@@ -54,7 +48,6 @@ export const en: Record<StringKey, string> = {
     'landing.shipLeaderboard.heading': 'Ship leaderboard{suffix}',
 
     'common.all': 'All',
-    'common.clear': 'Clear',
     'common.tier': 'Tier',
     'common.type': 'Type',
     'common.battles': 'Battles',
@@ -62,9 +55,7 @@ export const en: Record<StringKey, string> = {
     'common.winRate': 'Win rate',
     'common.ship': 'Ship',
     'common.player': 'Player',
-    'common.clan': 'Clan',
     'common.season': 'Season',
-    'common.close': 'Close',
 
     'notFound.title': 'Page Not Found',
     'notFound.body': 'The requested page could not be found.',
