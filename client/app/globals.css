@@ -372,3 +372,15 @@ body {
     animation: none;
   }
 }
+
+/* CJK typography. `uppercase` is a no-op on Korean and Japanese, and
+   `tracking-wide` reads as broken spacing. Attribute-scoped descendant
+   selectors (0,2,1) outrank Tailwind's single-class utilities (0,1,0), so no
+   !important is needed and the rule cannot drift as new headings are written.
+   Accepted: this also de-uppercases the English strings still out of i18n
+   scope. A uniformly sentence-case page beats a half-uppercased one. */
+:root[data-lang="ko"] .uppercase,
+:root[data-lang="ja"] .uppercase { text-transform: none; }
+
+:root[data-lang="ko"] .tracking-wide,
+:root[data-lang="ja"] .tracking-wide { letter-spacing: normal; }
