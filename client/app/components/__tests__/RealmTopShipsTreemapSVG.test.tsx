@@ -57,8 +57,25 @@ describe('RealmTopShipsTreemapSVG (presentational)', () => {
             />,
         );
         const heading = screen.getByRole('heading');
-        expect(heading.textContent).toContain('T10 Cruisers');
-        expect(heading.textContent).toContain('top 50%');
+        // Exact match, not .toContain: this is the only place that proves the
+        // component wires bucketLabel/wrPct/windowLabel into t() correctly, as
+        // opposed to the en.ts template merely being correct in isolation. A
+        // substring match would pass even if e.g. `bucket: bucketLabel` (no
+        // `|| 'ships'` fallback) rendered a literal `{bucket}` for someone else.
+        expect(heading.textContent).toBe('NA most-played T10 Cruisers · top 50% · 1–30 Jun');
+    });
+
+    it('renders the bucket-absent heading exactly when no tier/type filter is active (the landing page default)', () => {
+        render(
+            <RealmTopShipsTreemapSVG
+                ships={[ship({})]}
+                tier={null}
+                type={null}
+                wrPct={null}
+            />,
+        );
+        const heading = screen.getByRole('heading');
+        expect(heading.textContent).toBe('NA most-played ships');
     });
 
     it('draws a tile per ship and drills via onSelect on click', () => {
