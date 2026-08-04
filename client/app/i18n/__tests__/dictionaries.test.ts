@@ -2,6 +2,7 @@ import { en } from '../en';
 import { ko } from '../ko';
 import { ja } from '../ja';
 import { translate, LOCALES, resolveDictionary } from '../index';
+import type { StringKey } from '../keys';
 
 describe('dictionaries', () => {
     it('en is total: every key has a non-empty string', () => {
@@ -38,11 +39,18 @@ describe('translate', () => {
     });
 
     it('falls back to English when the locale lacks the key', () => {
-        // ko is an empty Partial at this stage (Task 7 populates it), so any
-        // key exercises the fallback; 'player.section.efficiencyBadges' is
-        // just a representative pick, not a specially-untranslated string.
-        expect(translate('ko', 'player.section.efficiencyBadges'))
-            .toBe(en['player.section.efficiencyBadges']);
+        // Key-agnostic by design: ko/ja are actively-populated Partials now
+        // (Task 7), so pinning one specific StringKey as "the untranslated
+        // one" would make this test brittle — a future translation of that
+        // exact key would break it for a reason unrelated to what it checks
+        // (the fallback mechanism, not any particular key's coverage state).
+        // Instead, find whichever key ko currently lacks and assert the
+        // fallback against it.
+        const enKeys = Object.keys(en) as StringKey[];
+        const missingKey = enKeys.find((k) => !(k in ko));
+        expect(missingKey).toBeDefined();
+        expect(translate('ko', missingKey as StringKey))
+            .toBe(en[missingKey as StringKey]);
     });
 
     it('substitutes {vars}', () => {

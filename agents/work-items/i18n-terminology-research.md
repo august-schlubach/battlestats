@@ -78,3 +78,34 @@ Decided 2026-08-04. Both options were attested in every case; register decided.
 | Word for "stats" | **`戦績` / `전적`** | The community's own word for a player's record; `統計`/`통계` reads institutional. |
 
 Applied consistently: `랜덤전` (not `랭덤전`), `랭크전`, `클랜전`.
+
+## Generic UI chrome: a two-tier attestation standard
+
+Added 2026-08-04 (fix round 1 on the dictionary-population task), after review found the
+original "do not translate anything not attested here" instruction self-contradicted:
+it also specified three chrome strings (`nav.selectRealm`, `nav.language`, `common.all`)
+that this corpus does not attest. That gap is closed here, explicitly, so the next
+person doesn't re-derive it:
+
+- **Game terminology requires corpus attestation.** Ship classes, battle modes, tiers,
+  damage, win rate, seasons, clans — anything a player would recognize from the game
+  client. Unattested means omitted. This is unchanged and absolute; it is the rule the
+  rest of this document exists to serve.
+- **Generic UI chrome may use standard everyday vocabulary without a corpus hit.**
+  Words like "language," "all," "select," "close" carry no game-specific register
+  risk — there is no plausible-but-wrong WoWS jargon to accidentally introduce, because
+  they aren't WoWS jargon at all.
+
+Keys admitted under the generic-chrome tier, with their values:
+
+| Key | Korean | Japanese |
+|---|---|---|
+| `nav.selectRealm` | 서버 선택 | サーバー選択 |
+| `nav.language` | 언어 | 言語 |
+| `common.all` | 전체 | すべて |
+| `nav.selectTheme` | 테마 선택 | テーマ選択 |
+
+This tier is deliberately narrow. `common.clear`, `common.close`, and `common.type`
+remain omitted even though they are also generic — they belong to table/filter chrome
+scoped to a separate follow-on task, not this admission list. Do not extend this tier
+without a matching entry here.

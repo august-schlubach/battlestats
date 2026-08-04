@@ -5,6 +5,7 @@ import type { StringKey } from './keys';
 export const ja: Partial<Record<StringKey, string>> = {
     'nav.selectRealm': 'サーバー選択',
     'nav.language': '言語',
+    'nav.selectTheme': 'テーマ選択',
     'nav.searchPlayer': 'プレイヤー検索',
     'nav.searchClan': 'クラン検索',
 
@@ -51,8 +52,15 @@ export const ja: Partial<Record<StringKey, string>> = {
     // through t(), so translating just the heading mixes languages:
     //   landing.shipLeaderboard.heading
     //
-    // Generic UI chrome outside the research doc's remit, not brief-specified:
-    //   nav.selectTheme, footer.lastViewed, common.clear, common.close
+    // Generic UI chrome outside the research doc's WoWS-jargon remit. Two-tier
+    // standard (see the research doc's "Generic UI chrome" section, added
+    // after the fix-round-1 review): everyday interface vocabulary with no
+    // game-specific register risk may use standard translations even without
+    // a corpus hit (nav.selectRealm, nav.language, nav.selectTheme, common.all
+    // above are that tier). footer.lastViewed, common.clear, common.close are
+    // NOT admitted here — they belong to table/filter/footer chrome a
+    // separate follow-on task owns, so they stay omitted for now:
+    //   footer.lastViewed, common.clear, common.close
     //
     // Category label unattested (individual ship-class nouns are attested;
     // the umbrella word "type"/"class" is not):

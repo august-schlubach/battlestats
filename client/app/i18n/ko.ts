@@ -7,6 +7,7 @@ import type { StringKey } from './keys';
 export const ko: Partial<Record<StringKey, string>> = {
     'nav.selectRealm': '서버 선택',
     'nav.language': '언어',
+    'nav.selectTheme': '테마 선택',
     'nav.searchPlayer': '플레이어 검색',
     'nav.searchClan': '클랜 검색',
 
@@ -59,9 +60,15 @@ export const ko: Partial<Record<StringKey, string>> = {
     // suffix clause to become its own key before this one can honestly ship:
     //   landing.shipLeaderboard.heading
     //
-    // Generic UI chrome outside the research doc's WoWS-jargon remit, and not
-    // part of the pre-vetted brief set:
-    //   nav.selectTheme, footer.lastViewed, common.clear, common.close
+    // Generic UI chrome outside the research doc's WoWS-jargon remit. Two-tier
+    // standard (see the research doc's "Generic UI chrome" section, added
+    // after the fix-round-1 review): everyday interface vocabulary with no
+    // game-specific register risk may use standard translations even without
+    // a corpus hit (nav.selectRealm, nav.language, nav.selectTheme, common.all
+    // above are that tier). footer.lastViewed, common.clear, common.close are
+    // NOT admitted here — they belong to table/filter/footer chrome a
+    // separate follow-on task owns, so they stay omitted for now:
+    //   footer.lastViewed, common.clear, common.close
     //
     // Category label unattested (the individual ship-class nouns — 전함,
     // 순양함, 구축함, 항공모함, 잠수함 — are attested, but the umbrella word
