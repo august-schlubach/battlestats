@@ -8,7 +8,7 @@ export type StringKey =
     | 'nav.language'
     | 'nav.searchPlayer'
     | 'nav.searchClan'
-    | 'nav.theme'
+    | 'nav.selectTheme'
     | 'footer.lastViewed'
     // — player insight tabs —
     | 'insights.tabs.activity'

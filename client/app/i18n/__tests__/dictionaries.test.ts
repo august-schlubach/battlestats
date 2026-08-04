@@ -40,7 +40,9 @@ describe('translate', () => {
     });
 
     it('falls back to English when the locale lacks the key', () => {
-        // 'nav.language' is deliberately untranslated (NEEDS-NATIVE-CHECK).
+        // ko is an empty Partial at this stage (Task 7 populates it), so any
+        // key exercises the fallback; 'player.section.efficiencyBadges' is
+        // just a representative pick, not a specially-untranslated string.
         expect(translate('ko', 'player.section.efficiencyBadges'))
             .toBe(en['player.section.efficiencyBadges']);
     });

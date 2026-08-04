@@ -4,9 +4,9 @@ import type { StringKey } from './keys';
 export const en: Record<StringKey, string> = {
     'nav.selectRealm': 'Select realm',
     'nav.language': 'Language',
-    'nav.searchPlayer': 'Search players',
-    'nav.searchClan': 'Search clans',
-    'nav.theme': 'Toggle theme',
+    'nav.searchPlayer': 'Search Players',
+    'nav.searchClan': 'Search Clans',
+    'nav.selectTheme': 'Select theme',
     'footer.lastViewed': 'Last viewed:',
 
     'insights.tabs.activity': 'Activity',
@@ -36,7 +36,10 @@ export const en: Record<StringKey, string> = {
     // Composed at runtime; word order differs per language, so the whole
     // sentence is one template rather than concatenated fragments.
     'landing.treemap.heading': '{realm} most-played {bucket}{suffix}',
-    'landing.shipLeaderboard.heading': '{realm} ship leaderboard',
+    // Live source (ShipLeaderboard.tsx) carries no realm in this heading — it's
+    // always "Ship leaderboard", with an optional " · last N days rolling"
+    // clause once the served window is known. {suffix} carries that clause.
+    'landing.shipLeaderboard.heading': 'Ship leaderboard{suffix}',
 
     'common.all': 'All',
     'common.clear': 'Clear',
