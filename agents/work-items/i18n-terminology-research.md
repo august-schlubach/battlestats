@@ -66,11 +66,15 @@ Flagged rather than guessed. These need a second pass or a native check before s
 - **Activity** (our tab) — no direct analogue in the corpus.
 - **Reigning champion**, **Skill bracket**, **Compare vs** — our own product language, no in-game source.
 
-## Open forks
+## Resolved forks
 
-Genuine choices where both options are attested and correct; register decides.
+Decided 2026-08-04. Both options were attested in every case; register decided.
 
-1. **KO battle-mode length.** Client-consistent `무작위 전투 / 랭크 전투 / 클랜 전투` vs compact `랜덤전 / 랭크전 / 클랜전`. wows-numbers itself mixes: full in nav, compact in tables.
-2. **KO damage.** `데미지` (loanword, what the stats site and players use) vs `피해량` (official client term).
-3. **JA tier.** `Tier` in Latin (how JP players write it) vs `ティア` (katakana).
-4. **The word for "stats".** Community `戦績` / `전적` vs formal `統計` / `통계`.
+| Fork | Decision | Rationale |
+|---|---|---|
+| KO battle-mode length | **Compact**: `랜덤전` / `랭크전` / `클랜전` | What players write (arca.live), and what wows-numbers' own tables use. Fits tab labels. Diverges from the client's `무작위 전투`, accepted. |
+| KO damage | **`데미지`** | The loanword the community and wows-numbers use. `피해량` is the client term and reads officialese. |
+| JA tier | **`Tier`, Latin** | How JP players write it (`Tier10`, `T9`). Keeps the numeral adjacent in dense rows. |
+| Word for "stats" | **`戦績` / `전적`** | The community's own word for a player's record; `統計`/`통계` reads institutional. |
+
+Applied consistently: `랜덤전` (not `랭덤전`), `랭크전`, `클랜전`.

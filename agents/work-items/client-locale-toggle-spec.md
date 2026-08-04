@@ -4,7 +4,8 @@
 **Status:** approved, implementing
 **Surface:** client only (header chrome, section headings, insight-tab labels)
 **Scope:** frontend; no `server/` change
-**Ships:** dark (flag absent in prod), dictionaries stubbed to English
+**Ships:** dark (flag absent in prod), dictionaries populated from researched terminology
+**Terminology:** `agents/work-items/i18n-terminology-research.md`
 
 ## Why
 
@@ -38,10 +39,20 @@ those players that uses machine-translated approximations reads as untrustworthy
 strictly worse than English, which at least signals "this is an English tool"
 rather than "this tool does not know the game."
 
-**Therefore this work item ships the mechanism only.** `ko.ts` and `ja.ts` land
-carrying the English source text. Nothing user-visible changes until a person who
-plays the JP/KR client fills them in. The plumbing is the reusable part and does
-not depend on that person; the dictionaries do.
+**Resolved by research, not by machine translation** (2026-08-04). Terminology is
+sourced from a live corpus — `asia.wows-numbers.com` in both locales (a
+human-localized WoWS *stats* site, the closest analogue to ours), `namu.wiki`,
+`arca.live/b/wows`, `wikiwiki.jp/wows`, and Japanese player stats blogs. Reddit's
+`?tl=` auto-translated pages were excluded: sampling them would have measured the
+exact failure mode described above. Register decisions (compact KO mode names,
+`데미지` over `피해량`, Latin `Tier`, `戦績`/`전적` over `統計`/`통계`) are recorded
+with their evidence in the research doc.
+
+`ko.ts` and `ja.ts` therefore ship **populated**. The residue is small and named:
+survival rate, nation, "efficiency", and our own product coinages (*Reigning
+champion*, *Skill bracket*, *Compare vs*) have no in-game source and carry a
+`// NEEDS-NATIVE-CHECK` marker. Those specific strings fall back to English rather
+than ship a guess.
 
 ## Scope
 
@@ -97,9 +108,10 @@ single file to fill in).
   translation: strings are lifted **verbatim** from the components, so the `en`
   render is byte-identical to today.
 - `ko.ts`, `ja.ts` — `Record<StringKey, string>` typed against the same union,
-  initially carrying the English text under a `// TODO(i18n-ko)` / `(i18n-ja)`
-  header. Because the type is shared, a key added to `en.ts` and forgotten
-  elsewhere is a **build failure**, not a blank label in production.
+  populated from the terminology research. Strings with no in-game source carry a
+  `// NEEDS-NATIVE-CHECK` comment and hold the English text deliberately. Because
+  the type is shared, a key added to `en.ts` and forgotten elsewhere is a **build
+  failure**, not a blank label in production.
 - `index.ts` — locale registry + `resolveDictionary(locale)`.
 
 **Key style is semantic and namespaced** (`insights.tabs.activity`), not
@@ -252,7 +264,7 @@ and deployed — `NEXT_PUBLIC_APP_VERSION` is baked at build time.
 
 ## Follow-ons (not in this work item)
 
-1. Populate `ko.ts`, then `ja.ts`, with in-game-correct terminology; flip
+1. Native check on the `NEEDS-NATIVE-CHECK` residue; flip
    `NEXT_PUBLIC_LOCALE_SELECTOR=1`; cut a minor.
 2. Localize the ~12 backend axis labels via the client-side override map.
 3. Localize info-tooltip descriptions.
