@@ -8,6 +8,10 @@ export const ja: Partial<Record<StringKey, string>> = {
     'nav.selectTheme': 'テーマ選択',
     'nav.searchPlayer': 'プレイヤー検索',
     'nav.searchClan': 'クラン検索',
+    'nav.searchSubmit': '検索',
+    'nav.themeLight': 'ライト',
+    'nav.themeDark': 'ダーク',
+    'nav.themeCurrent': 'テーマ: {label}',
 
     'insights.tabs.ships': '艦艇',
     'insights.tabs.ranked': 'ランク戦',
@@ -56,8 +60,10 @@ export const ja: Partial<Record<StringKey, string>> = {
     // standard (see the research doc's "Generic UI chrome" section, added
     // after the fix-round-1 review): everyday interface vocabulary with no
     // game-specific register risk may use standard translations even without
-    // a corpus hit (nav.selectRealm, nav.language, nav.selectTheme, common.all
-    // above are that tier). footer.lastViewed, common.clear, common.close are
+    // a corpus hit (nav.selectRealm, nav.language, nav.selectTheme, common.all,
+    // and — added Task 8b — nav.searchSubmit/nav.themeLight/nav.themeDark/
+    // nav.themeCurrent above are that tier). footer.lastViewed, common.clear,
+    // common.close are
     // NOT admitted here — they belong to table/filter/footer chrome a
     // separate follow-on task owns, so they stay omitted for now:
     //   footer.lastViewed, common.clear, common.close

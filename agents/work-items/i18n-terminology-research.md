@@ -104,6 +104,20 @@ Keys admitted under the generic-chrome tier, with their values:
 | `nav.language` | 언어 | 言語 |
 | `common.all` | 전체 | すべて |
 | `nav.selectTheme` | 테마 선택 | テーマ選択 |
+| `nav.searchSubmit` | 검색 | 検索 |
+| `nav.themeLight` | 라이트 | ライト |
+| `nav.themeDark` | 다크 | ダーク |
+| `nav.themeCurrent` | 테마: {label} | テーマ: {label} |
+
+Added 2026-08-04 (Task 8b, closing the header's last two untranslated words —
+the `Go` submit button and the theme chip's `Light`/`Dark`/`Theme: …`).
+`nav.searchSubmit` is not a literal rendering of "Go": it reuses the
+corpus-attested Search verb (row 53 above, 検索/검색) because a Korean or
+Japanese search form labels its button with the verb, not an English
+interjection. `nav.themeLight`/`nav.themeDark` are the established loanwords
+interface toggles actually use. `nav.themeCurrent` composes the WHOLE button
+aria-label (`Theme: {label}`) as one template — keying only the theme word
+would leave the accessible name a mixed-language `Theme: 다크`.
 
 This tier is deliberately narrow. `common.clear` and `common.close` remain omitted
 even though they are generic — they belong to table/filter chrome scoped to a separate

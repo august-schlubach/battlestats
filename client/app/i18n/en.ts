@@ -6,7 +6,13 @@ export const en: Record<StringKey, string> = {
     'nav.language': 'Language',
     'nav.searchPlayer': 'Search Players',
     'nav.searchClan': 'Search Clans',
+    'nav.searchSubmit': 'Go',
     'nav.selectTheme': 'Select theme',
+    'nav.themeLight': 'Light',
+    'nav.themeDark': 'Dark',
+    // Composed at runtime so the whole accessible name — not just the theme
+    // word — is a single translated sentence; see ThemeToggle.tsx.
+    'nav.themeCurrent': 'Theme: {label}',
     'footer.lastViewed': 'Last viewed:',
 
     'insights.tabs.activity': 'Activity',

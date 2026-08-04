@@ -5,16 +5,20 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faChevronDown, faMoon, faSun } from '@fortawesome/free-solid-svg-icons';
 import { useTheme, type Theme } from '../context/ThemeContext';
 import { useT } from '../context/LocaleContext';
+import type { StringKey } from '../i18n';
 import { trackEvent } from '../lib/umami';
 
 interface ThemeOption {
     value: Theme;
-    label: string;
+    labelKey: StringKey;
 }
 
+// Labels are keys, not strings: a module-level constant cannot call a hook, so
+// resolution happens at render (same pattern as TAB_CONFIG in
+// PlayerDetailInsightsTabs.tsx).
 const THEME_OPTIONS: ThemeOption[] = [
-    { value: 'light', label: 'Light' },
-    { value: 'dark', label: 'Dark' },
+    { value: 'light', labelKey: 'nav.themeLight' },
+    { value: 'dark', labelKey: 'nav.themeDark' },
 ];
 
 const INACTIVE_OPTION_COLOR = 'var(--text-secondary)';
@@ -61,7 +65,7 @@ const ThemeToggle: React.FC = () => {
     const moonIconColor = theme === 'dark' ? '#a5b4fc' : 'rgba(107, 114, 128, 0.6)';
     const currentIcon = theme === 'light' ? faSun : faMoon;
     const currentIconColor = theme === 'light' ? sunIconColor : moonIconColor;
-    const currentLabel = theme === 'light' ? 'Light' : 'Dark';
+    const currentLabel = t(theme === 'light' ? 'nav.themeLight' : 'nav.themeDark');
 
     return (
         <div ref={containerRef} className="relative">
@@ -76,7 +80,7 @@ const ThemeToggle: React.FC = () => {
                     color: 'var(--text-secondary)',
                     cursor: 'pointer',
                 }}
-                aria-label={`Theme: ${currentLabel}`}
+                aria-label={t('nav.themeCurrent', { label: currentLabel })}
                 aria-expanded={open}
                 aria-haspopup="listbox"
             >
@@ -139,7 +143,7 @@ const ThemeToggle: React.FC = () => {
                             >
                                 <span className="inline-flex items-center gap-2" style={{ fontSize: '13px' }}>
                                     <FontAwesomeIcon icon={optionIcon} style={{ fontSize: '13px', color: optionIconColor }} aria-hidden="true" />
-                                    {option.label}
+                                    {t(option.labelKey)}
                                 </span>
                                 {isActive && (
                                     <FontAwesomeIcon icon={faCheck} style={{ fontSize: '11px' }} aria-hidden="true" />
