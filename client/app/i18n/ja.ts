@@ -111,8 +111,14 @@ export const ja: Partial<Record<StringKey, string>> = {
     // and the surviving common.* keys, which Fix 4's spec amendment assigns
     // to a named follow-on).
     //
-    // Category label unattested (individual ship-class nouns are attested;
-    // the umbrella word "type"/"class" is not):
+    // Category label — NOT an attestation gap anymore (updated, fix round 1):
+    // a 2026-08-04 corpus pass attested the umbrella word itself, 艦種, as a
+    // filter label on asia.wows-numbers.com's ja ship-ranking page (see the
+    // research doc's Verified terms table). Stays omitted here anyway because
+    // populating it ahead of the landing filter bar / EfficiencyBadgeTable.tsx
+    // wiring is that named follow-on's work, not this doc-reconciliation
+    // pass's — see ko.ts and the client-locale-toggle spec's "What blocks
+    // wiring it now" section for the current (shorter) blocker list:
     //   common.type
     //
     // Out of scope by the spec's own rule, not by attestation gap — see

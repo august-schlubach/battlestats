@@ -104,14 +104,19 @@ vocabulary the research corpus did not attest, not generic UI chrome. A
 follow-up corpus pass against `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`
 (a fully localized ship-ranking table header) resolved two of the three:
 
-- ~~**`Nation`**~~ (ship nationality) — **now attested**: 国家/국가 head the
-  nationality column in both locales' ship tables. See the research doc's
-  Verified terms table.
+- ~~**`Nation`**~~ (ship nationality) — **now attested**: 国家/국가 label the
+  nationality **filter** above the ranking table on both locales' ship pages
+  (`**국가:** 전체 | …`, not a column header — corrected in fix round 1). See
+  the research doc's Verified terms table.
 - ~~**`Type`**~~, the umbrella category word for ship class — **now
-  attested**: 艦種/함종 head the class column in the same pair of tables. The
-  individual class nouns were already attested (전함/戦艦, 순양함/巡洋艦, …);
+  attested**: 艦種/함종 label the class **filter** in the same row (`**함종:**
+  전체 | 구축함 항공모함 …`, again a filter label rather than a column header).
+  The individual class nouns were already attested (전함/戦艦, 순양함/巡洋艦, …);
   this closes the umbrella-word gap that used to keep `common.type` out of the
-  generic-chrome admission table.
+  generic-chrome admission table. Worth noting precisely because it strengthens
+  the case for wiring: our own filter bars use the umbrella word as a **filter
+  label** too, the exact same UI role as the corpus's, not merely an adjacent
+  one.
 - **`Award`** (badge-tier name — our own product taxonomy, no in-game source)
   remains the one unresolved label. It names a classification this site
   invented, not something WoWS or its community ranks ships/players by, so no
@@ -462,6 +467,24 @@ name as one template (see `app/i18n/en.ts`'s comment on that key). The actual
 rule: a key is blocked when its interpolated clause is assembled as an English
 literal in the component; it is not blocked merely because it contains a
 token.
+
+### The language chip's aria-label is the one non-byte-identical English change (header-menu coverage pass, 2026-08-04)
+
+Every other key wired in the header-menu coverage pass (`nav.realmCurrent`,
+`landing.treemap.chartSectionLabel`/`chartViewGroup`/`toggleMap`/`togglePlot`)
+carries an English value lifted verbatim from the literal it replaced, so the
+English render is byte-identical to before. `nav.languageCurrent` is the one
+exception, by design: `LocaleSelector.tsx`'s collapsed chip used to carry the
+static `aria-label={t('nav.language')}` ("Language", regardless of which
+locale was active); it now composes `"Language: {language}"` the same way the
+realm chip already announces its current value ("Realm: NA"). In English that
+renders `"Language: English"` — new text, not a re-rendering of old text. This
+is exactly the asymmetry the task asked to close (the realm chip announced its
+value, the language chip didn't), so it's correct, not drift. Recorded here so
+a future byte-identity audit of this codebase doesn't read the diff as an
+unexplained regression: it is an `aria-label` only, no visible on-page text
+changed, and no test pinned the old value (confirmed via `grep` before
+changing it).
 
 ## Follow-ons (not in this work item)
 

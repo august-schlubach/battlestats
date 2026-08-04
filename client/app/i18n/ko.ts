@@ -116,9 +116,14 @@ export const ko: Partial<Record<StringKey, string>> = {
     // and the surviving common.* keys, which Fix 4's spec amendment assigns
     // to a named follow-on).
     //
-    // Category label unattested (the individual ship-class nouns — 전함,
-    // 순양함, 구축함, 항공모함, 잠수함 — are attested, but the umbrella word
-    // "type"/"class" itself is not):
+    // Category label — NOT an attestation gap anymore (updated, fix round 1):
+    // a 2026-08-04 corpus pass attested the umbrella word itself, 함종, as a
+    // filter label on asia.wows-numbers.com's ko ship-ranking page (see the
+    // research doc's Verified terms table). Stays omitted here anyway because
+    // populating it ahead of the landing filter bar / EfficiencyBadgeTable.tsx
+    // wiring is that named follow-on's work, not this doc-reconciliation
+    // pass's — see the client-locale-toggle spec's "What blocks wiring it
+    // now" section for the current (shorter) blocker list:
     //   common.type
     //
     // Out of scope by the spec's own rule, not by attestation gap — the

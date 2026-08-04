@@ -45,7 +45,7 @@ Counts are occurrences in the corpus above.
 | Destroyer | 駆逐艦 | 구축함 | JP blog ×5; namu ×59. |
 | Aircraft carrier | 空母 | 항공모함 | namu ×47. Community shortens to `항모` in speech. |
 | Submarine | 潜水艦 | 잠수함 | namu ×48. |
-| Tier | Tier | 티어 | JA writes Latin: `Tier10`, `T9`. KO loanword dominates: namu ×21, arca `8티어`. `등급` — zero hits. |
+| Tier | Tier | 티어 | JA writes Latin: `Tier10`, `T9`. KO loanword dominates: namu ×21, arca `8티어`. `등급` — zero hits. `단계` is a second attested-but-not-chosen KO alternative — see the Resolved forks table below; the `티어` ruling stands. |
 | Player | プレイヤー | 플레이어 | wows-numbers nav (KO). JA nav leaves "Player" in Latin. |
 | Clan | クラン | 클랜 | Universal. |
 | Leaderboard | リーダーボード | 리더보드 | wows-numbers nav, both locales. |
@@ -55,10 +55,10 @@ Counts are occurrences in the corpus above.
 | Clan members | 在籍メンバー数 | 클랜 인원 | wows-numbers clan tables. |
 | Active members | 活動しているメンバー数 | 활성 멤버수 | wows-numbers clan tables. |
 | Personal rating | PR | 개인 레이팅(PR) | wows-numbers, both locales. |
-| Ship type / class (umbrella) | 艦種 | 함종 | `asia.wows-numbers.com/ko/ships/` and `/ja/ships/` ship-ranking table column headers, corpus pass 2026-08-04: 함종/艦種 head the class column itself — the umbrella category word, distinct from the individual class nouns (전함/戦艦, 순양함/巡洋艦, …) already attested above. Closes the gap the client-locale-toggle spec named as the blocker on `common.type`. |
-| Nation (ship nationality) | 国家 | 국가 | Same 2026-08-04 pass, same table: 국가/国家 head the nationality column in both locales. Closes the gap the spec named as the blocker on `common.nation`. |
-| Top N% (percentile filter) | 上位{pct}% | 상위{pct}% | Same pass: `상위` ×3, `上位` ×5 across the ko/ja ship-ranking pages. Already shipped as `landing.treemap.topPct` under the generic-chrome tier (2026-08-04, follow-on #1) before this corpus hit existed — promoted here now that the word itself is directly attested, not merely admitted as unattested-but-safe chrome. |
-| Recent / last (KO) | — (see note) | 최근 | Same pass: `최근` ×5. Already shipped as the `최근` clause inside `landing.treemap.windowPhraseWithDays`'s and `landing.shipLeaderboard.windowSuffix`'s Korean values; promoted for the same reason as Top N% above. Japanese's `直近`, used in the same two keys, is a *different* word with no corpus hit of its own: it stays unattested and stays a generic-chrome admission (see the admission table below) — this row promotes the Korean word only. |
+| Ship type / class (umbrella) | 艦種 | 함종 | `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`, corpus pass 2026-08-04. **Correction (fix round 1):** these are the **filter labels above the ranking table** (`**함종:** 전체 \| 구축함 항공모함 …`), not column headers as an earlier draft of this row said — reproduces on both hosts either way, and the attestation stands; only the description was wrong. Distinct from the individual class nouns (전함/戦艦, 순양함/巡洋艦, …) already attested above. Closes the gap the client-locale-toggle spec named as the blocker on `common.type`. |
+| Nation (ship nationality) | 国家 | 국가 | Same 2026-08-04 pass, same page: 국가/国家 label the nationality filter, same row as the class filter above (**correction, fix round 1**: a filter label, not a column header). Closes the gap the spec named as the blocker on `common.nation`. |
+| Top N% (percentile filter, KO only) | — (see note) | 상위{pct}% | **Re-cited, fix round 1** — the original attribution to `asia.wows-numbers.com/ko/ships/` was wrong; re-verification found zero occurrences of `상위` there. The real source is `namu.wiki/w/월드 오브 워쉽` (`상위` ×3). Already shipped as `landing.treemap.topPct`'s Korean value under the generic-chrome tier (2026-08-04, follow-on #1); promoted here now that namu.wiki attests it directly. **Japanese `上位` is NOT promoted** — see the demotion note under Generic UI chrome below; its only hit is a single occurrence on an unvetted source. |
+| Recent / last (KO) | — (see note) | 최근 | **Re-cited, fix round 1** — the original attribution was wrong; re-verification found zero occurrences on the `ships/` pages. Real sources: `namu.wiki/w/월드 오브 워쉽` (`최근` ×8) and `asia.wows-numbers.com/ko/` root (`최근 이벤트`, `최근 전적` ×2 — `최근 전적` is exactly our register, "recent record"). Already shipped as the `최근` clause inside `landing.treemap.windowPhraseWithDays`'s and `landing.shipLeaderboard.windowSuffix`'s Korean values; promoted for the same reason as Top N% above. Japanese's `直近`, used in the same two keys, is a *different* word with no corpus hit of its own: it stays unattested and stays a generic-chrome admission (see the admission table below) — this row promotes the Korean word only. |
 
 ## Not verified in this corpus
 
@@ -119,6 +119,7 @@ Keys admitted under the generic-chrome tier, with their values:
 | `insights.tabs.efficiency` | 효율 | 効率 |
 | `notFound.title` | 페이지를 찾을 수 없습니다 | ページが見つかりません |
 | `notFound.body` | 요청하신 페이지를 찾을 수 없습니다. | お探しのページは見つかりませんでした。 |
+| `landing.treemap.topPct` (Japanese half only — Korean is promoted, see Verified terms) | *(promoted — see Verified terms table)* | 上位{pct}% † |
 | `landing.treemap.windowPhraseWithDays` | 최근 {days}일간의 함선 순위 집계 기간 | 直近{days}日間の艦艇ランキング集計期間 |
 | `landing.treemap.windowPhraseNoDays` | 함선 순위 집계 기간 | 艦艇ランキング集計期間 |
 | `landing.treemap.viewTreemap` | 트리맵 | ツリーマップ |
@@ -134,20 +135,40 @@ Keys admitted under the generic-chrome tier, with their values:
 | `landing.treemap.toggleMap` | 트리맵 | ツリーマップ |
 | `landing.treemap.togglePlot` | 산점도 | 散布図 |
 
-**`landing.treemap.topPct` and the `최근` clause: promoted, not removed.** Both
-were admitted here on 2026-08-04 before any corpus evidence existed for them.
-The 2026-08-04 corpus pass (see the Verified terms table above) directly
-attests `상위`/`上位` and Korean `최근`, so `landing.treemap.topPct` moved to
-the Verified terms table outright — it no longer needs the generic-chrome
-justification, it has a corpus hit. `landing.treemap.windowPhraseWithDays` and
-`landing.shipLeaderboard.windowSuffix` stay listed here rather than moving
-wholesale: each composes a full phrase ("N-day ship-standings window", "last N
-days rolling") where only the Korean `최근` word inside is independently
-attested — the rest of the phrase ("함선 순위 집계 기간", the standings-window
-concept itself) is still our own coinage, not a WoWS term. Japanese `直近`,
-used in the same two keys, has no corpus hit of its own and remains a
-generic-chrome admission (see the client-locale-toggle spec's "Known traps"
-section, which names this explicitly).
+**`landing.treemap.topPct`'s Korean half and the `최근` clause: promoted, the
+Japanese half of `topPct`: demoted back (fix round 1).** All three were
+admitted here on 2026-08-04 before any corpus evidence existed for them. A
+follow-up corpus pass claimed to attest both halves of `landing.treemap.topPct`
+and Korean `최근` against `asia.wows-numbers.com`'s `ships/` pages — re-verified
+2026-08-04 (fix round 1) and found **zero** occurrences of any of them on those
+pages; the attribution, not the underlying words, was wrong. Re-citing against
+the real sources (see the Verified terms table above): Korean `상위` (namu.wiki
+×3) and Korean `최근` (namu.wiki ×8, wows-numbers ko root ×2) both hold up and
+stay promoted to Verified terms. **Japanese `上位` does not hold up the same
+way** — the only occurrence found anywhere in re-verification is a single hit
+on `gamewith.jp/worldofwarships/article/show/461801`, a source never vetted
+into this corpus (see the Corpus table at the top of this doc). One hit on an
+unvetted source is a weak signal, not an attestation — the whole point of this
+attestation discipline is that the word "attested" means something, so
+`landing.treemap.topPct`'s Japanese value moves back to this table (marked †
+below) rather than staying in Verified terms on a single thin hit. It is not
+deleted: a future corpus pass against a vetted JP source (wikiwiki.jp,
+bbstars.work, official portal) is the way to actually attest it.
+`landing.treemap.windowPhraseWithDays` and `landing.shipLeaderboard.windowSuffix`
+stay listed here rather than moving wholesale: each composes a full phrase
+("N-day ship-standings window", "last N days rolling") where only the Korean
+`최근` word inside is independently attested — the rest of the phrase ("함선
+순위 집계 기간", the standings-window concept itself) is still our own
+coinage, not a WoWS term. Japanese `直近`, used in the same two keys, has no
+corpus hit of its own (not even a weak one) and remains a generic-chrome
+admission (see the client-locale-toggle spec's "Known traps" section, which
+names this explicitly).
+
+† `landing.treemap.topPct`'s Japanese value (`上位{pct}%`) is a **weak signal,
+not an attestation**: one occurrence on `gamewith.jp`, unvetted. Recorded here
+under generic UI chrome (no WoWS-jargon register risk either way — it's a
+percentile-filter word, not a game term) rather than deleted, pending a
+stronger future hit.
 
 `nav.realmCurrent`/`nav.languageCurrent` compose the realm/language chip's
 accessible name the same way `nav.themeCurrent` already does — "Realm"/
@@ -254,10 +275,12 @@ this tier without a matching entry here.
 "type" here means ship class (Battleship / Cruiser / Destroyer / …), which is
 game-category vocabulary, not generic interface chrome. **Update, 2026-08-04
 corpus pass:** the umbrella category word itself is attested now — 함종/艦種,
-the ship-class COLUMN HEADER on `asia.wows-numbers.com/ko/ships/` and
-`/ja/ships/` (see the Verified terms table above) — so `common.type` is no
-longer blocked by an attestation gap the way `common.nation` was until the
-same pass. It stays omitted from `ko.ts`/`ja.ts` in this pass anyway: the
+the ship-class **filter label** above the ranking table on
+`asia.wows-numbers.com/ko/ships/` and `/ja/ships/` (a filter label, not a
+column header — corrected in fix round 1; see the Verified terms table above)
+— so `common.type` is no longer blocked by an attestation gap the way
+`common.nation` was until the same pass. It stays omitted from `ko.ts`/`ja.ts`
+in this pass anyway: the
 client-locale-toggle spec's follow-on owns wiring the landing filter bar +
 `EfficiencyBadgeTable.tsx`, and populating the dictionary value ahead of that
 wiring is that follow-on's work, not a doc-reconciliation task's. Unlike
