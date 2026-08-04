@@ -67,12 +67,21 @@ export const LocaleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
 };
 
+// LIVE locale, resolved synchronously — identical on the server's first paint
+// only when the visitor happens to be English; otherwise it already reflects
+// the stored/URL locale on the client's very first render. Correct for LOGIC
+// and DATA decisions (nothing about those has an SSR counterpart to mismatch),
+// but do NOT render this value as TEXT into anything the server prerenders —
+// that reintroduces the exact hydration mismatch useDisplayLocale (and useT
+// below) exist to avoid. If a future edit finds itself reaching for `locale`
+// here to render a string, it almost certainly wants useDisplayLocale/useT.
 export const useLocale = (): LocaleContextValue => useContext(LocaleContext);
 
 // Locale for TEXT rendered in the statically-prerendered shell (the header).
 // The live locale comes from localStorage, which the server cannot know, so
 // rendering it directly would mismatch the SSG 'en' default. Returns 'en' until
-// mounted, then the real locale. Same split as useDisplayRealm.
+// mounted, then the real locale. Same split as useDisplayRealm. useT() below
+// shares this exact gate — do not give it its own separate mount flag.
 export const useDisplayLocale = (): Locale => {
     const { locale } = useLocale();
     const [mounted, setMounted] = useState(false);
@@ -80,10 +89,19 @@ export const useDisplayLocale = (): Locale => {
     return mounted ? locale : 'en';
 };
 
+// Translator for RENDERED TEXT. Deliberately built on useDisplayLocale, not
+// useLocale: the server always prerenders 'en' (no window at that point), so
+// a ko/ja visitor's first client render must also read English or the DOM
+// disagrees with the server HTML — mounted flips a tick later and the real
+// translation takes over. This was a real (if currently invisible) hydration
+// bug: it was masked only because ko.ts/ja.ts are still empty partials, so
+// translate() fell back to English regardless of which locale it was given.
+// It will surface the moment those dictionaries are populated, so do not
+// "simplify" this back to reading useLocale() directly.
 export const useT = () => {
-    const { locale } = useLocale();
+    const displayLocale = useDisplayLocale();
     return useCallback(
-        (key: StringKey, vars?: Record<string, string | number>) => translate(locale, key, vars),
-        [locale],
+        (key: StringKey, vars?: Record<string, string | number>) => translate(displayLocale, key, vars),
+        [displayLocale],
     );
 };
