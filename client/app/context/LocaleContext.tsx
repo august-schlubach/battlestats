@@ -93,10 +93,8 @@ export const useDisplayLocale = (): Locale => {
 // useLocale: the server always prerenders 'en' (no window at that point), so
 // a ko/ja visitor's first client render must also read English or the DOM
 // disagrees with the server HTML — mounted flips a tick later and the real
-// translation takes over. This was a real (if currently invisible) hydration
-// bug: it was masked only because ko.ts/ja.ts are still empty partials, so
-// translate() fell back to English regardless of which locale it was given.
-// It will surface the moment those dictionaries are populated, so do not
+// translation takes over. ko.ts/ja.ts are now populated dictionaries, so this
+// is a live, user-visible hydration guard, not a latent one — do not
 // "simplify" this back to reading useLocale() directly.
 export const useT = () => {
     const displayLocale = useDisplayLocale();

@@ -9,10 +9,25 @@ jest.mock('../../lib/umami', () => ({ trackEvent: (...args: unknown[]) => trackE
 const renderSelector = () => render(<LocaleProvider><LocaleSelector /></LocaleProvider>);
 
 describe('LocaleSelector', () => {
+    // process.env is shared across every test file in a Jest worker, so a
+    // mutation here without an undo leaks into whichever suite runs next in
+    // this worker. Save the incoming value and restore it after each test
+    // rather than only ever forcing '1'/'0'.
+    let originalFlag: string | undefined;
+
     beforeEach(() => {
         localStorage.clear();
         trackEvent.mockClear();
+        originalFlag = process.env.NEXT_PUBLIC_LOCALE_SELECTOR;
         process.env.NEXT_PUBLIC_LOCALE_SELECTOR = '1';
+    });
+
+    afterEach(() => {
+        if (originalFlag === undefined) {
+            delete process.env.NEXT_PUBLIC_LOCALE_SELECTOR;
+        } else {
+            process.env.NEXT_PUBLIC_LOCALE_SELECTOR = originalFlag;
+        }
     });
 
     it('renders nothing when the flag is off', () => {

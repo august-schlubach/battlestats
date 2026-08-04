@@ -4,16 +4,21 @@ import { render, screen, act } from '@testing-library/react';
 // Wraps the real `translate` in a jest.fn so call arguments (which locale it
 // was resolved against) are inspectable, while every other test in this file
 // still gets the real, correct translation — it calls straight through.
-// Needed because ko.ts/ja.ts are still empty partials: real output is
-// identical for 'en' and 'ko' today, so the hydration-safety tests below
-// can't tell the two apart by RENDERED TEXT alone and must inspect what
-// locale useT() actually asked translate() to resolve.
+// The hydration-safety test below is about the STAGED RESOLUTION mechanism
+// (English on the first render, the real locale after mount) rather than any
+// particular key's translation state, so it inspects what locale useT()
+// actually asked translate() to resolve instead of relying on rendered TEXT —
+// that stays true regardless of whether ko.ts/ja.ts translate the Probe's
+// probed key (insights.tabs.activity, which they now do).
 jest.mock('../../i18n', () => {
     const actual = jest.requireActual('../../i18n');
     return { ...actual, translate: jest.fn(actual.translate) };
 });
 
 import { translate } from '../../i18n';
+import { en } from '../../i18n/en';
+import { ko } from '../../i18n/ko';
+import type { StringKey } from '../../i18n/keys';
 import { LocaleProvider, useLocale, useDisplayLocale, useT } from '../LocaleContext';
 
 const translateMock = translate as jest.Mock;
@@ -92,10 +97,24 @@ describe('LocaleContext', () => {
         expect(document.documentElement.dataset.lang).toBe('ko');
     });
 
+    // Key-agnostic by design, same reasoning as dictionaries.test.ts: ko.ts is
+    // an actively-populated Partial now, so pinning one specific StringKey as
+    // "the untranslated one" would make this test brittle against the next
+    // translation round. Find whichever key ko currently lacks and probe that
+    // one directly (not the shared Probe component above, which is fixed on
+    // insights.tabs.activity — translated in ko today, so it can't stand in
+    // for "untranslated" here).
     it('t() returns English for an untranslated key', () => {
         localStorage.setItem('bs-locale', 'ko');
-        renderProbe();
-        expect(screen.getByTestId('tab')).toHaveTextContent('Activity');
+        const enKeys = Object.keys(en) as StringKey[];
+        const missingKey = enKeys.find((k) => !(k in ko)) as StringKey | undefined;
+        expect(missingKey).toBeDefined();
+        const UntranslatedProbe: React.FC = () => {
+            const t = useT();
+            return <span data-testid="untranslated">{t(missingKey as StringKey)}</span>;
+        };
+        render(<LocaleProvider><UntranslatedProbe /></LocaleProvider>);
+        expect(screen.getByTestId('untranslated')).toHaveTextContent(en[missingKey as StringKey]);
     });
 
     // The server always prerenders 'en' (no window at that point). If useT()
@@ -104,10 +123,11 @@ describe('LocaleContext', () => {
     // English server HTML — a real hydration mismatch. useT() must gate on
     // the same mounted flag useDisplayLocale() exposes, so the first render
     // still resolves 'en' and only the post-mount render resolves the real
-    // locale. ko.ts is still an empty partial, so this can't be observed via
-    // rendered TEXT (translate() falls back to English regardless of which
-    // locale it's given) — it has to be asserted on what locale useT() asked
-    // translate() to resolve, across the two render passes.
+    // locale. This is asserted on what locale useT() asked translate() to
+    // resolve, across the two render passes, rather than on rendered TEXT —
+    // that holds regardless of whether the Probe's probed key happens to be
+    // translated in ko (see the mock-rationale comment at the top of this
+    // file).
     it('useT resolves English on the first render even when a non-English locale is stored, then the real locale after mount', () => {
         localStorage.setItem('bs-locale', 'ko');
         renderProbe();
@@ -126,6 +146,12 @@ describe('LocaleContext', () => {
         const DisplayProbe: React.FC = () => {
             const displayLocale = useDisplayLocale();
             if (firstRender === undefined) {
+                // NOT dead: `react-hooks/globals` (eslint-plugin-react-hooks
+                // 7.0.1) is a real, active rule here — it flags reassigning
+                // this outer-scope variable during render as an impure side
+                // effect. Verified empirically (2026-08-04 fix round):
+                // removing this line produces a genuine lint error, so the
+                // suppression is load-bearing, not inert.
                 // eslint-disable-next-line react-hooks/globals
                 firstRender = displayLocale;
             }

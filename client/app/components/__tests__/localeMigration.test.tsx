@@ -1,8 +1,13 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { LocaleProvider } from '../../context/LocaleContext';
-import { translate } from '../../i18n';
 import NotFound from '../../not-found';
+
+// Note: the former "composes the treemap heading identically" case (a
+// translate()-layer assertion against a literal) was removed here — it was a
+// dictionary-value assertion, redundant with the mutation-verified
+// component-level coverage in RealmTopShipsTreemapSVG.test.tsx (exact
+// `.textContent` checks on the rendered heading, not just `.toContain`).
 
 describe('migrated call sites', () => {
     beforeEach(() => localStorage.clear());
@@ -13,31 +18,21 @@ describe('migrated call sites', () => {
         expect(screen.getByText('The requested page could not be found.')).toBeInTheDocument();
     });
 
-    it('falls back to English for an untranslated locale', () => {
+    // notFound.* is translated in both locales now (fix round closing the
+    // insight-tab-strip alternating-language defect); a regex disjunction
+    // like /Page Not Found|페이지/ can't meaningfully fail (either branch
+    // satisfies it), so each locale gets its own exact assertion instead.
+    it('renders the Korean copy when ko is selected', () => {
         localStorage.setItem('bs-locale', 'ko');
         render(<LocaleProvider><NotFound /></LocaleProvider>);
-        // Task 7 may translate these; if so, update this assertion to the
-        // Korean string rather than deleting the test.
-        expect(screen.getByText(/Page Not Found|페이지/)).toBeInTheDocument();
+        expect(screen.getByText('페이지를 찾을 수 없습니다')).toBeInTheDocument();
+        expect(screen.getByText('요청하신 페이지를 찾을 수 없습니다.')).toBeInTheDocument();
     });
 
-    // RealmTopShipsTreemapSVG.tsx replaced a direct string concatenation with
-    // this template (Task 6). Nothing renders it with every fragment (realm +
-    // bucket + wrPct + windowLabel) populated at once, so this locks the
-    // composed byte sequence down at the translate() layer instead of relying
-    // on the component test's `.toContain` checks.
-    it('composes the treemap heading identically to the old concatenation', () => {
-        expect(translate('en', 'landing.treemap.heading', {
-            realm: 'NA',
-            bucket: 'T10 Cruisers',
-            suffix: ' · top 50% · last 45 days',
-        })).toBe('NA most-played T10 Cruisers · top 50% · last 45 days');
-
-        // bucketLabel absent → the old ' ships' branch, no wrPct/windowLabel.
-        expect(translate('en', 'landing.treemap.heading', {
-            realm: 'EU',
-            bucket: 'ships',
-            suffix: '',
-        })).toBe('EU most-played ships');
+    it('renders the Japanese copy when ja is selected', () => {
+        localStorage.setItem('bs-locale', 'ja');
+        render(<LocaleProvider><NotFound /></LocaleProvider>);
+        expect(screen.getByText('ページが見つかりません')).toBeInTheDocument();
+        expect(screen.getByText('お探しのページは見つかりませんでした。')).toBeInTheDocument();
     });
 });
