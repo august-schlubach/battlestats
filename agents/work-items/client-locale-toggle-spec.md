@@ -57,8 +57,7 @@ than ship a guess.
 ## Scope
 
 **In:** header/footer chrome, section headings (33 `SectionHeadingWithTooltip` /
-`<h1>`–`<h4>` sites), the six insight-tab labels, and button/filter labels.
-Roughly 80–110 strings.
+`<h1>`–`<h4>` sites), and the six insight-tab labels. Roughly 80–110 strings.
 
 **Out, deliberately:**
 
@@ -73,6 +72,52 @@ Roughly 80–110 strings.
 - **Numbers and dates.** No locale-aware formatting.
 - **Auto-detection.** `navigator.language` is never consulted.
 - **SEO.** See *Non-goal: search traffic*.
+
+### Corrected against what actually shipped: button/filter labels are NOT in scope
+
+An earlier draft of this Scope section listed "button/filter labels" as in
+scope alongside the tab labels. That never happened, and shipping it partially
+now would recreate the exact defect this fix round otherwise closes (an
+alternating-language surface) — one review pass caught the tab strip doing
+this; the filter bar and the Efficiency table are the next place it would
+happen, so the honest move is to name the follow-on rather than half-wire it.
+
+Two concrete surfaces remain fully hardcoded English:
+
+- The landing ship-leaderboard filter bar (`ShipLeaderboard.tsx`, the Tier /
+  Type / `WR ≥` pill-group labels).
+- `EfficiencyBadgeTable.tsx`'s filter row (`Tier` / `Type` / `Nation` / `Award`
+  labels plus four `<option value="all">All</option>` dropdown entries).
+
+**The scaffolding is already in place.** `common.tier`, `common.type`,
+`common.all`, `common.battles`, `common.avgDamage`, `common.winRate`,
+`common.ship`, `common.player`, and `common.season` are populated in `en.ts`/
+`ko.ts`/`ja.ts` today with no call site — a fix round this pass confirmed no
+component references them and deliberately kept them anyway (as opposed to
+`common.clear`/`common.close`/`common.clan`, which had neither a call site nor
+a named owner and were deleted outright). Wiring the filter bar and the
+Efficiency table is that named owner.
+
+**What blocks wiring it now — the attestation gap.** Three of the labels on
+those two surfaces are game-category vocabulary the research corpus does not
+attest, not generic UI chrome:
+
+- **`Nation`** (ship nationality — expected 国家/국가, "not verified in this
+  corpus" per the research doc).
+- **`Award`** (badge-tier name — our own product taxonomy, no in-game source).
+- **`Type`**, the umbrella category word for ship class (Battleship / Cruiser
+  / Destroyer / …). The individual class nouns are attested (전함/戦艦,
+  순양함/巡洋艦, …) but the umbrella word itself is not — this is why
+  `common.type` sits in `ko.ts`/`ja.ts`'s absolute-tier omission list rather
+  than the generic-chrome admission table, even though `Tier`/`All`/`WR ≥` on
+  the same filter bar could ship today under the two-tier standard.
+
+**Follow-on:** run a corpus pass on `Nation`/`Award`/umbrella-`Type`, wire the
+already-populated `common.*` keys into `ShipLeaderboard.tsx`'s filter bar and
+`EfficiencyBadgeTable.tsx`, and add `common.nation`/`common.award` once
+attested (or admitted under the generic-chrome tier, if a reviewer judges them
+as carrying no game-specific register risk — unlikely for `Nation`/`Award`
+given they name real game taxonomy, more plausible for the umbrella `Type`).
 
 ### Accepted inconsistency
 
@@ -302,6 +347,57 @@ With the flag absent in prod this is user-visible nothing, so: **patch** bump no
 **minor** the day the selector is enabled. Either way the client must be rebuilt
 and deployed — `NEXT_PUBLIC_APP_VERSION` is baked at build time.
 
+## Known traps for the next translation pass
+
+Both moved here from the scratch planning ledger (`.superpowers/sdd/client-locale-toggle-plan/progress.md`,
+gitignored) at the final fix-round review — durable rulings a follow-on needs,
+not planning residue.
+
+### `common.winRate` is sentence case; four live sites render title case
+
+`en.ts` holds `'common.winRate': 'Win rate'` (sentence case) — correct for the
+table-column contexts that motivated it: `ShipLeaderboard`, `ShipRouteView`,
+`RealmTopShipsTreemapSVG`. Four other live sites render **title** case `'Win
+Rate'` instead: `PlayerDetail.tsx:321`, `RankedSeasonScatterSVG.tsx:158`,
+`ClanBattleSeasonScatterSVG.tsx:132`, `Clan3DSVG.tsx:90`. Wiring those four to
+`common.winRate` as-is would silently change their rendered text (a real,
+visible regression, not a translation gap). `common.winRate` will be the first
+key any follow-on reaches for since it is fully populated in all three
+dictionaries with the most obvious call sites — resolve the casing question
+(new title-case key vs. a per-site `.toUpperCase()`/CSS transform vs.
+reconciling the four sites to sentence case) before wiring any of the four.
+
+### The composed-template blocker is bounded to exactly three keys
+
+Three `en.ts` values contain `{}` tokens whose interpolated clause is built as
+an **English literal inside the component**, never passed through `t()`:
+
+- `landing.shipLeaderboard.heading` — `{suffix}` is ` · last N days rolling`,
+  built in `ShipLeaderboard.tsx`. (This fix round made the key drive the
+  visible heading text as well as the aria-label — they used to diverge — but
+  did not touch the suffix clause itself, so the blocker stands.)
+- `landing.treemap.heading` — `{bucket}`/`{suffix}` carry ship-bucket labels,
+  WR-percentile clauses, and window phrases built in
+  `RealmTopShipsTreemapSVG.tsx`.
+- `landing.treemap.ariaLabel` — same component, same English-literal clauses
+  (`{bucket}`, `{windowPhrase}`, `{view}`).
+
+Translating any of these three keys alone would ship a mixed-language string
+(e.g. `함선 리더보드 · last 45 days rolling`). One refactor — give each
+interpolated clause its own key, resolved through `t()` in the component
+before being passed as a template var — unblocks all three at once; it is not
+three separate problems.
+
+**`{}` alone is not the signal — `nav.themeCurrent` has one and is NOT
+blocked.** `'nav.themeCurrent': 'Theme: {label}'` also interpolates, but
+`{label}` is filled from `nav.themeLight`/`nav.themeDark`, which are
+themselves translated dictionary values, not component-side English literals —
+that is the whole reason `nav.themeCurrent` composes the *whole* accessible
+name as one template (see `app/i18n/en.ts`'s comment on that key). The actual
+rule: a key is blocked when its interpolated clause is assembled as an English
+literal in the component; it is not blocked merely because it contains a
+token.
+
 ## Follow-ons (not in this work item)
 
 1. Native check on the `NEEDS-NATIVE-CHECK` residue; flip
@@ -310,3 +406,8 @@ and deployed — `NEXT_PUBLIC_APP_VERSION` is baked at build time.
 3. Localize info-tooltip descriptions.
 4. If KR/JP engagement moves: localized route segments, `hreflang`, per-locale
    `generateMetadata`, sitemap × locales, and a CJK font for OG cards.
+5. Wire the landing filter bar and `EfficiencyBadgeTable.tsx` to the
+   already-populated `common.*` keys, once `Nation`/`Award`/umbrella-`Type` are
+   attested (see *Corrected against what actually shipped* under Scope).
+   Resolve the `common.winRate` casing trap and the composed-template blocker
+   above before or during this pass — both sit directly in its path.
