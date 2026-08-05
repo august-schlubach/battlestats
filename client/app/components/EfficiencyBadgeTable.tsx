@@ -3,6 +3,7 @@ import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } fro
 import wrColor from '../lib/wrColor';
 import { trackEvent } from '../lib/umami';
 import { useRealm } from '../context/RealmContext';
+import { useT } from '../context/LocaleContext';
 import { nationLabel } from '../lib/shipIdentity';
 import EfficiencyMiniTreemaps from './EfficiencyMiniTreemaps';
 import NationFlag from './NationFlag';
@@ -63,15 +64,35 @@ const typeRank = (type: string): number => {
     return index === -1 ? SHIP_TYPE_ORDER.length : index;
 };
 
-const COLUMNS: Array<{ key: SortKey; label: string; align: 'left' | 'center' }> = [
-    { key: 'name', label: 'Name', align: 'left' },
-    { key: 'tier', label: 'Tier', align: 'center' },
-    { key: 'nation', label: 'Nation', align: 'center' },
-    { key: 'type', label: 'Type', align: 'center' },
-    { key: 'award', label: 'Award', align: 'center' },
-    { key: 'battles', label: 'Battles', align: 'center' },
-    { key: 'wr', label: 'WR%', align: 'center' },
+const COLUMNS: Array<{ key: SortKey; align: 'left' | 'center' }> = [
+    { key: 'name', align: 'left' },
+    { key: 'tier', align: 'center' },
+    { key: 'nation', align: 'center' },
+    { key: 'type', align: 'center' },
+    { key: 'award', align: 'center' },
+    { key: 'battles', align: 'center' },
+    { key: 'wr', align: 'center' },
 ];
+
+// Column header text. Tier/Nation/Type/Award reuse the SAME common.* keys as
+// the filter bar directly above this table and the mini-treemap titles beside
+// it (fix round 1, F1) — a translated filter label sitting one row above an
+// English column header repeating the same word reads as broken, not scoped.
+// Name/Battles/WR% carry no dictionary key (out of this task's scope, no
+// corpus/generic-chrome case made for them) and stay literal English.
+const columnLabel = (key: SortKey, t: ReturnType<typeof useT>): string => {
+    switch (key) {
+        case 'tier': return t('common.tier');
+        case 'type': return t('common.type');
+        case 'nation': return t('common.nation');
+        case 'award': return t('common.award');
+        case 'battles': return 'Battles';
+        case 'wr': return 'WR%';
+        case 'name':
+        default:
+            return 'Name';
+    }
+};
 
 // Each column's natural first direction: names/types read best A→Z, tier/award
 // best-first (highest tier, Expert grade), battles/WR biggest-first.
@@ -135,6 +156,7 @@ const compareRows = (a: EfficiencyBadgeDot, b: EfficiencyBadgeDot, key: SortKey,
 const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme, maxTableHeightPx }) => {
     const colors = chartColors[theme];
     const { realm } = useRealm();
+    const t = useT();
     const [sortKey, setSortKey] = useState<SortKey>('award');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     // 'all' = no filter on that facet.
@@ -261,52 +283,57 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
         <div className="mt-8 overflow-x-auto px-[15px]">
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Tier</span>
+                    {/* whitespace-nowrap: CJK has no spaces, so a short label can
+                        break mid-character once the flex row squeezes it below
+                        its content width (the ThemeToggle chip hit this first —
+                        see its comment). 티어/艦種/... are one- or two-character
+                        tokens that should never wrap in any language. */}
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.tier')}</span>
                     <select
                         value={filterTier}
                         onChange={(event) => applyFilter('tier', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {tierOptions.map((tier) => (
                             <option key={tier} value={String(tier)}>T{tier}</option>
                         ))}
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Type</span>
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.type')}</span>
                     <select
                         value={filterType}
                         onChange={(event) => applyFilter('type', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {typeOptions.map((type) => (
                             <option key={type} value={type}>{type}</option>
                         ))}
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Nation</span>
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.nation')}</span>
                     <select
                         value={filterNation}
                         onChange={(event) => applyFilter('nation', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {nationOptions.map((option) => (
                             <option key={option.code} value={option.code}>{option.label}</option>
                         ))}
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Award</span>
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.award')}</span>
                     <select
                         value={filterAward}
                         onChange={(event) => applyFilter('award', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {awardOptions.map((badgeClass) => (
                             <option key={badgeClass} value={String(badgeClass)}>
                                 {GRADES.find((grade) => grade.badgeClass === badgeClass)?.label ?? `Class ${badgeClass}`}
@@ -320,7 +347,7 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                     disabled={!hasActiveFilter}
                     className="rounded border border-[var(--border)] px-2.5 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-default disabled:opacity-40 disabled:hover:text-[var(--text-secondary)]"
                 >
-                    Clear
+                    {t('common.clear')}
                 </button>
             </div>
             {/* Small-multiples treemaps of the (filtered) badge set by tier,
@@ -366,9 +393,18 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
                                     <button
                                         type="button"
                                         onClick={() => onSort(column.key)}
-                                        className={`inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-[var(--text-primary)] ${active ? 'text-[var(--text-primary)]' : ''}`}
+                                        // whitespace-nowrap: caught live in fix round 1 —
+                                        // this table's narrow <th> cells squeeze at mobile
+                                        // width, and CJK has no spaces, so 티어/국가/함종
+                                        // were wrapping to one character per line
+                                        // ("티\n어") before this. Same CJK-wrap risk the
+                                        // filter-bar labels and ThemeToggle's chip already
+                                        // guard against; this call site was missed because
+                                        // the wrap only reproduces below the width jsdom
+                                        // renders at, not in any automated test.
+                                        className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wide transition-colors hover:text-[var(--text-primary)] ${active ? 'text-[var(--text-primary)]' : ''}`}
                                     >
-                                        {column.label}
+                                        {columnLabel(column.key, t)}
                                         <span aria-hidden="true" className="text-[0.65rem] leading-none">
                                             {active ? (sortDir === 'asc' ? '▲' : '▼') : ''}
                                         </span>

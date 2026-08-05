@@ -120,8 +120,26 @@ export const en: Record<StringKey, string> = {
     'shipClass.ships': 'ships',
 
     'common.all': 'All',
+    // Restored, fix round 1 (F3): deleted in an earlier fix round on the
+    // (mistaken) grounds that no call site referenced it and no follow-on
+    // claimed it — that was true of the code at the time, but not of the
+    // intent: EfficiencyBadgeTable.tsx's filter-row Clear button always had
+    // an owner, it just hadn't been wired yet. Generic UI chrome, same tier
+    // as common.all — see the research doc's admission table.
+    'common.clear': 'Clear',
     'common.tier': 'Tier',
     'common.type': 'Type',
+    // The ship-nationality filter's label — corpus-attested 国家/국가, same
+    // dual role (filter label + column header) as common.type — see
+    // agents/work-items/i18n-terminology-research.md's Verified terms table.
+    'common.nation': 'Nation',
+    // EfficiencyBadgeTable's badge-tier filter label — our own product
+    // taxonomy (Expert/I/II/III), not a WoWS term, so no corpus pass will
+    // ever attest it. Admitted under the generic-chrome tier (see the
+    // research doc's admission table) using 등급/等級 ("grade"), which is
+    // what the column's values actually are. NEEDS-NATIVE-CHECK in ko.ts/
+    // ja.ts: the weakest attestation in this change, flagged deliberately.
+    'common.award': 'Award',
     'common.battles': 'Battles',
     'common.avgDamage': 'Avg dmg',
     'common.winRate': 'Win rate',
