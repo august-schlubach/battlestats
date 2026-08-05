@@ -201,6 +201,17 @@ describe('RealmTopShipsTreemapSVG (presentational)', () => {
         expect(screen.getByRole('button', { name: 'Plot' })).toHaveAttribute('aria-pressed', 'false');
     });
 
+    it('pins the English section and chart-view-group aria-labels (landing.treemap.chartSectionLabel/chartViewGroup)', () => {
+        render(
+            <RealmTopShipsTreemapSVG ships={[ship({})]} tier={10} type="Cruiser" wrPct={null} />,
+        );
+        // Only Map/Plot were explicitly pinned before this test — these two
+        // keys' English renders were asserted implicitly at best, so a future
+        // en.ts edit to either could drift silently. Fix round 1.
+        expect(screen.getByRole('region', { name: 'Realm ship chart' })).toBeInTheDocument();
+        expect(screen.getByRole('group', { name: 'Chart view' })).toBeInTheDocument();
+    });
+
     it('toggling to Plot swaps tiles for a battles-vs-WR scatter, plots the full bucket, and persists the choice', () => {
         const onSelect = jest.fn();
         const { container } = render(

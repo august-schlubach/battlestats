@@ -98,26 +98,46 @@ component references them and deliberately kept them anyway (as opposed to
 a named owner and were deleted outright). Wiring the filter bar and the
 Efficiency table is that named owner.
 
-**What blocks wiring it now — the attestation gap.** Three of the labels on
-those two surfaces are game-category vocabulary the research corpus does not
-attest, not generic UI chrome:
+**What blocks wiring it now — narrowed by the 2026-08-04 corpus pass.** Three
+labels on those two surfaces were originally flagged as game-category
+vocabulary the research corpus did not attest, not generic UI chrome. A
+follow-up corpus pass against `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`
+(a fully localized ship-ranking table header) resolved two of the three:
 
-- **`Nation`** (ship nationality — expected 国家/국가, "not verified in this
-  corpus" per the research doc).
-- **`Award`** (badge-tier name — our own product taxonomy, no in-game source).
-- **`Type`**, the umbrella category word for ship class (Battleship / Cruiser
-  / Destroyer / …). The individual class nouns are attested (전함/戦艦,
-  순양함/巡洋艦, …) but the umbrella word itself is not — this is why
-  `common.type` sits in `ko.ts`/`ja.ts`'s absolute-tier omission list rather
-  than the generic-chrome admission table, even though `Tier`/`All`/`WR ≥` on
-  the same filter bar could ship today under the two-tier standard.
+- ~~**`Nation`**~~ (ship nationality) — **now attested**: 国家/국가 label the
+  nationality **filter** above the ranking table on both locales' ship pages
+  (`**국가:** 전체 | …`, not a column header — corrected in fix round 1). See
+  the research doc's Verified terms table.
+- ~~**`Type`**~~, the umbrella category word for ship class — **now
+  attested**: 艦種/함종 label the class **filter** in the same row (`**함종:**
+  전체 | 구축함 항공모함 …`, again a filter label rather than a column header).
+  The individual class nouns were already attested (전함/戦艦, 순양함/巡洋艦, …);
+  this closes the umbrella-word gap that used to keep `common.type` out of the
+  generic-chrome admission table. Worth noting precisely because it strengthens
+  the case for wiring: our own filter bars use the umbrella word as a **filter
+  label** too, the exact same UI role as the corpus's, not merely an adjacent
+  one.
+- **`Award`** (badge-tier name — our own product taxonomy, no in-game source)
+  remains the one unresolved label. It names a classification this site
+  invented, not something WoWS or its community ranks ships/players by, so no
+  stats-site corpus pass will ever attest it — the eventual call is whether a
+  reviewer admits it under the generic-chrome tier (an "award" concept is
+  common everyday vocabulary, if a strained fit for a WoWS-specific badge
+  taxonomy) or leaves it English.
 
-**Follow-on:** run a corpus pass on `Nation`/`Award`/umbrella-`Type`, wire the
-already-populated `common.*` keys into `ShipLeaderboard.tsx`'s filter bar and
-`EfficiencyBadgeTable.tsx`, and add `common.nation`/`common.award` once
-attested (or admitted under the generic-chrome tier, if a reviewer judges them
-as carrying no game-specific register risk — unlikely for `Nation`/`Award`
-given they name real game taxonomy, more plausible for the umbrella `Type`).
+**A future pass is no longer blocked on `Nation`/`Type`.** What remains before
+wiring `ShipLeaderboard.tsx`'s filter bar and `EfficiencyBadgeTable.tsx`:
+
+1. Resolve `Award` (attest, admit under generic-chrome, or leave English) and
+   populate `common.nation`/a new `common.type` value in `ko.ts`/`ja.ts` —
+   `common.type` is already scaffolded as a `StringKey`, `common.nation` is
+   not yet added.
+2. Resolve the `common.winRate` casing trap below — it sits directly in this
+   follow-on's path, since `ShipLeaderboard.tsx` is one of the four live sites
+   with the casing conflict.
+3. Wire the filter bars themselves. **Still explicitly deferred**: this
+   corpus pass closes the vocabulary gap, it does not wire anything — the
+   filter bars stay hardcoded English until that follow-on runs.
 
 ### Accepted inconsistency
 
@@ -367,26 +387,76 @@ dictionaries with the most obvious call sites — resolve the casing question
 (new title-case key vs. a per-site `.toUpperCase()`/CSS transform vs.
 reconciling the four sites to sentence case) before wiring any of the four.
 
-### The composed-template blocker is bounded to exactly three keys
+### The composed-template blocker — RESOLVED (follow-on #1, 2026-08-04)
 
-Three `en.ts` values contain `{}` tokens whose interpolated clause is built as
-an **English literal inside the component**, never passed through `t()`:
+Three `en.ts` values used to contain `{}` tokens whose interpolated clause was
+built as an **English literal inside the component**, never passed through
+`t()`:
 
-- `landing.shipLeaderboard.heading` — `{suffix}` is ` · last N days rolling`,
-  built in `ShipLeaderboard.tsx`. (This fix round made the key drive the
+- `landing.shipLeaderboard.heading` — `{suffix}` was ` · last N days rolling`,
+  built in `ShipLeaderboard.tsx`. (A prior fix round made the key drive the
   visible heading text as well as the aria-label — they used to diverge — but
-  did not touch the suffix clause itself, so the blocker stands.)
-- `landing.treemap.heading` — `{bucket}`/`{suffix}` carry ship-bucket labels,
-  WR-percentile clauses, and window phrases built in
+  did not touch the suffix clause itself, so the blocker stood until now.)
+- `landing.treemap.heading` — `{bucket}`/`{suffix}` carried ship-bucket
+  labels, WR-percentile clauses, and window phrases built in
   `RealmTopShipsTreemapSVG.tsx`.
 - `landing.treemap.ariaLabel` — same component, same English-literal clauses
   (`{bucket}`, `{windowPhrase}`, `{view}`).
 
-Translating any of these three keys alone would ship a mixed-language string
-(e.g. `함선 리더보드 · last 45 days rolling`). One refactor — give each
-interpolated clause its own key, resolved through `t()` in the component
-before being passed as a template var — unblocks all three at once; it is not
-three separate problems.
+Translating any of these three keys alone would have shipped a mixed-language
+string (e.g. `함선 리더보드 · last 45 days rolling`). The fix was one refactor
+across both components: give every interpolated clause its own dictionary
+key, resolved through `t()` **in the component** before being handed to the
+outer template as a var, so the outer template only ever composes already-
+translated fragments — never an opaque English one.
+
+**New keys, each resolved at its own call site:**
+
+- `shipClass.destroyers`/`cruisers`/`battleships`/`aircraftCarriers`/
+  `submarines`/`ships` — the treemap heading's bucket label
+  (`T{tier} {class}`); reusable vocabulary (not treemap-specific), so it lives
+  in its own top-level `shipClass.*` namespace rather than under `landing.*`.
+  `RealmTopShipsTreemapSVG.tsx`'s `pluralTypeLabel` now takes `t` as a
+  parameter (a plain function call, not a hook — `useT()` stays a single
+  top-level call in the component) and looks up the class's key instead of
+  pluralizing an English label string.
+- `landing.treemap.topPct` (`top {pct}%`) — the WR-percentile clause in the
+  heading's `{suffix}`.
+- `landing.treemap.windowPhraseWithDays` / `windowPhraseNoDays` — the
+  `{windowPhrase}` clause in the aria-label, with/without a known window
+  length.
+- `landing.treemap.viewTreemap` / `viewScatterplot` — the `{view}` clause in
+  the aria-label.
+- `landing.shipLeaderboard.windowSuffix` (`last {days} days rolling`) — the
+  clause inside `ShipLeaderboard.tsx`'s heading `{suffix}`.
+
+`landing.treemap.heading`, `landing.treemap.ariaLabel`, and
+`landing.shipLeaderboard.heading` themselves now ship translated in `ko`/`ja`
+— the word-order concern that had blocked them (a template with several
+moving parts) resolved to "keep the same relative order as English, add a
+locative connective" (`{realm} 서버에서 …`/`{realm}サーバーで…`, "at the
+{realm} server") rather than reordering, since the English sentence shape
+reads naturally in both target languages once every clause is itself
+translated. Terminology + the full admission reasoning (which keys reuse
+already-attested nouns vs. are new generic-chrome admissions):
+`agents/work-items/i18n-terminology-research.md`.
+
+**Deliberately preserved, not touched by this fix:** the info-tooltip
+paragraph in `RealmTopShipsTreemapSVG.tsx` that also names the standings
+window (info-tooltip descriptions are out of scope for localization per this
+spec's Scope section) keeps its own English-literal copy of the window phrase
+(`windowPhraseTooltip`) rather than sharing the now-translated `windowPhrase`
+variable — sharing it would have leaked a translated fragment into an
+otherwise fully-English paragraph the moment ko/ja is active, a regression to
+an area this work item does not claim.
+
+**Test coverage:** `RealmTopShipsTreemapSVGLocale.test.tsx` and
+`ShipLeaderboardLocale.test.tsx` render under real `ko`/`ja` dictionaries
+(no `translate()` mock) and assert the whole composed heading/aria-label is in
+the target language — no surviving English clause word, no literal `{token}`
+— covering both branches of every conditional clause (bucket present/absent,
+every ship class, WR-percentile present/absent, window-days known/unknown,
+map/plot view).
 
 **`{}` alone is not the signal — `nav.themeCurrent` has one and is NOT
 blocked.** `'nav.themeCurrent': 'Theme: {label}'` also interpolates, but
@@ -398,6 +468,24 @@ rule: a key is blocked when its interpolated clause is assembled as an English
 literal in the component; it is not blocked merely because it contains a
 token.
 
+### The language chip's aria-label is the one non-byte-identical English change (header-menu coverage pass, 2026-08-04)
+
+Every other key wired in the header-menu coverage pass (`nav.realmCurrent`,
+`landing.treemap.chartSectionLabel`/`chartViewGroup`/`toggleMap`/`togglePlot`)
+carries an English value lifted verbatim from the literal it replaced, so the
+English render is byte-identical to before. `nav.languageCurrent` is the one
+exception, by design: `LocaleSelector.tsx`'s collapsed chip used to carry the
+static `aria-label={t('nav.language')}` ("Language", regardless of which
+locale was active); it now composes `"Language: {language}"` the same way the
+realm chip already announces its current value ("Realm: NA"). In English that
+renders `"Language: English"` — new text, not a re-rendering of old text. This
+is exactly the asymmetry the task asked to close (the realm chip announced its
+value, the language chip didn't), so it's correct, not drift. Recorded here so
+a future byte-identity audit of this codebase doesn't read the diff as an
+unexplained regression: it is an `aria-label` only, no visible on-page text
+changed, and no test pinned the old value (confirmed via `grep` before
+changing it).
+
 ## Follow-ons (not in this work item)
 
 1. Native check on the `NEEDS-NATIVE-CHECK` residue; flip
@@ -407,7 +495,13 @@ token.
 4. If KR/JP engagement moves: localized route segments, `hreflang`, per-locale
    `generateMetadata`, sitemap × locales, and a CJK font for OG cards.
 5. Wire the landing filter bar and `EfficiencyBadgeTable.tsx` to the
-   already-populated `common.*` keys, once `Nation`/`Award`/umbrella-`Type` are
-   attested (see *Corrected against what actually shipped* under Scope).
-   Resolve the `common.winRate` casing trap and the composed-template blocker
-   above before or during this pass — both sit directly in its path.
+   already-populated `common.*` keys (see *Corrected against what actually
+   shipped* under Scope). A 2026-08-04 corpus pass attested `Nation` and the
+   umbrella `Type` (国家/국가, 艦種/함종 — see the research doc's Verified
+   terms table), so the blocker list has shrunk to just `Award` (our own
+   badge taxonomy, still no in-game source) plus the `common.winRate` casing
+   trap immediately below, which still sits directly in this follow-on's
+   path. (The composed-template blocker that used to sit alongside it was
+   resolved 2026-08-04 — see above — and no longer blocks this follow-on
+   either.) Wiring itself remains deferred — this pass closed the vocabulary
+   gap, not the surfaces.

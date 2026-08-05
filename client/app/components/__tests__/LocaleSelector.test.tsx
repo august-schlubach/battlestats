@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen, act, fireEvent } from '@testing-library/react';
 import { LocaleProvider } from '../../context/LocaleContext';
 import LocaleSelector from '../LocaleSelector';
 
@@ -39,6 +39,26 @@ describe('LocaleSelector', () => {
     it('shows the current locale flag on the collapsed chip', () => {
         const { container } = renderSelector();
         expect(container.querySelector('img')).toHaveAttribute('src', '/flags/uk.svg');
+    });
+
+    it('announces the current NATIVE language name on the collapsed chip (nav.languageCurrent)', () => {
+        renderSelector();
+        // Default locale is English — the chip's accessible name must name the
+        // current option, closing the gap where the realm chip announced its
+        // value ("Realm: NA") and the language chip previously only said the
+        // static "Language" regardless of which locale was active.
+        expect(screen.getByRole('button', { name: 'Language: English' })).toBeInTheDocument();
+    });
+
+    it('announces the current native language name in Korean and Japanese, not English', () => {
+        localStorage.setItem('bs-locale', 'ko');
+        const { unmount } = renderSelector();
+        expect(screen.getByRole('button', { name: '언어: 한국어' })).toBeInTheDocument();
+        unmount();
+
+        localStorage.setItem('bs-locale', 'ja');
+        renderSelector();
+        expect(screen.getByRole('button', { name: '言語: 日本語' })).toBeInTheDocument();
     });
 
     it('opens to three options with native names', () => {
@@ -90,5 +110,38 @@ describe('LocaleSelector', () => {
             screen.getByRole('listbox').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
         });
         expect(screen.queryByRole('listbox')).toBeInTheDocument();
+    });
+
+    it('highlights an inactive option row on hover, matching RealmSelector/ThemeToggle, and reverts on mouse-leave', () => {
+        renderSelector();
+        act(() => { screen.getByRole('button').click(); });
+
+        // English is the active row (isActive), so exercise an INACTIVE one —
+        // the hover swap only applies when !isActive, same exemption the other
+        // two selectors carry. Read `.style.backgroundColor` directly rather
+        // than jest-dom's `toHaveStyle`: jsdom's CSS parser normalizes the
+        // `transparent` keyword through its color model, which makes
+        // `toHaveStyle({ backgroundColor: 'transparent' })` report a false
+        // mismatch even though the inline style attribute is exactly right.
+        const koreanOption = screen.getByRole('option', { name: /한국어/ });
+        expect(koreanOption.style.backgroundColor).toBe('transparent');
+
+        act(() => { fireEvent.mouseEnter(koreanOption); });
+        expect(koreanOption.style.backgroundColor).toBe('var(--bg-hover)');
+
+        act(() => { fireEvent.mouseLeave(koreanOption); });
+        expect(koreanOption.style.backgroundColor).toBe('transparent');
+    });
+
+    it('does not swap the ACTIVE row background on hover (matches RealmSelector/ThemeToggle\'s exemption)', () => {
+        renderSelector();
+        act(() => { screen.getByRole('button').click(); });
+
+        const englishOption = screen.getByRole('option', { name: /English/ });
+        act(() => { fireEvent.mouseEnter(englishOption); });
+        // isActive rows keep the accent background rather than picking up the
+        // hover color — RealmSelector/ThemeToggle both gate the mouseEnter swap
+        // on `!isActive`.
+        expect(englishOption.style.backgroundColor).toBe('var(--accent-faint)');
     });
 });

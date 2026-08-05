@@ -45,7 +45,7 @@ Counts are occurrences in the corpus above.
 | Destroyer | 駆逐艦 | 구축함 | JP blog ×5; namu ×59. |
 | Aircraft carrier | 空母 | 항공모함 | namu ×47. Community shortens to `항모` in speech. |
 | Submarine | 潜水艦 | 잠수함 | namu ×48. |
-| Tier | Tier | 티어 | JA writes Latin: `Tier10`, `T9`. KO loanword dominates: namu ×21, arca `8티어`. `등급` — zero hits. |
+| Tier | Tier | 티어 | JA writes Latin: `Tier10`, `T9`. KO loanword dominates: namu ×21, arca `8티어`. `등급` — zero hits. `단계` is a second attested-but-not-chosen KO alternative — see the Resolved forks table below; the `티어` ruling stands. |
 | Player | プレイヤー | 플레이어 | wows-numbers nav (KO). JA nav leaves "Player" in Latin. |
 | Clan | クラン | 클랜 | Universal. |
 | Leaderboard | リーダーボード | 리더보드 | wows-numbers nav, both locales. |
@@ -55,13 +55,18 @@ Counts are occurrences in the corpus above.
 | Clan members | 在籍メンバー数 | 클랜 인원 | wows-numbers clan tables. |
 | Active members | 活動しているメンバー数 | 활성 멤버수 | wows-numbers clan tables. |
 | Personal rating | PR | 개인 레이팅(PR) | wows-numbers, both locales. |
+| Ship type / class (umbrella) | 艦種 | 함종 | `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`, corpus pass 2026-08-04. Appears **twice on the page, in both roles**: as the filter label above the ranking table (`**함종:** 전체 \| 구축함 항공모함 …`) and as a column header in the table itself (`\| 함선 \| 단계 \| 함종 \| 국가 \| …`). Reproduces on both hosts. (Fix round 1 first recorded "column header", a later pass over-corrected to "filter label only"; both were partial — it is both, which is the strongest form of the evidence, since our own use is a filter label.) Distinct from the individual class nouns (전함/戦艦, 순양함/巡洋艦, …) already attested above. Closes the gap the client-locale-toggle spec named as the blocker on `common.type`. |
+| Nation (ship nationality) | 国家 | 국가 | Same 2026-08-04 pass, same page, same dual role as 함종/艦種 above: it labels the nationality filter and heads the nationality column (`\| 함종 \| 국가 \| 전투 \| …`). Closes the gap the spec named as the blocker on `common.nation`. |
+| Top N% (percentile filter, KO only) | — (see note) | 상위{pct}% | **Re-cited, fix round 1** — the original attribution to `asia.wows-numbers.com/ko/ships/` was wrong; re-verification found zero occurrences of `상위` there. The real source is `namu.wiki/w/월드 오브 워쉽` (`상위` ×3). Already shipped as `landing.treemap.topPct`'s Korean value under the generic-chrome tier (2026-08-04, follow-on #1); promoted here now that namu.wiki attests it directly. **Japanese `上位` is NOT promoted** — see the demotion note under Generic UI chrome below; its only hit is a single occurrence on an unvetted source. |
+| Recent / last (KO) | — (see note) | 최근 | **Re-cited, fix round 1** — the original attribution was wrong; re-verification found zero occurrences on the `ships/` pages. Real sources: `namu.wiki/w/월드 오브 워쉽` (`최근` ×8) and `asia.wows-numbers.com/ko/` root (`최근 이벤트`, `최근 전적` ×2 — `최근 전적` is exactly our register, "recent record"). Already shipped as the `최근` clause inside `landing.treemap.windowPhraseWithDays`'s and `landing.shipLeaderboard.windowSuffix`'s Korean values; promoted for the same reason as Top N% above. Japanese's `直近`, used in the same two keys, is a *different* word with no corpus hit of its own: it stays unattested and stays a generic-chrome admission (see the admission table below) — this row promotes the Korean word only. |
 
 ## Not verified in this corpus
 
 Flagged rather than guessed. These need a second pass or a native check before shipping:
 
 - **Survival rate** — expected `生存率` / `생존율`; no corpus hit.
-- **Nation** (ship nationality) — expected `国家` / `국가`; no corpus hit.
+- ~~**Nation** (ship nationality)~~ — resolved by the 2026-08-04 corpus pass;
+  see the Verified terms table above (`国家`/`국가`).
 - **Efficiency** — not a WoWS term at all; it is our coinage. `効率` / `효율` are the literal renderings and may read as jargon-free but also as meaningless. **Admitted anyway as the `insights.tabs.efficiency` TAB label** under the generic-UI-chrome tier — see the admission table below for the reasoning (the vagueness is symmetric: the English word carries the same ambiguity for an English reader, and a consistently-translated tab strip beats one that alternates languages tab to tab). `player.section.efficiencyBadges` (the section heading, a compound noun phrase rather than a bare tab label) stays unadmitted.
 - **Activity** (our tab) — no direct analogue in the corpus. **Admitted anyway as the `insights.tabs.activity` TAB label** under the generic-UI-chrome tier — see the admission table below.
 - **Reigning champion**, **Skill bracket**, **Compare vs** — our own product language, no in-game source.
@@ -76,6 +81,7 @@ Decided 2026-08-04. Both options were attested in every case; register decided.
 | KO damage | **`데미지`** | The loanword the community and wows-numbers use. `피해량` is the client term and reads officialese. |
 | JA tier | **`Tier`, Latin** | How JP players write it (`Tier10`, `T9`). Keeps the numeral adjacent in dense rows. |
 | Word for "stats" | **`戦績` / `전적`** | The community's own word for a player's record; `統計`/`통계` reads institutional. |
+| KO tier word | **`티어` (unchanged)** | The 2026-08-04 corpus pass surfaces `단계` as the literal ko.wows-numbers column header for "Tier" — a second attested option, not a guess. The ruling stands anyway: `단계` is the formal, institutional word a table header uses; `티어` is the community's own register (namu ×21, arca), which is what this doc's Register target section asks for throughout. Recorded as the attested-but-not-chosen alternative, not a fork to re-open. |
 
 Applied consistently: `랜덤전` (not `랭덤전`), `랭크전`, `클랜전`.
 
@@ -113,6 +119,108 @@ Keys admitted under the generic-chrome tier, with their values:
 | `insights.tabs.efficiency` | 효율 | 効率 |
 | `notFound.title` | 페이지를 찾을 수 없습니다 | ページが見つかりません |
 | `notFound.body` | 요청하신 페이지를 찾을 수 없습니다. | お探しのページは見つかりませんでした。 |
+| `landing.treemap.topPct` (Japanese half only — Korean is promoted, see Verified terms) | *(promoted — see Verified terms table)* | 上位{pct}% † |
+| `landing.treemap.windowPhraseWithDays` | 최근 {days}일간의 함선 순위 집계 기간 | 直近{days}日間の艦艇ランキング集計期間 |
+| `landing.treemap.windowPhraseNoDays` | 함선 순위 집계 기간 | 艦艇ランキング集計期間 |
+| `landing.treemap.viewTreemap` | 트리맵 | ツリーマップ |
+| `landing.treemap.viewScatterplot` | 전투 수 대비 승률 산점도 | 戦闘数と勝率の散布図 |
+| `landing.shipLeaderboard.windowSuffix` | 최근 {days}일 | 直近{days}日間 |
+| `landing.treemap.heading` (template) | {realm} 서버에서 가장 많이 플레이한 {bucket}{suffix} | {realm}サーバーで最もプレイされた{bucket}{suffix} |
+| `landing.treemap.ariaLabel` (template) | {realm} 서버에서 {windowPhrase} 동안 가장 많이 플레이한 {bucket}을 {view} 형태로 표시 | {realm}サーバーで{windowPhrase}に最もプレイされた{bucket}を{view}として表示 |
+| `landing.shipLeaderboard.heading` (template) | 함선 리더보드{suffix} | 艦艇リーダーボード{suffix} |
+| `nav.realmCurrent` | 서버: {realm} | サーバー: {realm} |
+| `nav.languageCurrent` | 언어: {language} | 言語: {language} |
+| `landing.treemap.chartSectionLabel` | 서버 함선 차트 | サーバー艦艇チャート |
+| `landing.treemap.chartViewGroup` | 차트 보기 | チャート表示 |
+| `landing.treemap.toggleMap` | 트리맵 | ツリーマップ |
+| `landing.treemap.togglePlot` | 산점도 | 散布図 |
+
+**`landing.treemap.topPct`'s Korean half and the `최근` clause: promoted, the
+Japanese half of `topPct`: demoted back (fix round 1).** All three were
+admitted here on 2026-08-04 before any corpus evidence existed for them. A
+follow-up corpus pass claimed to attest both halves of `landing.treemap.topPct`
+and Korean `최근` against `asia.wows-numbers.com`'s `ships/` pages — re-verified
+2026-08-04 (fix round 1) and found **zero** occurrences of any of them on those
+pages; the attribution, not the underlying words, was wrong. Re-citing against
+the real sources (see the Verified terms table above): Korean `상위` (namu.wiki
+×3) and Korean `최근` (namu.wiki ×8, wows-numbers ko root ×2) both hold up and
+stay promoted to Verified terms. **Japanese `上位` does not hold up the same
+way** — the only occurrence found anywhere in re-verification is a single hit
+on `gamewith.jp/worldofwarships/article/show/461801`, a source never vetted
+into this corpus (see the Corpus table at the top of this doc). One hit on an
+unvetted source is a weak signal, not an attestation — the whole point of this
+attestation discipline is that the word "attested" means something, so
+`landing.treemap.topPct`'s Japanese value moves back to this table (marked †
+below) rather than staying in Verified terms on a single thin hit. It is not
+deleted: a future corpus pass against a vetted JP source (wikiwiki.jp,
+bbstars.work, official portal) is the way to actually attest it.
+`landing.treemap.windowPhraseWithDays` and `landing.shipLeaderboard.windowSuffix`
+stay listed here rather than moving wholesale: each composes a full phrase
+("N-day ship-standings window", "last N days rolling") where only the Korean
+`최근` word inside is independently attested — the rest of the phrase ("함선
+순위 집계 기간", the standings-window concept itself) is still our own
+coinage, not a WoWS term. Japanese `直近`, used in the same two keys, has no
+corpus hit of its own (not even a weak one) and remains a generic-chrome
+admission (see the client-locale-toggle spec's "Known traps" section, which
+names this explicitly).
+
+† `landing.treemap.topPct`'s Japanese value (`上位{pct}%`) is a **weak signal,
+not an attestation**: one occurrence on `gamewith.jp`, unvetted. Recorded here
+under generic UI chrome (no WoWS-jargon register risk either way — it's a
+percentile-filter word, not a game term) rather than deleted, pending a
+stronger future hit.
+
+`nav.realmCurrent`/`nav.languageCurrent` compose the realm/language chip's
+accessible name the same way `nav.themeCurrent` already does — "Realm"/
+"Language" plus a generic colon-separated value, no WoWS register risk.
+`landing.treemap.chartSectionLabel`/`chartViewGroup` pair the already-attested
+`함선`/`艦艇` (ship) noun with the generic word for "chart" (차트/チャート);
+`toggleMap`/`togglePlot` reuse the exact vocabulary already shipped for
+`landing.treemap.viewTreemap`/`viewScatterplot` (트리맵/ツリーマップ for the
+map view) plus a shortened, bare "scatterplot" word (산점도/散布図) for the
+plot toggle, since the full "battles-vs-win-rate scatterplot" phrase used in
+the aria-label clause does not fit a compact pill button.
+
+`landing.treemap.infoLabel` (`en.ts`: "About the ship treemap and its
+eligibility window") is deliberately **absent** from this table and from
+`ko.ts`/`ja.ts` — it is keyed (so the structure is complete for a future pass)
+but not translated, because the long info-tooltip paragraph it opens is
+explicitly out of scope for localization per the client-locale-toggle spec's
+Scope section. Translating the trigger's accessible name while the panel it
+opens stays English would announce a translated label for an English panel;
+that is a worse experience than a consistently-English trigger-and-panel
+pair. See the comment on this key in `en.ts`/`ko.ts`/`ja.ts`.
+
+**Added 2026-08-04 (follow-on #1, the composed-template blocker).** The client-
+locale-toggle spec named three `en.ts` keys whose `{}` clauses were built as
+English literals inside components, never passed through `t()` — translating
+the outer template alone would have shipped a mixed-language string like
+`함선 리더보드 · last 45 days rolling`. Each clause now has its own key,
+resolved through `t()` in the component before being handed to the outer
+template as a var. Two kinds of new key:
+
+- **Compositions of already-attested terms**, no new admission needed:
+  `shipClass.destroyers`/`cruisers`/`battleships`/`aircraftCarriers`/
+  `submarines`/`ships` reuse the individual ship-class nouns from the Verified
+  terms table above (전함/戦艦, 순양함/巡洋艦, 구축함/駆逐艦, 항공모함/空母,
+  잠수함/潜水艦, 함선/艦艇). Neither Korean nor Japanese pluralizes, so each
+  value equals the singular noun already verified there — there is no new
+  vocabulary claim being made, only a new call site (the treemap heading's
+  bucket label) for nouns this document already clears.
+- **New generic-chrome admissions**, added to the table above: `top {pct}%`,
+  the two window-phrase variants ("rolling[, trailing N-day] ship-standings
+  window"), `treemap`/`scatterplot`, and "last {days} days rolling" (as
+  `landing.shipLeaderboard.windowSuffix`). These are exactly the class the
+  "Generic UI chrome" section above describes — sort/filter/view-mode chrome
+  with no plausible-but-wrong WoWS jargon to introduce, since none of them are
+  WoWS jargon. The two composed heading/ariaLabel **templates** themselves
+  (`landing.treemap.heading`/`landing.treemap.ariaLabel`/
+  `landing.shipLeaderboard.heading`) are listed too, since this is also the
+  point their word order was decided (previously blocked as "too risky") —
+  KO/JA both keep the bucket/suffix clauses in the same relative position as
+  English, adding a possessive/locative connective (`서버에서`/`サーバーで`,
+  "at the {realm} server") rather than reordering, since the source order
+  already reads naturally in both target languages for this sentence shape.
 
 Added 2026-08-04 (Task 8b, closing the header's last two untranslated words —
 the `Go` submit button and the theme chip's `Light`/`Dark`/`Theme: …`).
@@ -165,11 +273,18 @@ this tier without a matching entry here.
 
 `common.type` is a different case and does **not** belong in the paragraph above:
 "type" here means ship class (Battleship / Cruiser / Destroyer / …), which is
-game-category vocabulary, not generic interface chrome. It is blocked under the
-**absolute** tier — omitted for lack of corpus attestation of the umbrella category
-word itself, the same status as `common.tier`/`common.avgDamage` would carry if this
-corpus hadn't attested them. Unlike `common.clear`/`common.close`/`common.clan`
-(deleted outright above), `common.type` is kept as scaffolding — the client-locale-toggle
-spec names the landing filter bar + `EfficiencyBadgeTable.tsx` as its follow-on owner —
-but is blocked on whoever runs the next corpus pass to attest the umbrella word, not on
-finding it a call site.
+game-category vocabulary, not generic interface chrome. **Update, 2026-08-04
+corpus pass:** the umbrella category word itself is attested now — 함종/艦種,
+the ship-class **filter label** above the ranking table on
+`asia.wows-numbers.com/ko/ships/` and `/ja/ships/` (a filter label, not a
+column header — corrected in fix round 1; see the Verified terms table above)
+— so `common.type` is no longer blocked by an attestation gap the way
+`common.nation` was until the same pass. It stays omitted from `ko.ts`/`ja.ts`
+in this pass anyway: the
+client-locale-toggle spec's follow-on owns wiring the landing filter bar +
+`EfficiencyBadgeTable.tsx`, and populating the dictionary value ahead of that
+wiring is that follow-on's work, not a doc-reconciliation task's. Unlike
+`common.clear`/`common.close`/`common.clan` (deleted outright above),
+`common.type` is kept as scaffolding for that named follow-on — see the
+client-locale-toggle spec's updated "What blocks wiring it now" section for
+the current, shorter blocker list.

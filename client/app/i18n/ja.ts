@@ -4,7 +4,9 @@ import type { StringKey } from './keys';
 // how JP players write it (Tier10, T9), evidenced in the research doc.
 export const ja: Partial<Record<StringKey, string>> = {
     'nav.selectRealm': 'サーバー選択',
+    'nav.realmCurrent': 'サーバー: {realm}',
     'nav.language': '言語',
+    'nav.languageCurrent': '言語: {language}',
     'nav.selectTheme': 'テーマ選択',
     'nav.searchPlayer': 'プレイヤー検索',
     'nav.searchClan': 'クラン検索',
@@ -22,6 +24,31 @@ export const ja: Partial<Record<StringKey, string>> = {
 
     'player.section.rankedSeasons': 'ランク戦シーズン',
     'player.section.randomBattlesByTier': 'Tier別ランダム戦',
+
+    // Composed-template blocker (see the research doc + spec's "Known traps"
+    // section): the clauses below are resolved through t() in the components,
+    // so these two multi-part templates can now ship translated.
+    'landing.treemap.heading': '{realm}サーバーで最もプレイされた{bucket}{suffix}',
+    'landing.treemap.ariaLabel': '{realm}サーバーで{windowPhrase}に最もプレイされた{bucket}を{view}として表示',
+    'landing.treemap.topPct': '上位{pct}%',
+    'landing.treemap.windowPhraseWithDays': '直近{days}日間の艦艇ランキング集計期間',
+    'landing.treemap.windowPhraseNoDays': '艦艇ランキング集計期間',
+    'landing.treemap.viewTreemap': 'ツリーマップ',
+    'landing.treemap.viewScatterplot': '戦闘数と勝率の散布図',
+    'landing.shipLeaderboard.heading': '艦艇リーダーボード{suffix}',
+    'landing.shipLeaderboard.windowSuffix': '直近{days}日間',
+
+    'landing.treemap.chartSectionLabel': 'サーバー艦艇チャート',
+    'landing.treemap.chartViewGroup': 'チャート表示',
+    'landing.treemap.toggleMap': 'ツリーマップ',
+    'landing.treemap.togglePlot': '散布図',
+
+    'shipClass.destroyers': '駆逐艦',
+    'shipClass.cruisers': '巡洋艦',
+    'shipClass.battleships': '戦艦',
+    'shipClass.aircraftCarriers': '空母',
+    'shipClass.submarines': '潜水艦',
+    'shipClass.ships': '艦艇',
 
     'common.all': 'すべて',
     'common.tier': 'Tier',
@@ -51,16 +78,17 @@ export const ja: Partial<Record<StringKey, string>> = {
     //   player.section.rankedSeasonTimeline, player.section.clanSeasonTimeline,
     //   player.section.battlesPlayedDistribution
     //
-    // Multi-part template, word order too risky:
-    //   landing.treemap.heading, landing.treemap.ariaLabel
-    //
-    // Structural blocker — ShipLeaderboard.tsx builds `{suffix}` as a
-    // hardcoded English literal (`· last N days rolling`) that never passes
-    // through t(). This fix round made the key drive the VISIBLE text too,
-    // not just the aria-label (they used to diverge), but the suffix clause
-    // itself is still an English literal built in the component, so
-    // translating just the heading still mixes languages:
-    //   landing.shipLeaderboard.heading
+    // RESOLVED (composed-template blocker, follow-on #1): landing.treemap.heading,
+    // landing.treemap.ariaLabel, and landing.shipLeaderboard.heading used to sit
+    // here — either "word order too risky" or, for the ship-leaderboard heading,
+    // a hardcoded English literal (`· last N days rolling`) built in
+    // ShipLeaderboard.tsx that never passed through t(). Every interpolated
+    // clause (the ship-class plurals, "top N%", the window phrase, the
+    // map/plot view name, and the "last N days rolling" suffix) now has its own
+    // key, resolved through t() in the component before being handed to the
+    // outer template as a var — see landing.treemap.topPct/windowPhraseWithDays/
+    // windowPhraseNoDays/viewTreemap/viewScatterplot, landing.shipLeaderboard.
+    // windowSuffix, and shipClass.* above. All three templates ship translated.
     //
     // Generic UI chrome outside the research doc's WoWS-jargon remit. Two-tier
     // standard (see the research doc's "Generic UI chrome" section): everyday
@@ -83,7 +111,17 @@ export const ja: Partial<Record<StringKey, string>> = {
     // and the surviving common.* keys, which Fix 4's spec amendment assigns
     // to a named follow-on).
     //
-    // Category label unattested (individual ship-class nouns are attested;
-    // the umbrella word "type"/"class" is not):
+    // Category label — NOT an attestation gap anymore (updated, fix round 1):
+    // a 2026-08-04 corpus pass attested the umbrella word itself, 艦種, as a
+    // filter label on asia.wows-numbers.com's ja ship-ranking page (see the
+    // research doc's Verified terms table). Stays omitted here anyway because
+    // populating it ahead of the landing filter bar / EfficiencyBadgeTable.tsx
+    // wiring is that named follow-on's work, not this doc-reconciliation
+    // pass's — see ko.ts and the client-locale-toggle spec's "What blocks
+    // wiring it now" section for the current (shorter) blocker list:
     //   common.type
+    //
+    // Out of scope by the spec's own rule, not by attestation gap — see
+    // ko.ts for the full reasoning:
+    //   landing.treemap.infoLabel
 };
