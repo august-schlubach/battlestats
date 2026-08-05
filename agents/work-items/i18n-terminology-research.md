@@ -152,6 +152,20 @@ Keys admitted under the generic-chrome tier, with their values:
 | `landing.treemap.chartViewGroup` | 차트 보기 | チャート表示 |
 | `landing.treemap.toggleMap` | 트리맵 | ツリーマップ |
 | `landing.treemap.togglePlot` | 산점도 | 散布図 |
+| `footer.leaveFeedback` | 피드백 남기기 | フィードバックを送る |
+| `feedback.modal.title` | 피드백 남기기 | フィードバックを送る |
+| `feedback.category.featureSuggestion` | 기능 제안 | 機能の提案 |
+| `feedback.category.bugReport` | 버그 신고 | バグ報告 |
+| `feedback.messagePlaceholder` | 문제나 제안 사항을 알려주세요 | 問題や提案の内容を入力してください |
+| `feedback.submit` | 제출 | 送信 |
+| `feedback.submitting` | 제출 중… | 送信中… |
+| `feedback.cancel` | 취소 | キャンセル |
+| `feedback.close` | 닫기 | 閉じる |
+| `feedback.success` | 감사합니다! 피드백이 검토를 기다리고 있습니다. | ありがとうございます!いただいたフィードバックは確認を待っています。 |
+| `feedback.error.correctBelow` | 아래 오류를 수정해 주세요. | 以下のエラーを修正してください。 |
+| `feedback.error.generic` | 문제가 발생했습니다. 나중에 다시 시도해 주세요. | 問題が発生しました。しばらくしてからもう一度お試しください。 |
+| `feedback.error.network` | 네트워크 오류입니다. 다시 시도해 주세요. | ネットワークエラーです。もう一度お試しください。 |
+| `feedback.category.languageIssue` (NEEDS-NATIVE-CHECK, see § below) | 번역 오류 신고 | 翻訳問題の報告 |
 
 **`landing.treemap.topPct`'s Korean half and the `최근` clause: promoted, the
 Japanese half of `topPct`: demoted back (fix round 1).** All three were
@@ -340,3 +354,22 @@ key, `common.award` (등급/等級, generic-chrome admission — see the admissi
 this site's own badge taxonomy, not a WoWS or community concept. The client-locale-
 toggle spec's "What blocks wiring it now" section and Follow-ons list are updated to
 match — see that spec.
+
+**Added 2026-08-05, `feedback-submission-spec.md`'s frontend half (`FeedbackModal.tsx`
++ the footer "Leave feedback" link).** Fourteen new keys, all generic UI chrome —
+form labels, button/state text, and success/error copy for a feedback form, none of
+it WoWS vocabulary, so all fourteen are admitted under this tier without a corpus
+hit and populated in `ko.ts`/`ja.ts` immediately (no omission, this is not the
+WoWS-jargon tier). See the admission table above for the values.
+
+The one case worth arguing explicitly: `feedback.category.languageIssue`. The
+category exists specifically to close the loop on this project's own translation
+mistakes (the `NEEDS-NATIVE-CHECK` residue this doc's earlier sections describe), so
+"language issue" in this product means "our translation is wrong" — a literal calque
+of "language" (언어/言語) would read as a report about the *game's* language settings,
+not ours. Rendered instead as "translation error/problem report" (번역 오류 신고 /
+翻訳問題の報告), which names the actual thing being reported. This is a judgment call
+about framing, not a corpus attestation (there is no WoWS-community source for "how
+to phrase a feedback-form category label"), so it carries `NEEDS-NATIVE-CHECK` in
+`ko.ts`/`ja.ts` next to the key — same precedent as `common.award` — rather than
+shipping a confident-looking guess.

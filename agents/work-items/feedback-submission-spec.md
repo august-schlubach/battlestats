@@ -1,7 +1,7 @@
 # "Leave feedback" — footer link + categorized submission modal
 
 **Date:** 2026-08-04
-**Status:** backend implemented 2026-08-05 (`feat/feedback-submission`, `Feedback` model + `POST /api/feedback/`) — wire contract in `.superpowers/sdd/feedback/backend-report.md`; frontend (`FeedbackModal` + footer link) still pending
+**Status:** implemented 2026-08-05 (`feat/feedback-submission`, `Feedback` model + `POST /api/feedback/`) — wire contract in `.superpowers/sdd/feedback/backend-report.md`. Frontend (`FeedbackModal` + footer "Leave feedback" link, replacing the removed GitHub link) landed the same day — report in `.superpowers/sdd/feedback/frontend-report.md`. Both halves are now user-reachable; the streamer-submission runbook precedent for a landed-feature writeup is a follow-on, not done here (see that report's self-review).
 **Surface:** footer (all routes) + new modal; new backend model/endpoint
 **Depends on:** the locale toggle — the categories and the link text are localized
 

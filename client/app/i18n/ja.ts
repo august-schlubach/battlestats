@@ -14,6 +14,7 @@ export const ja: Partial<Record<StringKey, string>> = {
     'nav.themeLight': 'ライト',
     'nav.themeDark': 'ダーク',
     'nav.themeCurrent': 'テーマ: {label}',
+    'footer.leaveFeedback': 'フィードバックを送る',
 
     'insights.tabs.activity': 'アクティビティ',
     'insights.tabs.ships': '艦艇',
@@ -78,6 +79,26 @@ export const ja: Partial<Record<StringKey, string>> = {
 
     'notFound.title': 'ページが見つかりません',
     'notFound.body': 'お探しのページは見つかりませんでした。',
+
+    // FeedbackModal.tsx — generic UI chrome, see the research doc's admission
+    // table. These are form labels/states, not WoWS vocabulary.
+    'feedback.modal.title': 'フィードバックを送る',
+    // "language issue" here means "our translation is wrong," so rendered as
+    // 翻訳問題の報告 ("report of a translation problem") rather than a
+    // literal calque of "language." Same register decision as ko.ts's
+    // 번역 오류 신고 — see that file's NEEDS-NATIVE-CHECK comment.
+    'feedback.category.languageIssue': '翻訳問題の報告',
+    'feedback.category.featureSuggestion': '機能の提案',
+    'feedback.category.bugReport': 'バグ報告',
+    'feedback.messagePlaceholder': '問題や提案の内容を入力してください',
+    'feedback.submit': '送信',
+    'feedback.submitting': '送信中…',
+    'feedback.cancel': 'キャンセル',
+    'feedback.close': '閉じる',
+    'feedback.success': 'ありがとうございます!いただいたフィードバックは確認を待っています。',
+    'feedback.error.correctBelow': '以下のエラーを修正してください。',
+    'feedback.error.generic': '問題が発生しました。しばらくしてからもう一度お試しください。',
+    'feedback.error.network': 'ネットワークエラーです。もう一度お試しください。',
 
     // NEEDS-NATIVE-CHECK — same residue as ko.ts, key-for-key (the research
     // doc's gaps apply to both locales identically since it's one corpus

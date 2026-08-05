@@ -16,6 +16,7 @@ export const ko: Partial<Record<StringKey, string>> = {
     'nav.themeLight': '라이트',
     'nav.themeDark': '다크',
     'nav.themeCurrent': '테마: {label}',
+    'footer.leaveFeedback': '피드백 남기기',
 
     'insights.tabs.activity': '활동',
     'insights.tabs.ships': '함선',
@@ -80,6 +81,27 @@ export const ko: Partial<Record<StringKey, string>> = {
 
     'notFound.title': '페이지를 찾을 수 없습니다',
     'notFound.body': '요청하신 페이지를 찾을 수 없습니다.',
+
+    // FeedbackModal.tsx — generic UI chrome, see the research doc's admission
+    // table. These are form labels/states, not WoWS vocabulary.
+    'feedback.modal.title': '피드백 남기기',
+    // NEEDS-NATIVE-CHECK: "language issue" here means "our translation is
+    // wrong," so rendered as "번역 오류 신고" (report a translation error)
+    // rather than a literal calque of "language" (언어 문제). A native
+    // speaker should confirm this reads as intended in this exact context —
+    // flagged deliberately, same precedent as common.award.
+    'feedback.category.languageIssue': '번역 오류 신고',
+    'feedback.category.featureSuggestion': '기능 제안',
+    'feedback.category.bugReport': '버그 신고',
+    'feedback.messagePlaceholder': '문제나 제안 사항을 알려주세요',
+    'feedback.submit': '제출',
+    'feedback.submitting': '제출 중…',
+    'feedback.cancel': '취소',
+    'feedback.close': '닫기',
+    'feedback.success': '감사합니다! 피드백이 검토를 기다리고 있습니다.',
+    'feedback.error.correctBelow': '아래 오류를 수정해 주세요.',
+    'feedback.error.generic': '문제가 발생했습니다. 나중에 다시 시도해 주세요.',
+    'feedback.error.network': '네트워크 오류입니다. 다시 시도해 주세요.',
 
     // NEEDS-NATIVE-CHECK — every key below is omitted, not guessed. Grouped by
     // why the research doc doesn't clear it. `en.ts` grew past the brief's

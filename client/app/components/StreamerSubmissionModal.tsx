@@ -3,6 +3,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { trackEvent } from '../lib/umami';
 
+// Kill switch (2026-08-05): production got 2 submissions ever, both rejected,
+// both on 2026-04-07 — nothing in the four months since. Hidden everywhere,
+// not deleted; flip to true to restore the footer affordance. This component,
+// the endpoint, and the model stay fully intact — only the Footer call site
+// gates rendering on this flag.
+export const STREAMER_SUBMISSION_ENABLED = false;
+
 interface StreamerSubmissionModalProps {
     open: boolean;
     onClose: () => void;
