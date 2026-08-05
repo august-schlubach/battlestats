@@ -53,6 +53,8 @@ export const ko: Partial<Record<StringKey, string>> = {
     'shipClass.ships': '함선',
 
     'common.all': '전체',
+    // Restored, fix round 1 (F3) — see en.ts's comment on this key.
+    'common.clear': '초기화',
     'common.tier': '티어',
     // Filter-bar wiring (2026-08-04, follow-on #2): 함종, the ship-class
     // umbrella word — corpus-attested as a filter label on
@@ -124,13 +126,19 @@ export const ko: Partial<Record<StringKey, string>> = {
     // WoWS register risk (see the research doc's admission table for the
     // reasoning on 효율 specifically — it's our own coinage in English too,
     // and a consistently-translated tab strip beats one that alternates
-    // languages tab to tab). common.clear/common.close/common.clan were
-    // deleted outright this fix round rather than kept as unwired
-    // scaffolding — no call site references any of them anywhere in the
-    // client, and no follow-on task claims them (contrast the surviving
-    // common.* keys, which Fix 4's spec amendment assigned to a named
-    // follow-on — now wired, see common.type/common.nation/common.award
-    // above).
+    // languages tab to tab). common.close/common.clan were deleted outright
+    // this fix round rather than kept as unwired scaffolding — no call site
+    // references either anywhere in the client, and no follow-on task claims
+    // them (contrast the surviving common.* keys, which Fix 4's spec
+    // amendment assigned to a named follow-on — now wired, see
+    // common.type/common.nation/common.award above). common.clear was
+    // ALSO deleted in that round on the same "no call site" reasoning —
+    // **that inference was wrong, corrected fix round 1**: no call site is
+    // not the same as no owner. EfficiencyBadgeTable.tsx's filter-row Clear
+    // button was always there, rendering the same hardcoded 'Clear' literal
+    // this key would have driven; it just hadn't been wired yet, the same
+    // unwired state common.type/common.nation/common.award were in before
+    // this pass. Restored above with the key populated and the button wired.
     //
     // Out of scope by the spec's own rule, not by attestation gap — the
     // long info-tooltip paragraph this label opens is explicitly excluded

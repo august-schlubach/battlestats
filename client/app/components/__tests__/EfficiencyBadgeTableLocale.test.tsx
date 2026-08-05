@@ -15,6 +15,16 @@ import { LocaleProvider } from '../../context/LocaleContext';
 // NEEDS-NATIVE-CHECK in ko.ts/ja.ts. It is still asserted here like every
 // other wired key: the native check is about whether the WORD is right, not
 // about whether the wiring works.
+//
+// Fix round 1 (F1) regression net: the same four words (Tier/Type/Nation/
+// Award) also render as this table's own column headers AND as
+// EfficiencyMiniTreemaps' mini-treemap titles, one row above the filter bar.
+// The first wiring pass translated only the filter labels, so ko/ja
+// screenshots showed a translated filter row sitting directly above English
+// column headers and treemap titles — exactly the alternating-language
+// defect this follow-on exists to close. Asserting the column-header text
+// AND counting total occurrences of each translated word (filter label +
+// column header + treemap title = 3) catches a regression on either site.
 
 jest.mock('../../context/RealmContext', () => ({ useRealm: () => ({ realm: 'na' }) }));
 jest.mock('../../lib/umami', () => ({ trackEvent: jest.fn() }));
@@ -73,5 +83,55 @@ describe('EfficiencyBadgeTable filter bar — locale coverage', () => {
         expect(optionTexts('艦種')).toContain('すべて');
         expect(optionTexts('国家')).toContain('すべて');
         expect(optionTexts('等級')).toContain('すべて');
+    });
+
+    it('F1: Korean column headers AND mini-treemap titles match the filter labels (no mixed-language row)', () => {
+        localStorage.setItem('bs-locale', 'ko');
+        renderWithLocale();
+        const table = screen.getByRole('table');
+        expect(within(table).getByRole('columnheader', { name: '티어' })).toBeInTheDocument();
+        expect(within(table).getByRole('columnheader', { name: '함종' })).toBeInTheDocument();
+        expect(within(table).getByRole('columnheader', { name: '국가' })).toBeInTheDocument();
+        expect(within(table).getByRole('columnheader', { name: '등급' })).toBeInTheDocument();
+        expect(within(table).queryByRole('columnheader', { name: 'Tier' })).toBeNull();
+        expect(within(table).queryByRole('columnheader', { name: 'Type' })).toBeNull();
+        expect(within(table).queryByRole('columnheader', { name: 'Nation' })).toBeNull();
+        expect(within(table).queryByRole('columnheader', { name: 'Award' })).toBeNull();
+        // Filter label + column header + mini-treemap title = 3 occurrences of
+        // each translated word once F1 is fixed; before the fix each word
+        // appeared exactly once (the filter label only).
+        expect(screen.getAllByText('티어').length).toBeGreaterThanOrEqual(3);
+        expect(screen.getAllByText('함종').length).toBeGreaterThanOrEqual(3);
+        expect(screen.getAllByText('국가').length).toBeGreaterThanOrEqual(3);
+        expect(screen.getAllByText('등급').length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('F1: Japanese column headers AND mini-treemap titles match the filter labels', () => {
+        localStorage.setItem('bs-locale', 'ja');
+        renderWithLocale();
+        const table = screen.getByRole('table');
+        expect(within(table).getByRole('columnheader', { name: '艦種' })).toBeInTheDocument();
+        expect(within(table).getByRole('columnheader', { name: '国家' })).toBeInTheDocument();
+        expect(within(table).getByRole('columnheader', { name: '等級' })).toBeInTheDocument();
+        expect(within(table).queryByRole('columnheader', { name: 'Type' })).toBeNull();
+        expect(within(table).queryByRole('columnheader', { name: 'Nation' })).toBeNull();
+        expect(within(table).queryByRole('columnheader', { name: 'Award' })).toBeNull();
+        expect(screen.getAllByText('艦種').length).toBeGreaterThanOrEqual(3);
+        expect(screen.getAllByText('国家').length).toBeGreaterThanOrEqual(3);
+        expect(screen.getAllByText('等級').length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('F3: the Clear button renders through common.clear in ko/ja', () => {
+        localStorage.setItem('bs-locale', 'ko');
+        renderWithLocale();
+        expect(screen.getByRole('button', { name: '초기화' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+    });
+
+    it('F3: the Clear button renders through common.clear in ja', () => {
+        localStorage.setItem('bs-locale', 'ja');
+        renderWithLocale();
+        expect(screen.getByRole('button', { name: 'クリア' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
     });
 });

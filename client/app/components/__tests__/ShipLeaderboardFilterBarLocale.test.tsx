@@ -21,6 +21,12 @@ import { LocaleProvider } from '../../context/LocaleContext';
 // (a real requirement — the label must not break across a line), and pinning
 // the exact non-breaking-space byte in a test string is a needless way to
 // break this file the next time someone edits it.
+//
+// F2 (fix round 1): the WR-percentile group's `All` pill was the one
+// `common.all` call site the first pass missed — it stayed hardcoded while
+// EfficiencyBadgeTable's four "All" options translated in the same release.
+// Asserted below by role+name so it can't be satisfied by the 50%/25% pills
+// or anything else in the row.
 
 jest.mock('../../lib/sharedJsonFetch', () => ({ fetchSharedJson: jest.fn() }));
 jest.mock('../../context/RealmContext', () => ({ useRealm: () => ({ realm: 'na' }) }));
@@ -53,6 +59,9 @@ describe('ShipLeaderboard filter bar — locale coverage', () => {
         expect(screen.queryByText('Type')).toBeNull();
         // WR ≥ stays English in every locale — see the module comment above.
         expect(screen.getByText(/^WR/)).toBeInTheDocument();
+        // F2: the WR-percentile group's "All" pill is translated.
+        expect(screen.getByRole('button', { name: '전체' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'All' })).toBeNull();
     });
 
     it('renders the Japanese Tier/Type filter labels, and leaves WR ≥ in English', async () => {
@@ -64,5 +73,8 @@ describe('ShipLeaderboard filter bar — locale coverage', () => {
         // from hardcoded; the Type assertion above carries that signal here.
         expect(screen.getByText('Tier')).toBeInTheDocument();
         expect(screen.getByText(/^WR/)).toBeInTheDocument();
+        // F2: the WR-percentile group's "All" pill is translated.
+        expect(screen.getByRole('button', { name: 'すべて' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'All' })).toBeNull();
     });
 });

@@ -41,8 +41,13 @@ const TIERS: Tier[] = [8, 9, 10];
 // ships?". `null` is the default realm-wide aggregate. Must match the backend's
 // SHIP_LIST_WR_PCTS (50/25). Does NOT change which ships are listed.
 export type WrPct = 50 | 25 | null;
-const WR_PCTS: { value: WrPct; label: string }[] = [
-    { value: null, label: 'All' },
+// `label` for the 50/25 pills is a plain percent literal (no translation
+// case — digits + "%" read the same in every locale); `null` ("All") is
+// wired through common.all at render time (fix round 1, F2) since "All" now
+// renders translated in EfficiencyBadgeTable's filter bar and would
+// otherwise be the one pill left English in the same release.
+const WR_PCTS: { value: WrPct; label: string | null }[] = [
+    { value: null, label: null },
     { value: 50, label: '50%' },
     { value: 25, label: '25%' },
 ];
@@ -691,15 +696,21 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         see its comment). 티어/Tier/... are one- or two-character
                         tokens that should never wrap in any language. */}
                     <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('common.tier')}</span>
-                    {TIERS.map((t) => (
+                    {/* Loop var renamed from `t` (fix round 1, F4) — it shadowed
+                        the translator `const t = useT()` above. Harmless while
+                        nothing inside this callback called t(), but the next
+                        person translating a pill's title INSIDE the map would
+                        silently get the tier number instead of the function,
+                        and it would still typecheck. */}
+                    {TIERS.map((tierValue) => (
                         <button
-                            key={t}
+                            key={tierValue}
                             type="button"
-                            onClick={() => chooseTier(t)}
-                            className={`${PILL_BASE} ${tier === t ? PILL_ON : PILL_OFF}`}
-                            aria-pressed={tier === t}
+                            onClick={() => chooseTier(tierValue)}
+                            className={`${PILL_BASE} ${tier === tierValue ? PILL_ON : PILL_OFF}`}
+                            aria-pressed={tier === tierValue}
                         >
-                            {t}
+                            {tierValue}
                         </button>
                     ))}
                 </div>
@@ -707,18 +718,20 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                     {/* whitespace-nowrap: same CJK wrap risk as the Tier label
                         above. */}
                     <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('common.type')}</span>
-                    {SHIP_TYPES.map((t) => {
-                        const cls = shipClass(t);
+                    {/* Loop var renamed from `t` — same shadowing fix as the
+                        Tier pills above (fix round 1, F4). */}
+                    {SHIP_TYPES.map((typeValue) => {
+                        const cls = shipClass(typeValue);
                         return (
                             <button
-                                key={t}
+                                key={typeValue}
                                 type="button"
-                                onClick={() => chooseType(t)}
-                                className={`${PILL_BASE} ${type === t ? PILL_ON : PILL_OFF}`}
-                                aria-pressed={type === t}
-                                title={cls?.label ?? t}
+                                onClick={() => chooseType(typeValue)}
+                                className={`${PILL_BASE} ${type === typeValue ? PILL_ON : PILL_OFF}`}
+                                aria-pressed={type === typeValue}
+                                title={cls?.label ?? typeValue}
                             >
-                                {cls?.abbr ?? t}
+                                {cls?.abbr ?? typeValue}
                             </button>
                         );
                     })}
@@ -741,7 +754,12 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                             <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">WR&nbsp;&ge;</span>
                             {WR_PCTS.map(({ value, label }) => (
                                 <button
-                                    key={label}
+                                    // Was `key={label}` — collided once the null
+                                    // row's label stopped being the static string
+                                    // 'All' and started resolving through t()
+                                    // (fix round 1, F2). `value` is unique and
+                                    // stable regardless of locale.
+                                    key={String(value)}
                                     type="button"
                                     onClick={() => chooseWrPct(value)}
                                     className={`${PILL_BASE} ${wrPct === value ? PILL_ON : PILL_OFF}`}
@@ -752,7 +770,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                                             : `Top ${value}% of players by win rate`
                                     }
                                 >
-                                    {label}
+                                    {label ?? t('common.all')}
                                 </button>
                             ))}
                         </>

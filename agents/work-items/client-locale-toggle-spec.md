@@ -85,17 +85,24 @@ as the next place it would happen. That follow-on has now run.
 Two concrete surfaces were fully hardcoded English and are now wired:
 
 - The landing ship-leaderboard filter bar (`ShipLeaderboard.tsx`, the Tier /
-  Type labels — **`WR ≥` is deliberately excluded, see below**).
+  Type labels and the WR-percentile group's `All` pill — **`WR ≥` itself is
+  deliberately excluded, see below**).
 - `EfficiencyBadgeTable.tsx`'s filter row (`Tier` / `Type` / `Nation` / `Award`
-  labels plus four `<option value="all">All</option>` dropdown entries).
+  labels, four `<option value="all">All</option>` dropdown entries, and the
+  `Clear` button), its results-table column headers (same four words,
+  repeated — see F1 below), and `EfficiencyMiniTreemaps.tsx`'s four
+  mini-treemap titles (same four words again, one row above the table).
 
 **The scaffolding was already in place; it is now load-bearing.** `common.tier`,
 `common.type`, `common.all`, `common.battles`, `common.avgDamage`,
 `common.winRate`, `common.ship`, `common.player`, and `common.season` were
 populated in `en.ts`/`ko.ts`/`ja.ts` with no call site before this follow-on
-(as opposed to `common.clear`/`common.close`/`common.clan`, which had neither
-a call site nor a named owner and were deleted outright). Two new keys were
-added alongside them: `common.nation` and `common.award` (see below).
+(as opposed to `common.close`/`common.clan`, which had neither a call site
+nor a named owner and were deleted outright — `common.clear` was deleted in
+that same round on the same reasoning and **that was wrong, corrected fix
+round 1**: see F3 below and the research doc's reconciliation). Three new
+keys were added: `common.nation`, `common.award` (see below), and
+`common.clear` (restored, F3).
 
 **Resolved, in order:**
 
@@ -132,12 +139,63 @@ added alongside them: `common.nation` and `common.award` (see below).
    one remaining English label in that row for a gap and "fix" it into a
    guessed translation. No `common.*` key exists for it.
 
+**Fix round 1 (review pass, same day).** Five findings, closed:
+
+- **F1 — the same four words rendered twice, one row apart, in different
+  languages.** The first pass wired `EfficiencyBadgeTable.tsx`'s filter-bar
+  labels but missed two other sites naming the identical four facets:
+  `EfficiencyMiniTreemaps.tsx:281-284`'s mini-treemap titles, and the table's
+  own `COLUMNS` header row (`Tier`/`Nation`/`Type`/`Award`). Under `?lang=ko`
+  this put translated filter labels directly above English column headers
+  and mini-treemap titles in one viewport — precisely the alternating-
+  language defect this whole follow-on exists to close. Both now resolve
+  through the same `common.tier`/`common.type`/`common.nation`/`common.award`
+  keys; `EfficiencyBadgeTable.tsx`'s `COLUMNS` lost its static `label` field
+  in favour of a `columnLabel(key, t)` lookup (a module-level array can't
+  call a hook, so the label has to be resolved at render time instead of
+  baked into the array).
+- **F2 — the ship-leaderboard WR-percentile filter's `All` pill was still
+  hardcoded**, the one `common.all` call site the first pass missed. Wired
+  to `common.all`; the `WR ≥` abbreviation ruling (item 4 above) never
+  covered this pill; `WR_PCTS`'s React `key` was also switched from the
+  (about-to-become-translated) `label` to `String(value)` so the keys can't
+  collide once `label` stops being a static string.
+- **F3 — `common.clear` was wrongly deleted, restored.** A prior round
+  deleted it alongside `common.close`/`common.clan` reasoning "no call site,
+  no follow-on owner" — true of the code, not of the intent:
+  `EfficiencyBadgeTable.tsx`'s filter-row `Clear` button always existed and
+  needed exactly this key. Restored (`Clear`/초기화/クリア, generic-chrome
+  tier) and wired; the deletion rationale is corrected at its source in the
+  research doc and in `ko.ts`/`ja.ts`'s own comments so a future reader
+  doesn't inherit the wrong inference again.
+- **F4 (minor) — `t` shadowing.** `ShipLeaderboard.tsx`'s `TIERS.map((t) =>
+  …)`/`SHIP_TYPES.map((t) => …)` shadowed the top-level `const t = useT()`.
+  Harmless while nothing inside those callbacks called `t()`, but a future
+  edit adding a translated `title` inside one of them would silently resolve
+  to the tier/type value instead of the translator function and still
+  typecheck. Loop variables renamed (`tierValue`/`typeValue`).
+- **F5 (minor) — stale invariant below, in "Why `Partial`..."**: corrected
+  to acknowledge `common.award` ships populated *and* carries
+  `NEEDS-NATIVE-CHECK` — see that section.
+
+**Verification split — what I verified myself vs. what review verified.**
+This pass's own dev-server visual check was limited to `ShipLeaderboard.tsx`
+(the Django backend wasn't running, so `EfficiencyBadgeTable.tsx` couldn't
+mount with real data). The review pass that found F1–F5 also discovered
+`BATTLESTATS_API_ORIGIN=https://battlestats.online npx next dev` proxies to
+prod without a local backend, and used it to visually verify all four
+`EfficiencyBadgeTable.tsx` labels, both locales, both widths — zero wrapping
+or clipping. Both verification passes are recorded in the report rather than
+merged into one claim.
+
 **Test coverage:** `ShipLeaderboardFilterBarLocale.test.tsx` and
 `EfficiencyBadgeTableLocale.test.tsx` render both components under real
 `ko`/`ja` dictionaries (no `translate()` mock) and assert the translated
 label text, so breaking the wiring turns them red — an English-only
 assertion can't distinguish a working `t()` call from a hardcoded literal,
-since both render the same string in the default locale.
+since both render the same string in the default locale. Extended in fix
+round 1 to also cover the mini-treemap titles, the column headers, the WR
+`All` pill, and the restored `Clear` button.
 
 ### Accepted inconsistency
 
@@ -184,8 +242,16 @@ and the `NEEDS-NATIVE-CHECK` residue is the entire subject of the follow-on work
 so being unable to answer *how much of `ko` is real* costs more than the build
 gate is worth. With `Partial`:
 
-- untranslated = omitted, and `NEEDS-NATIVE-CHECK` is simply a comment beside the
-  omission;
+- untranslated = omitted, and `NEEDS-NATIVE-CHECK` is ordinarily a comment beside
+  the omission — **with one recorded exception**: `common.award` (added in the
+  filter-bar follow-on, see "Filter bars: DONE" above) ships a real value in
+  `ko.ts`/`ja.ts` *and* carries a `NEEDS-NATIVE-CHECK` marker, because shipping
+  a best-effort generic-chrome admission beat leaving one filter label English
+  next to three translated ones. The marker therefore means two different
+  things depending on whether the key beside it is populated: "omitted,
+  pending a stronger corpus hit" (the ordinary case) or "shipped, pending a
+  native speaker's confirmation of the word choice" (`common.award`'s case).
+  Both are "not fully trusted yet"; only the first withholds the string;
 - the runtime English fallback becomes live and load-bearing rather than dead code
   reachable only by casting past the type;
 - coverage is `Object.keys(ko).length / Object.keys(en).length`, asserted and

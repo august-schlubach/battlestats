@@ -61,6 +61,7 @@ export type StringKey =
     | 'shipClass.ships'
     // — shared controls —
     | 'common.all'
+    | 'common.clear'
     | 'common.tier'
     | 'common.type'
     | 'common.nation'

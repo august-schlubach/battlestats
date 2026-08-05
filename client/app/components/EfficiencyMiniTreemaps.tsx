@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } from '../lib/chartTheme';
+import { useT } from '../context/LocaleContext';
 import { nationLabel } from '../lib/shipIdentity';
 import type { EfficiencyBadgeDot } from './EfficiencyBadgeTable';
 
@@ -211,6 +212,7 @@ const nationBlue = (rank: number, total: number): string => (
 // the Blues ramp.
 const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, theme, selected, onSelect }) => {
     const colors = chartColors[theme];
+    const t = useT();
 
     const { tierData, typeData, nationData, awardData } = useMemo(() => {
         const tierCounts = new Map<number, number>();
@@ -278,10 +280,17 @@ const EfficiencyMiniTreemaps: React.FC<EfficiencyMiniTreemapsProps> = ({ rows, t
     // 2x2: Tier / Type on the first line, Nation / Award on the second.
     return (
         <div className="grid grid-cols-2 gap-3">
-            <EfficiencyMiniTreemap title="Tier" ariaLabel="Badged ships by tier" data={tierData} control="tier" selectedValue={selected.tier} onSelect={onSelect} />
-            <EfficiencyMiniTreemap title="Type" ariaLabel="Badged ships by class" data={typeData} control="type" selectedValue={selected.type} onSelect={onSelect} />
-            <EfficiencyMiniTreemap title="Nation" ariaLabel="Badged ships by nation" data={nationData} control="nation" selectedValue={selected.nation} onSelect={onSelect} />
-            <EfficiencyMiniTreemap title="Award" ariaLabel="Badged ships by award grade" data={awardData} control="award" selectedValue={selected.award} onSelect={onSelect} />
+            {/* Titles wired to the SAME common.* keys EfficiencyBadgeTable's filter
+                labels and column headers use (fix round 1, F1) — these tiles sit
+                directly above that table, so a mismatched language here reads as
+                broken, not partial. ariaLabel stays English: it's a longer
+                descriptive sentence, not a bare filter-bar word, same distinction
+                landing.treemap.viewTreemap/viewScatterplot vs their ariaLabel
+                clause already draws. */}
+            <EfficiencyMiniTreemap title={t('common.tier')} ariaLabel="Badged ships by tier" data={tierData} control="tier" selectedValue={selected.tier} onSelect={onSelect} />
+            <EfficiencyMiniTreemap title={t('common.type')} ariaLabel="Badged ships by class" data={typeData} control="type" selectedValue={selected.type} onSelect={onSelect} />
+            <EfficiencyMiniTreemap title={t('common.nation')} ariaLabel="Badged ships by nation" data={nationData} control="nation" selectedValue={selected.nation} onSelect={onSelect} />
+            <EfficiencyMiniTreemap title={t('common.award')} ariaLabel="Badged ships by award grade" data={awardData} control="award" selectedValue={selected.award} onSelect={onSelect} />
         </div>
     );
 };

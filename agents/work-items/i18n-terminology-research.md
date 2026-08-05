@@ -125,6 +125,7 @@ Keys admitted under the generic-chrome tier, with their values:
 | `nav.selectRealm` | 서버 선택 | サーバー選択 |
 | `nav.language` | 언어 | 言語 |
 | `common.all` | 전체 | すべて |
+| `common.clear` (restored fix round 1, F3 — see the note below the "This tier is deliberately narrow" paragraph) | 초기화 | クリア |
 | `nav.selectTheme` | 테마 선택 | テーマ選択 |
 | `nav.searchSubmit` | 검색 | 検索 |
 | `nav.themeLight` | 라이트 | ライト |
@@ -295,16 +296,30 @@ word) and stays unadmitted.
 requested page could not be found.") — generic application chrome with no game
 vocabulary in it at all, admitted for the same reason as `nav.language`.
 
-This tier is deliberately narrow. `common.clear`, `common.close`, and `common.clan`
-were considered for it and **rejected** — not deferred to a follow-on, deleted outright
-(final fix round): no call site in the client references any of the three, and no
-follow-on task claims them, so keeping them as translated-but-unwired scaffolding cost
-more than it delivered. `common.clan` in particular was translated in both locales with
-nowhere to land. Contrast the *other* nine `common.*` keys that existed before this pass
-(`tier`, `type`, `all`, `battles`, `avgDamage`, `winRate`, `ship`, `player`, `season`),
-which stayed as scaffolding because the client-locale-toggle spec's Scope section named
-an actual follow-on for them (the landing filter bar + `EfficiencyBadgeTable.tsx`). Do
-not extend this tier without a matching entry here.
+This tier is deliberately narrow. `common.close` and `common.clan` were considered for
+it and **rejected** — not deferred to a follow-on, deleted outright (final fix round):
+no call site in the client references either, and no follow-on task claims them, so
+keeping them as translated-but-unwired scaffolding cost more than it delivered.
+`common.clan` in particular was translated in both locales with nowhere to land.
+Contrast the *other* nine `common.*` keys that existed before this pass (`tier`, `type`,
+`all`, `battles`, `avgDamage`, `winRate`, `ship`, `player`, `season`), which stayed as
+scaffolding because the client-locale-toggle spec's Scope section named an actual
+follow-on for them (the landing filter bar + `EfficiencyBadgeTable.tsx`). Do not extend
+this tier without a matching entry here.
+
+**`common.clear` was deleted in that same round on the same reasoning and it was
+wrong — corrected fix round 1 (F3).** "No call site references it" was true of the
+code; "no follow-on task claims it" was not true of the intent. It restored the
+already-named follow-on's business: `EfficiencyBadgeTable.tsx:330` renders a hardcoded
+`Clear` button in the exact filter row this pass translated (see the entries above),
+so the key had an owner the whole time — the deletion rationale mistook an unwired
+key for an orphaned one, the same distinction that correctly kept `common.type`
+scaffolded rather than deleting it alongside `common.close`/`common.clan`. Re-added
+with English `'Clear'`, admitted under the generic-chrome tier (everyday interface
+vocabulary, same tier as `common.all` — see the admission table above), and wired to
+the button it was always describing.
+
+(added to the admission table above this section, alongside `common.all`.)
 
 `common.type` was a different case from the paragraph above: "type" here means ship
 class (Battleship / Cruiser / Destroyer / …), which is game-category vocabulary, not

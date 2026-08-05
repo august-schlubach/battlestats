@@ -120,6 +120,13 @@ export const en: Record<StringKey, string> = {
     'shipClass.ships': 'ships',
 
     'common.all': 'All',
+    // Restored, fix round 1 (F3): deleted in an earlier fix round on the
+    // (mistaken) grounds that no call site referenced it and no follow-on
+    // claimed it — that was true of the code at the time, but not of the
+    // intent: EfficiencyBadgeTable.tsx's filter-row Clear button always had
+    // an owner, it just hadn't been wired yet. Generic UI chrome, same tier
+    // as common.all — see the research doc's admission table.
+    'common.clear': 'Clear',
     'common.tier': 'Tier',
     'common.type': 'Type',
     // The ship-nationality filter's label — corpus-attested 国家/국가, same
