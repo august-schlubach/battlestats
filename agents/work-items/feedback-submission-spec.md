@@ -13,9 +13,11 @@ the locale rollout specifically needs one: the `NEEDS-NATIVE-CHECK` residue in
 notice, and today they have nowhere to say so. The **Report a language issue**
 category is the feedback loop that finishes the translation work.
 
-*Where am I?* is deliberately included. Search and direct traffic dominate
-arrivals, so a share of visitors land on a player page with no idea what this site
-is; that confusion is a measurable product signal, not a support burden.
+An earlier draft carried a fourth category, *Where am I?*, on the reasoning that
+search and direct traffic dominate arrivals so some visitors land on a player page
+with no idea what the site is. It was a joke in the original ask and is **dropped**.
+The underlying observation still stands and may deserve its own affordance one day —
+but a help link is not feedback, and conflating them serves neither.
 
 ## Shape
 
@@ -27,8 +29,16 @@ new infrastructure pattern.
 (body-portaled fixed overlay, the treatment established in 4.0.1), opened by a
 `Leave feedback` link in `Footer.tsx`.
 
+**Placement (decided 2026-08-05):** it takes the exact slot the **`Fork me on
+GitHub`** link occupies today — third in the byline row, between `CC BY-NC-SA 4.0`
+and `Add a streamer!` — and **that GitHub link is removed**, not moved. The footer
+row does not grow. Rationale: the repo link served contributors, a population this
+project does not have; the slot is better spent on the one affordance that closes
+a loop we actually need (the `NEEDS-NATIVE-CHECK` translation residue). Drop its
+`outbound-link`/`target: github` Umami call with it.
+
 - **Categories** (radio or select, one required): report a language issue ·
-  suggest a feature · report a bug · where am I?
+  suggest a feature · report a bug.
 - **Free-text input**, required, with a length cap.
 - Both the link text and the category labels come from the i18n dictionary and
   therefore **change with the locale selector**. These strings are part of the
@@ -43,12 +53,13 @@ Fields worth capturing beyond category + text: the **active locale** (a language
 report is meaningless without knowing which dictionary it refers to), the realm,
 and the originating path. No account, no email, no PII.
 
-## Open questions
+## Decisions (2026-08-05)
 
-- Rate limiting / spam control. The streamer endpoint's existing posture should be
-  read first and matched rather than invented.
-- Whether *where am I?* should answer itself inline — a one-paragraph "what this
-  site is" shown on selection — instead of only filing a report. Cheaper for the
-  visitor and probably the better product answer.
-- Notification: does a submission need to reach the operator actively, or is
-  Django admin sufficient (as it is for streamer submissions)?
+- **Three categories, not four.** *Where am I?* was a joke in the original ask and
+  is **dropped**. Shipping categories: report a language issue · suggest a feature ·
+  report a bug.
+- **Rate limiting / spam control:** read the streamer endpoint's existing posture
+  and match it. Do not invent a second policy for the same class of anonymous
+  write.
+- **Notification: Django admin only**, as with streamer submissions. No email, no
+  webhook. Revisit if volume ever justifies it.
