@@ -73,71 +73,71 @@ than ship a guess.
 - **Auto-detection.** `navigator.language` is never consulted.
 - **SEO.** See *Non-goal: search traffic*.
 
-### Corrected against what actually shipped: button/filter labels are NOT in scope
+### Filter bars: DONE (2026-08-04, follow-on #2)
 
 An earlier draft of this Scope section listed "button/filter labels" as in
-scope alongside the tab labels. That never happened, and shipping it partially
-now would recreate the exact defect this fix round otherwise closes (an
-alternating-language surface) — one review pass caught the tab strip doing
-this; the filter bar and the Efficiency table are the next place it would
-happen, so the honest move is to name the follow-on rather than half-wire it.
+scope alongside the tab labels. That never happened at the time, and
+shipping it partially would have recreated the exact defect this fix round
+otherwise closed (an alternating-language surface) — one review pass caught
+the tab strip doing this, and the filter bar / Efficiency table were named
+as the next place it would happen. That follow-on has now run.
 
-Two concrete surfaces remain fully hardcoded English:
+Two concrete surfaces were fully hardcoded English and are now wired:
 
 - The landing ship-leaderboard filter bar (`ShipLeaderboard.tsx`, the Tier /
-  Type / `WR ≥` pill-group labels).
+  Type labels — **`WR ≥` is deliberately excluded, see below**).
 - `EfficiencyBadgeTable.tsx`'s filter row (`Tier` / `Type` / `Nation` / `Award`
   labels plus four `<option value="all">All</option>` dropdown entries).
 
-**The scaffolding is already in place.** `common.tier`, `common.type`,
-`common.all`, `common.battles`, `common.avgDamage`, `common.winRate`,
-`common.ship`, `common.player`, and `common.season` are populated in `en.ts`/
-`ko.ts`/`ja.ts` today with no call site — a fix round this pass confirmed no
-component references them and deliberately kept them anyway (as opposed to
-`common.clear`/`common.close`/`common.clan`, which had neither a call site nor
-a named owner and were deleted outright). Wiring the filter bar and the
-Efficiency table is that named owner.
+**The scaffolding was already in place; it is now load-bearing.** `common.tier`,
+`common.type`, `common.all`, `common.battles`, `common.avgDamage`,
+`common.winRate`, `common.ship`, `common.player`, and `common.season` were
+populated in `en.ts`/`ko.ts`/`ja.ts` with no call site before this follow-on
+(as opposed to `common.clear`/`common.close`/`common.clan`, which had neither
+a call site nor a named owner and were deleted outright). Two new keys were
+added alongside them: `common.nation` and `common.award` (see below).
 
-**What blocks wiring it now — narrowed by the 2026-08-04 corpus pass.** Three
-labels on those two surfaces were originally flagged as game-category
-vocabulary the research corpus did not attest, not generic UI chrome. A
-follow-up corpus pass against `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`
-(a fully localized ship-ranking table header) resolved two of the three:
+**Resolved, in order:**
 
-- ~~**`Nation`**~~ (ship nationality) — **now attested**: 国家/국가 label the
-  nationality **filter** above the ranking table on both locales' ship pages
-  (`**국가:** 전체 | …`, not a column header — corrected in fix round 1). See
-  the research doc's Verified terms table.
-- ~~**`Type`**~~, the umbrella category word for ship class — **now
-  attested**: 艦種/함종 label the class **filter** in the same row (`**함종:**
-  전체 | 구축함 항공모함 …`, again a filter label rather than a column header).
-  The individual class nouns were already attested (전함/戦艦, 순양함/巡洋艦, …);
-  this closes the umbrella-word gap that used to keep `common.type` out of the
-  generic-chrome admission table. Worth noting precisely because it strengthens
-  the case for wiring: our own filter bars use the umbrella word as a **filter
-  label** too, the exact same UI role as the corpus's, not merely an adjacent
-  one.
-- **`Award`** (badge-tier name — our own product taxonomy, no in-game source)
-  remains the one unresolved label. It names a classification this site
-  invented, not something WoWS or its community ranks ships/players by, so no
-  stats-site corpus pass will ever attest it — the eventual call is whether a
-  reviewer admits it under the generic-chrome tier (an "award" concept is
-  common everyday vocabulary, if a strained fit for a WoWS-specific badge
-  taxonomy) or leaves it English.
+1. **`Nation`/`Type` corpus attestation** — resolved by the 2026-08-04 corpus
+   pass (see the research doc's Verified terms table): 国家/국가 and 艦種/함종
+   both attested as filter labels on `asia.wows-numbers.com`'s ship pages, the
+   same UI role as our own filter bars.
+2. **`Award`** (badge-tier name — our own product taxonomy, no in-game source)
+   — no corpus pass will ever attest it, since the concept doesn't exist
+   outside this site. Admitted under the generic-chrome tier using 등급/等級
+   ("grade", a description of the column's values rather than a literal
+   rendering of "Award") — see the research doc's admission table, entry
+   marked `‡`. **Ships with a `NEEDS-NATIVE-CHECK` marker in `ko.ts`/`ja.ts`**:
+   this is the weakest attestation in the whole change, flagged deliberately
+   rather than left to blend in with the corpus-backed keys around it.
+3. **The `common.winRate` casing trap, below, turned out not to block this
+   follow-on.** The trap's four live sites (`PlayerDetail.tsx`,
+   `RankedSeasonScatterSVG.tsx`, `ClanBattleSeasonScatterSVG.tsx`,
+   `Clan3DSVG.tsx`) are all title-case `'Win Rate'` renders outside the two
+   filter bars in scope here. `ShipLeaderboard.tsx` does contain a
+   sentence-case `'Win rate'` column header in its **results table**
+   (`colSort`/`SortButton`), matching `common.winRate`'s casing exactly — but
+   the filter-bar site list this follow-on was scoped to was the Tier/Type/
+   `WR ≥` pill-group labels specifically, not that table's column headers, so
+   it was left exactly as it was (hardcoded, unwired) and the casing trap
+   remains open for whichever follow-on eventually reaches for it.
+4. **`WR ≥` was resolved as "leave it English", not wired.** wows-numbers
+   keeps `WR Diff` in Latin in both its ko and ja ranking tables — the
+   community reads "WR" as an untranslated abbreviation in both languages, the
+   same as "PR" elsewhere in the corpus. This is now recorded as an explicit,
+   evidence-backed ruling in the research doc's "Deliberately untranslated:
+   `WR ≥`" section and as an inline comment at the call site in
+   `ShipLeaderboard.tsx`, specifically so a future pass does not mistake the
+   one remaining English label in that row for a gap and "fix" it into a
+   guessed translation. No `common.*` key exists for it.
 
-**A future pass is no longer blocked on `Nation`/`Type`.** What remains before
-wiring `ShipLeaderboard.tsx`'s filter bar and `EfficiencyBadgeTable.tsx`:
-
-1. Resolve `Award` (attest, admit under generic-chrome, or leave English) and
-   populate `common.nation`/a new `common.type` value in `ko.ts`/`ja.ts` —
-   `common.type` is already scaffolded as a `StringKey`, `common.nation` is
-   not yet added.
-2. Resolve the `common.winRate` casing trap below — it sits directly in this
-   follow-on's path, since `ShipLeaderboard.tsx` is one of the four live sites
-   with the casing conflict.
-3. Wire the filter bars themselves. **Still explicitly deferred**: this
-   corpus pass closes the vocabulary gap, it does not wire anything — the
-   filter bars stay hardcoded English until that follow-on runs.
+**Test coverage:** `ShipLeaderboardFilterBarLocale.test.tsx` and
+`EfficiencyBadgeTableLocale.test.tsx` render both components under real
+`ko`/`ja` dictionaries (no `translate()` mock) and assert the translated
+label text, so breaking the wiring turns them red — an English-only
+assertion can't distinguish a working `t()` call from a hardcoded literal,
+since both render the same string in the default locale.
 
 ### Accepted inconsistency
 
@@ -494,14 +494,17 @@ changing it).
 3. Localize info-tooltip descriptions.
 4. If KR/JP engagement moves: localized route segments, `hreflang`, per-locale
    `generateMetadata`, sitemap × locales, and a CJK font for OG cards.
-5. Wire the landing filter bar and `EfficiencyBadgeTable.tsx` to the
-   already-populated `common.*` keys (see *Corrected against what actually
-   shipped* under Scope). A 2026-08-04 corpus pass attested `Nation` and the
-   umbrella `Type` (国家/국가, 艦種/함종 — see the research doc's Verified
-   terms table), so the blocker list has shrunk to just `Award` (our own
-   badge taxonomy, still no in-game source) plus the `common.winRate` casing
-   trap immediately below, which still sits directly in this follow-on's
-   path. (The composed-template blocker that used to sit alongside it was
-   resolved 2026-08-04 — see above — and no longer blocks this follow-on
-   either.) Wiring itself remains deferred — this pass closed the vocabulary
-   gap, not the surfaces.
+5. ~~Wire the landing filter bar and `EfficiencyBadgeTable.tsx`~~ — **DONE,
+   2026-08-04 (follow-on #2)**. See "Filter bars: DONE" under Scope above for
+   the full account: `common.type`/`common.nation` are now populated from the
+   corpus-attested 함종/艦種 and 국가/国家; a new `common.award` key (등급/等級)
+   fills the one label no corpus pass could ever attest — a generic-chrome
+   admission carrying a `NEEDS-NATIVE-CHECK` marker, the weakest attestation
+   in this change; `WR ≥` was ruled deliberately English (wows-numbers keeps
+   `WR Diff` in Latin in both locales too); and the `common.winRate` casing
+   trap turned out not to be in this follow-on's actual path (its four sites
+   are all outside the two filter bars this task's site list named). The
+   remaining open item from this list is the casing trap itself, still
+   unresolved and still blocking whichever future follow-on wires
+   `common.winRate` into `ShipLeaderboard.tsx`'s results-table column header
+   or the other three title-case sites.

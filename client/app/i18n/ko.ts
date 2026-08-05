@@ -54,6 +54,21 @@ export const ko: Partial<Record<StringKey, string>> = {
 
     'common.all': '전체',
     'common.tier': '티어',
+    // Filter-bar wiring (2026-08-04, follow-on #2): 함종, the ship-class
+    // umbrella word — corpus-attested as a filter label on
+    // asia.wows-numbers.com/ko/ships/ (see the research doc's Verified terms
+    // table). No longer omitted — see the comment block at the bottom of
+    // this file for how the omission note used to read.
+    'common.type': '함종',
+    // Same 2026-08-04 corpus pass, same page, same dual role: 국가 labels
+    // the nationality filter above the ranking table.
+    'common.nation': '국가',
+    // NEEDS-NATIVE-CHECK — shipped anyway (generic-chrome admission, not a
+    // corpus attestation): 등급 ("grade") is this task's own rendering of
+    // our badge taxonomy (Expert/I/II/III), not a wows-numbers or community
+    // term for it. This is the weakest attestation in this change, flagged
+    // deliberately rather than left to blend in with the rest.
+    'common.award': '등급',
     'common.battles': '전투 수',
     'common.avgDamage': '평균 데미지',
     'common.winRate': '승률',
@@ -112,19 +127,10 @@ export const ko: Partial<Record<StringKey, string>> = {
     // languages tab to tab). common.clear/common.close/common.clan were
     // deleted outright this fix round rather than kept as unwired
     // scaffolding — no call site references any of them anywhere in the
-    // client, and no follow-on task claims them (contrast common.type below
-    // and the surviving common.* keys, which Fix 4's spec amendment assigns
-    // to a named follow-on).
-    //
-    // Category label — NOT an attestation gap anymore (updated, fix round 1):
-    // a 2026-08-04 corpus pass attested the umbrella word itself, 함종, as a
-    // filter label on asia.wows-numbers.com's ko ship-ranking page (see the
-    // research doc's Verified terms table). Stays omitted here anyway because
-    // populating it ahead of the landing filter bar / EfficiencyBadgeTable.tsx
-    // wiring is that named follow-on's work, not this doc-reconciliation
-    // pass's — see the client-locale-toggle spec's "What blocks wiring it
-    // now" section for the current (shorter) blocker list:
-    //   common.type
+    // client, and no follow-on task claims them (contrast the surviving
+    // common.* keys, which Fix 4's spec amendment assigned to a named
+    // follow-on — now wired, see common.type/common.nation/common.award
+    // above).
     //
     // Out of scope by the spec's own rule, not by attestation gap — the
     // long info-tooltip paragraph this label opens is explicitly excluded

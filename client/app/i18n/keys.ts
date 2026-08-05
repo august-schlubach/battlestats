@@ -63,6 +63,8 @@ export type StringKey =
     | 'common.all'
     | 'common.tier'
     | 'common.type'
+    | 'common.nation'
+    | 'common.award'
     | 'common.battles'
     | 'common.avgDamage'
     | 'common.winRate'

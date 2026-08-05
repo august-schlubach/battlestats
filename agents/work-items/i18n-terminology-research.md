@@ -60,6 +60,22 @@ Counts are occurrences in the corpus above.
 | Top N% (percentile filter, KO only) | — (see note) | 상위{pct}% | **Re-cited, fix round 1** — the original attribution to `asia.wows-numbers.com/ko/ships/` was wrong; re-verification found zero occurrences of `상위` there. The real source is `namu.wiki/w/월드 오브 워쉽` (`상위` ×3). Already shipped as `landing.treemap.topPct`'s Korean value under the generic-chrome tier (2026-08-04, follow-on #1); promoted here now that namu.wiki attests it directly. **Japanese `上位` is NOT promoted** — see the demotion note under Generic UI chrome below; its only hit is a single occurrence on an unvetted source. |
 | Recent / last (KO) | — (see note) | 최근 | **Re-cited, fix round 1** — the original attribution was wrong; re-verification found zero occurrences on the `ships/` pages. Real sources: `namu.wiki/w/월드 오브 워쉽` (`최근` ×8) and `asia.wows-numbers.com/ko/` root (`최근 이벤트`, `최근 전적` ×2 — `최근 전적` is exactly our register, "recent record"). Already shipped as the `최근` clause inside `landing.treemap.windowPhraseWithDays`'s and `landing.shipLeaderboard.windowSuffix`'s Korean values; promoted for the same reason as Top N% above. Japanese's `直近`, used in the same two keys, is a *different* word with no corpus hit of its own: it stays unattested and stays a generic-chrome admission (see the admission table below) — this row promotes the Korean word only. |
 
+## Deliberately untranslated: `WR ≥`
+
+Added 2026-08-04, filter-bar wiring (follow-on #2). `ShipLeaderboard.tsx`'s
+WR-percentile filter label (`WR&nbsp;≥`) stays hardcoded English in every
+locale — this is a **decision, evidenced against this corpus, not an
+omission**: the localized `asia.wows-numbers.com` ranking tables keep `WR
+Diff` in Latin in **both** the ko and ja versions of the page. Neither locale
+substitutes a native rendering for "WR" — the community reads it as an
+untranslated abbreviation in both languages, the same way `PR` (Personal
+Rating) already appears untranslated in the Verified terms table above. No
+`common.*` key was added for it, and none should be added by a future pass
+that notices `WR ≥` sitting in English next to a translated `Tier`/`Type`
+and assumes it was missed — it wasn't; see `ShipLeaderboard.tsx`'s inline
+comment at this call site and the client-locale-toggle spec's "Known traps"
+section, which records the same ruling.
+
 ## Not verified in this corpus
 
 Flagged rather than guessed. These need a second pass or a native check before shipping:
@@ -119,6 +135,7 @@ Keys admitted under the generic-chrome tier, with their values:
 | `insights.tabs.efficiency` | 효율 | 効率 |
 | `notFound.title` | 페이지를 찾을 수 없습니다 | ページが見つかりません |
 | `notFound.body` | 요청하신 페이지를 찾을 수 없습니다. | お探しのページは見つかりませんでした。 |
+| `common.award` (EfficiencyBadgeTable's filter-bar label) | 등급 ‡ | 等級 ‡ |
 | `landing.treemap.topPct` (Japanese half only — Korean is promoted, see Verified terms) | *(promoted — see Verified terms table)* | 上位{pct}% † |
 | `landing.treemap.windowPhraseWithDays` | 최근 {days}일간의 함선 순위 집계 기간 | 直近{days}日間の艦艇ランキング集計期間 |
 | `landing.treemap.windowPhraseNoDays` | 함선 순위 집계 기간 | 艦艇ランキング集計期間 |
@@ -169,6 +186,24 @@ not an attestation**: one occurrence on `gamewith.jp`, unvetted. Recorded here
 under generic UI chrome (no WoWS-jargon register risk either way — it's a
 percentile-filter word, not a game term) rather than deleted, pending a
 stronger future hit.
+
+‡ **Added 2026-08-04, filter-bar wiring (follow-on #2).** `common.award` is
+the weakest attestation in this document, flagged deliberately rather than
+left to blend in with the stronger rows above. It names
+`EfficiencyBadgeTable.tsx`'s badge-tier filter — our own product taxonomy
+(Expert/I/II/III), not anything WoWS or its community ranks ships or players
+by, so no stats-site corpus pass will ever attest it (this is not a "second
+pass might find it" gap like `Survival rate`; the concept itself doesn't
+exist outside this site). Admitted under the generic-UI-chrome tier anyway:
+"award" is common everyday vocabulary, if a strained fit for a WoWS-specific
+badge taxonomy. The Korean/Japanese values chosen (등급/等級, "grade") are a
+literal description of what the column's four values actually are — a
+ranked grade, not an "award" in the trophy sense — rather than a rendering
+of the English word "Award" itself. **NEEDS-NATIVE-CHECK**, marked inline in
+`ko.ts`/`ja.ts` next to the key (not filed under the omission-list comment
+block, since this key ships rather than being left absent): a native
+speaker should confirm 등급/等級 read naturally as a filter-dropdown label
+in this position, not just as a plausible dictionary rendering.
 
 `nav.realmCurrent`/`nav.languageCurrent` compose the realm/language chip's
 accessible name the same way `nav.themeCurrent` already does — "Realm"/
@@ -265,26 +300,28 @@ were considered for it and **rejected** — not deferred to a follow-on, deleted
 (final fix round): no call site in the client references any of the three, and no
 follow-on task claims them, so keeping them as translated-but-unwired scaffolding cost
 more than it delivered. `common.clan` in particular was translated in both locales with
-nowhere to land. Contrast the *other* nine `common.*` keys (`tier`, `type`, `all`,
-`battles`, `avgDamage`, `winRate`, `ship`, `player`, `season`), which stay as
-scaffolding because the client-locale-toggle spec's Scope section now names an actual
-follow-on for them (the landing filter bar + `EfficiencyBadgeTable.tsx`). Do not extend
-this tier without a matching entry here.
+nowhere to land. Contrast the *other* nine `common.*` keys that existed before this pass
+(`tier`, `type`, `all`, `battles`, `avgDamage`, `winRate`, `ship`, `player`, `season`),
+which stayed as scaffolding because the client-locale-toggle spec's Scope section named
+an actual follow-on for them (the landing filter bar + `EfficiencyBadgeTable.tsx`). Do
+not extend this tier without a matching entry here.
 
-`common.type` is a different case and does **not** belong in the paragraph above:
-"type" here means ship class (Battleship / Cruiser / Destroyer / …), which is
-game-category vocabulary, not generic interface chrome. **Update, 2026-08-04
-corpus pass:** the umbrella category word itself is attested now — 함종/艦種,
-the ship-class **filter label** above the ranking table on
-`asia.wows-numbers.com/ko/ships/` and `/ja/ships/` (a filter label, not a
-column header — corrected in fix round 1; see the Verified terms table above)
-— so `common.type` is no longer blocked by an attestation gap the way
-`common.nation` was until the same pass. It stays omitted from `ko.ts`/`ja.ts`
-in this pass anyway: the
-client-locale-toggle spec's follow-on owns wiring the landing filter bar +
-`EfficiencyBadgeTable.tsx`, and populating the dictionary value ahead of that
-wiring is that follow-on's work, not a doc-reconciliation task's. Unlike
-`common.clear`/`common.close`/`common.clan` (deleted outright above),
-`common.type` is kept as scaffolding for that named follow-on — see the
-client-locale-toggle spec's updated "What blocks wiring it now" section for
-the current, shorter blocker list.
+`common.type` was a different case from the paragraph above: "type" here means ship
+class (Battleship / Cruiser / Destroyer / …), which is game-category vocabulary, not
+generic interface chrome, so its omission was never this tier's business to resolve.
+**Update, 2026-08-04 corpus pass:** the umbrella category word itself is attested —
+함종/艦種, the ship-class **filter label** above the ranking table on
+`asia.wows-numbers.com/ko/ships/` and `/ja/ships/` (a filter label, not a column
+header — corrected in fix round 1; see the Verified terms table above) — which closed
+the attestation gap the same pass also closed for `common.nation` (국가/国家, same
+page, same dual role).
+
+**Wired, 2026-08-04, filter-bar follow-on #2.** The corpus pass above closed the
+vocabulary gap; this pass closed the wiring gap it left open — `common.type` and the
+new `common.nation` key are now populated in `ko.ts`/`ja.ts` and wired into both
+`ShipLeaderboard.tsx`'s and `EfficiencyBadgeTable.tsx`'s filter bars, and a third new
+key, `common.award` (등급/等級, generic-chrome admission — see the admission table's
+`‡` entry above), fills the one label neither corpus pass could ever attest: it names
+this site's own badge taxonomy, not a WoWS or community concept. The client-locale-
+toggle spec's "What blocks wiring it now" section and Follow-ons list are updated to
+match — see that spec.

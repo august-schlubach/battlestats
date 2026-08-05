@@ -685,7 +685,12 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Tier</span>
+                    {/* whitespace-nowrap: CJK has no spaces, so a short label can
+                        break mid-character once the flex row squeezes it below
+                        its content width (the ThemeToggle chip hit this first —
+                        see its comment). 티어/Tier/... are one- or two-character
+                        tokens that should never wrap in any language. */}
+                    <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('common.tier')}</span>
                     {TIERS.map((t) => (
                         <button
                             key={t}
@@ -699,7 +704,9 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                     ))}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Type</span>
+                    {/* whitespace-nowrap: same CJK wrap risk as the Tier label
+                        above. */}
+                    <span className="whitespace-nowrap text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">{t('common.type')}</span>
                     {SHIP_TYPES.map((t) => {
                         const cls = shipClass(t);
                         return (
@@ -721,6 +728,16 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                 <div className="flex flex-wrap items-center gap-2">
                     {!selectedShip && (
                         <>
+                            {/* "WR ≥" stays hardcoded English in every locale — a
+                                decision, not an omission. The localized
+                                asia.wows-numbers.com ranking tables keep "WR Diff"
+                                in Latin in BOTH ko and ja; the community reads "WR"
+                                as an untranslated abbreviation in both languages,
+                                same as "PR" elsewhere in that corpus. See
+                                agents/work-items/i18n-terminology-research.md's
+                                "Deliberately untranslated: WR ≥" section. No
+                                common.* key exists for this on purpose — do not
+                                add one. */}
                             <span className="text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">WR&nbsp;&ge;</span>
                             {WR_PCTS.map(({ value, label }) => (
                                 <button

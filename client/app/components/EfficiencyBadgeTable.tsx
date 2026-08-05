@@ -3,6 +3,7 @@ import { badgeClassColor, chartColors, shipTypeShortColor, type ChartTheme } fro
 import wrColor from '../lib/wrColor';
 import { trackEvent } from '../lib/umami';
 import { useRealm } from '../context/RealmContext';
+import { useT } from '../context/LocaleContext';
 import { nationLabel } from '../lib/shipIdentity';
 import EfficiencyMiniTreemaps from './EfficiencyMiniTreemaps';
 import NationFlag from './NationFlag';
@@ -135,6 +136,7 @@ const compareRows = (a: EfficiencyBadgeDot, b: EfficiencyBadgeDot, key: SortKey,
 const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme, maxTableHeightPx }) => {
     const colors = chartColors[theme];
     const { realm } = useRealm();
+    const t = useT();
     const [sortKey, setSortKey] = useState<SortKey>('award');
     const [sortDir, setSortDir] = useState<SortDir>('asc');
     // 'all' = no filter on that facet.
@@ -261,52 +263,57 @@ const EfficiencyBadgeTable: React.FC<EfficiencyBadgeTableProps> = ({ dots, theme
         <div className="mt-8 overflow-x-auto px-[15px]">
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Tier</span>
+                    {/* whitespace-nowrap: CJK has no spaces, so a short label can
+                        break mid-character once the flex row squeezes it below
+                        its content width (the ThemeToggle chip hit this first —
+                        see its comment). 티어/艦種/... are one- or two-character
+                        tokens that should never wrap in any language. */}
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.tier')}</span>
                     <select
                         value={filterTier}
                         onChange={(event) => applyFilter('tier', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {tierOptions.map((tier) => (
                             <option key={tier} value={String(tier)}>T{tier}</option>
                         ))}
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Type</span>
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.type')}</span>
                     <select
                         value={filterType}
                         onChange={(event) => applyFilter('type', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {typeOptions.map((type) => (
                             <option key={type} value={type}>{type}</option>
                         ))}
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Nation</span>
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.nation')}</span>
                     <select
                         value={filterNation}
                         onChange={(event) => applyFilter('nation', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {nationOptions.map((option) => (
                             <option key={option.code} value={option.code}>{option.label}</option>
                         ))}
                     </select>
                 </label>
                 <label className="inline-flex items-center gap-1.5 text-[var(--text-secondary)]">
-                    <span className="text-xs font-semibold uppercase tracking-wide">Award</span>
+                    <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-wide">{t('common.award')}</span>
                     <select
                         value={filterAward}
                         onChange={(event) => applyFilter('award', event.target.value, 'dropdown')}
                         className="rounded border border-[var(--border)] bg-[var(--bg-surface)] px-2 py-1 text-[var(--text-primary)]"
                     >
-                        <option value="all">All</option>
+                        <option value="all">{t('common.all')}</option>
                         {awardOptions.map((badgeClass) => (
                             <option key={badgeClass} value={String(badgeClass)}>
                                 {GRADES.find((grade) => grade.badgeClass === badgeClass)?.label ?? `Class ${badgeClass}`}
