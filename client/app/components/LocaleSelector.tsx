@@ -75,11 +75,14 @@ const LocaleSelector: React.FC = () => {
             <button
                 type="button"
                 onClick={() => setOpen((prev) => !prev)}
-                // 11.5px horizontal padding, not the 10px the sibling realm/theme
-                // chips use: this chip's only content is a 16px flag plus the
-                // chevron, so at 10px it read visibly tighter than its neighbours.
-                // 1.5px per side = 3px wider overall.
-                className="inline-flex items-center gap-1.5 rounded-md px-[11.5px] transition-colors"
+                // Asymmetric padding, unlike the sibling realm/theme chips' flat
+                // 10px: this chip's only content is a 16px flag plus the chevron.
+                // 11.5px on the left (3px wider than the siblings, which read too
+                // tight against a bare flag) and 19.5px on the right, giving the
+                // chevron 8px of breathing room before the edge.
+                // Written as pl/pr rather than px + pr so the override is explicit
+                // and does not depend on Tailwind's utility emission order.
+                className="inline-flex items-center gap-1.5 rounded-md pl-[11.5px] pr-[19.5px] transition-colors"
                 style={{
                     height: '28px',
                     border: '1px solid var(--border)',
