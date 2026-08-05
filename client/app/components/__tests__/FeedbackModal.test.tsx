@@ -47,6 +47,7 @@ describe('FeedbackModal submit tracking', () => {
         });
         const body = JSON.parse((global.fetch as jest.Mock).mock.calls[0][1].body);
         expect(body.category).toBe('bug_report');
+        expect(body.message).toBe('The Activity tab chart is blank on my profile.');
         expect(body).toHaveProperty('locale');
         expect(body).toHaveProperty('realm');
         expect(body.path).toBe('/player/CaptainTest');
@@ -109,6 +110,31 @@ describe('FeedbackModal submit tracking', () => {
             });
         });
         expect(screen.getByText('Network error. Please try again.')).toBeInTheDocument();
+    });
+
+    it('falls back to the generic error message when a 400 carries no surfaced field errors', async () => {
+        (global.fetch as jest.Mock).mockResolvedValue({
+            status: 400,
+            json: async () => ({ form_loaded_at: ['too_fast'] }),
+        });
+        render(<FeedbackModal open onClose={() => undefined} />);
+        fillValidForm();
+
+        await submitForm();
+
+        await waitFor(() => {
+            expect(trackEventMock).toHaveBeenCalledWith('feedback-submit', {
+                category: 'bug_report',
+                status: 'invalid',
+            });
+        });
+        // Neither category nor message was rejected, so there is nothing for
+        // "Please correct the errors below." to point at — the generic error
+        // renders instead, not an unannotated banner.
+        expect(
+            screen.getByText('Something went wrong. Please try again later.'),
+        ).toBeInTheDocument();
+        expect(screen.queryByText('Please correct the errors below.')).not.toBeInTheDocument();
     });
 
     it('disables submit until a category is chosen and the message is non-blank', () => {

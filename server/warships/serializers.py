@@ -28,7 +28,7 @@ class StreamerSubmissionSerializer(serializers.ModelSerializer):
         return value
 
     def validate_form_loaded_at(self, value):
-        if value and (time.time() * 1000 - value) < 2000:
+        if value and 0 <= (time.time() * 1000 - value) < 2000:
             raise serializers.ValidationError('too_fast')
         return value
 
@@ -102,7 +102,7 @@ class FeedbackSerializer(serializers.ModelSerializer):
         return value
 
     def validate_form_loaded_at(self, value):
-        if value and (time.time() * 1000 - value) < 2000:
+        if value and 0 <= (time.time() * 1000 - value) < 2000:
             raise serializers.ValidationError('too_fast')
         return value
 

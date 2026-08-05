@@ -112,7 +112,11 @@ const FeedbackModal: React.FC<FeedbackModalProps> = ({ open, onClose }) => {
                     if (body[k]) errs[k] = Array.isArray(body[k]) ? body[k][0] : String(body[k]);
                 }
                 setFieldErrors(errs);
-                setGenericError(t('feedback.error.correctBelow'));
+                setGenericError(
+                    Object.keys(errs).length > 0
+                        ? t('feedback.error.correctBelow')
+                        : t('feedback.error.generic'),
+                );
                 trackEvent('feedback-submit', { category, status: 'invalid' });
                 setState('error');
                 return;

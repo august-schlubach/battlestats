@@ -3529,6 +3529,22 @@ class StreamerSubmissionViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(StreamerSubmission.objects.count(), 0)
 
+    def test_future_skewed_clock_not_rejected(self):
+        # A visitor whose local clock runs fast sends a form_loaded_at ahead
+        # of the server's clock, making time.time()*1000 - value negative.
+        # The too-fast gate must not treat "negative gap" as "submitted
+        # instantly" — only a small non-negative gap is a bot signal.
+        import time as _time
+        from warships.models import StreamerSubmission
+        future_ms = int(_time.time() * 1000) + 60_000  # clock 1 minute fast
+        response = self.client.post(
+            self.URL,
+            data=self._payload(form_loaded_at=future_ms),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(StreamerSubmission.objects.count(), 1)
+
 
 class FeedbackViewTests(TestCase):
     URL = '/api/feedback/'
@@ -3665,6 +3681,22 @@ class FeedbackViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Feedback.objects.count(), 0)
 
+    def test_future_skewed_clock_not_rejected(self):
+        # Same clock-skew defect as StreamerSubmissionSerializer: a visitor
+        # whose local clock runs fast sends a form_loaded_at ahead of the
+        # server's clock, making time.time()*1000 - value negative. That must
+        # not be treated as "submitted instantly" by the too-fast gate.
+        import time as _time
+        from warships.models import Feedback
+        future_ms = int(_time.time() * 1000) + 60_000  # clock 1 minute fast
+        response = self.client.post(
+            self.URL,
+            data=self._payload(form_loaded_at=future_ms),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Feedback.objects.count(), 1)
+
     def test_optional_fields_default_and_long_path_truncates(self):
         from warships.models import Feedback
         payload = self._payload()
@@ -3698,6 +3730,23 @@ class FeedbackViewTests(TestCase):
         self.assertNotIn('submitter_ua', field_names)
         self.assertNotIn('email', field_names)
         self.assertNotIn('account', field_names)
+
+    def test_enabled_by_default(self):
+        # No env var set — the master kill switch defaults ON, so a
+        # submission with no override still succeeds.
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(), content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Feedback.objects.count(), 1)
+
+    def test_disabled_by_kill_switch(self):
+        from warships.models import Feedback
+        with patch.dict(os.environ, {"FEEDBACK_SUBMISSION_ENABLED": "0"}):
+            response = self.client.post(
+                self.URL, data=self._payload(), content_type='application/json')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(Feedback.objects.count(), 0)
 
 
 class PlayerLiveRefreshSignalTests(TestCase):
