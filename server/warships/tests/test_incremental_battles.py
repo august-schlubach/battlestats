@@ -1630,6 +1630,77 @@ class RebuildDailyShipStatsTests(TestCase):
         self.assertEqual(row.xp, 2_400)
         self.assertEqual(row.survived_battles, 1)
 
+    def test_rebuild_carries_phase7_combat_columns(self):
+        """The sweeper must carry the 14 Phase-7 widening columns.
+
+        Regression: `rebuild_daily_ship_stats_for_date` seeded only the 8 core
+        fields, so every nightly `roll_up_player_daily_ship_stats_task` run
+        (self-healing 3-day trailing window, delete+rebuild) silently reset
+        these to their model default of 0. Measured 2026-08-05: 9 of the
+        trailing 15 production days had `max(main_shots) = 0` in PDSS while
+        BattleEvent retained the deltas. The ship combat profile
+        (`data.py` hit-ratio brackets) reads these columns.
+        """
+        BattleEvent.objects.all().delete()
+        PlayerDailyShipStats.objects.all().delete()
+        midday = datetime(2026, 4, 28, 12, 0, 0)
+        BattleEvent.objects.create(
+            player=self.player, ship_id=42, ship_name="Yamato",
+            battles_delta=1, wins_delta=1, damage_delta=50_000, survived=True,
+            main_shots_delta=100, main_hits_delta=40, main_frags_delta=1,
+            secondary_shots_delta=200, secondary_hits_delta=60,
+            secondary_frags_delta=2,
+            torpedo_shots_delta=8, torpedo_hits_delta=3, torpedo_frags_delta=1,
+            damage_scouting_delta=12_000, ships_spotted_delta=5,
+            capture_points_delta=7, dropped_capture_points_delta=3,
+            team_capture_points_delta=11,
+            from_observation=self.obs_a, to_observation=self.obs_b,
+        )
+        BattleEvent.objects.all().update(detected_at=midday)
+
+        rebuild_daily_ship_stats_for_date(self.target_date)
+
+        row = PlayerDailyShipStats.objects.get(date=self.target_date)
+        self.assertEqual(row.main_shots, 100)
+        self.assertEqual(row.main_hits, 40)
+        self.assertEqual(row.main_frags, 1)
+        self.assertEqual(row.secondary_shots, 200)
+        self.assertEqual(row.secondary_hits, 60)
+        self.assertEqual(row.secondary_frags, 2)
+        self.assertEqual(row.torpedo_shots, 8)
+        self.assertEqual(row.torpedo_hits, 3)
+        self.assertEqual(row.torpedo_frags, 1)
+        self.assertEqual(row.damage_scouting, 12_000)
+        self.assertEqual(row.ships_spotted, 5)
+        self.assertEqual(row.capture_points, 7)
+        self.assertEqual(row.dropped_capture_points, 3)
+        self.assertEqual(row.team_capture_points, 11)
+
+    def test_rebuild_sums_phase7_across_multiple_events(self):
+        """Phase-7 columns accumulate across a day's events, like the core 8."""
+        BattleEvent.objects.all().delete()
+        PlayerDailyShipStats.objects.all().delete()
+        midday = datetime(2026, 4, 28, 12, 0, 0)
+        # Distinct observation pairs — BattleEvent is unique on
+        # (from_observation, to_observation, ship_id).
+        pairs = ((self.obs_a, self.obs_b), (self.obs_b, self.obs_c))
+        for (frm, to), (shots, hits) in zip(pairs, ((100, 40), (50, 25))):
+            BattleEvent.objects.create(
+                player=self.player, ship_id=42, ship_name="Yamato",
+                battles_delta=1, damage_delta=10_000,
+                main_shots_delta=shots, main_hits_delta=hits,
+                ships_spotted_delta=2,
+                from_observation=frm, to_observation=to,
+            )
+        BattleEvent.objects.all().update(detected_at=midday)
+
+        rebuild_daily_ship_stats_for_date(self.target_date)
+
+        row = PlayerDailyShipStats.objects.get(date=self.target_date)
+        self.assertEqual(row.main_shots, 150)
+        self.assertEqual(row.main_hits, 65)
+        self.assertEqual(row.ships_spotted, 4)
+
     def test_rebuild_is_idempotent(self):
         rebuild_daily_ship_stats_for_date(self.target_date)
         first_count = PlayerDailyShipStats.objects.count()
