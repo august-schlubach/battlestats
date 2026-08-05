@@ -2,7 +2,7 @@ import re
 import time
 
 from rest_framework import serializers
-from .models import Player, Clan, Ship, StreamerSubmission
+from .models import Player, Clan, Ship, StreamerSubmission, Feedback
 from .data import _calculate_player_kill_ratio, _coerce_battle_rows, get_published_efficiency_rank_payload, build_player_summary, get_current_clan_battle_season_id, get_current_ranked_season_id, get_current_season_clan_battle_win_rate, get_current_season_ranked_league, is_current_season_clan_battle_player, is_current_season_ranked_player, get_published_clan_battle_summary_payload, is_clan_battle_enjoyer, is_pve_player, get_player_ship_badges, join_efficiency_battle_stats
 
 
@@ -28,7 +28,7 @@ class StreamerSubmissionSerializer(serializers.ModelSerializer):
         return value
 
     def validate_form_loaded_at(self, value):
-        if value and (time.time() * 1000 - value) < 2000:
+        if value and 0 <= (time.time() * 1000 - value) < 2000:
             raise serializers.ValidationError('too_fast')
         return value
 
@@ -75,6 +75,63 @@ class StreamerSubmissionSerializer(serializers.ModelSerializer):
             validated['submitter_ip'] = get_client_ip(request)
             validated['submitter_ua'] = (
                 request.META.get('HTTP_USER_AGENT') or '')[:300]
+        return super().create(validated)
+
+
+class FeedbackSerializer(serializers.ModelSerializer):
+    # Honeypot + timing gate mirrored verbatim from StreamerSubmissionSerializer:
+    # write_only, not stored on the model, popped in create(). No submitter
+    # IP/UA is captured here (unlike StreamerSubmission) — the spec is explicit
+    # that Feedback carries no PII.
+    website = serializers.CharField(
+        required=False, allow_blank=True, write_only=True)
+    form_loaded_at = serializers.IntegerField(required=False, write_only=True)
+    # Declared without the model's max_length so an over-length path is
+    # truncated (mirrors submitter_ua[:300]) rather than rejected — it's
+    # provenance metadata, not user input worth failing the submission over.
+    path = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = Feedback
+        fields = ['category', 'message', 'locale', 'realm', 'path',
+                  'website', 'form_loaded_at']
+
+    def validate_website(self, value):
+        if value:
+            raise serializers.ValidationError('spam')
+        return value
+
+    def validate_form_loaded_at(self, value):
+        if value and 0 <= (time.time() * 1000 - value) < 2000:
+            raise serializers.ValidationError('too_fast')
+        return value
+
+    def validate_message(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('message required')
+        return value
+
+    def validate_locale(self, value):
+        v = (value or '').strip().lower()
+        if v not in {'en', 'ko', 'ja'}:
+            raise serializers.ValidationError('invalid locale')
+        return v
+
+    def validate_realm(self, value):
+        if not value:
+            return ''
+        v = value.strip().lower()
+        if v not in {'na', 'eu', 'asia'}:
+            raise serializers.ValidationError('invalid realm')
+        return v
+
+    def validate_path(self, value):
+        return (value or '').strip()[:255]
+
+    def create(self, validated):
+        validated.pop('website', None)
+        validated.pop('form_loaded_at', None)
         return super().create(validated)
 
 

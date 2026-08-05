@@ -16,6 +16,7 @@ export type StringKey =
     | 'nav.themeDark'
     | 'nav.themeCurrent'
     | 'footer.lastViewed'
+    | 'footer.leaveFeedback'
     // — player insight tabs —
     | 'insights.tabs.activity'
     | 'insights.tabs.ships'
@@ -74,4 +75,18 @@ export type StringKey =
     | 'common.season'
     // — not found —
     | 'notFound.title'
-    | 'notFound.body';
+    | 'notFound.body'
+    // — feedback modal (footer "Leave feedback" link + FeedbackModal.tsx) —
+    | 'feedback.modal.title'
+    | 'feedback.category.languageIssue'
+    | 'feedback.category.featureSuggestion'
+    | 'feedback.category.bugReport'
+    | 'feedback.messagePlaceholder'
+    | 'feedback.submit'
+    | 'feedback.submitting'
+    | 'feedback.cancel'
+    | 'feedback.close'
+    | 'feedback.success'
+    | 'feedback.error.correctBelow'
+    | 'feedback.error.generic'
+    | 'feedback.error.network';

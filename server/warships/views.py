@@ -2138,6 +2138,28 @@ def streamer_submission_view(request) -> Response:
 
 @api_view(["POST"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def feedback_view(request) -> Response:
+    # Master kill switch — default ON, matching every comparable anonymous-write
+    # / background subsystem in this repo (ENRICHMENT_POOL_MAINTENANCE_ENABLED,
+    # SNAPSHOT_ACTIVE_PLAYERS_ENABLED, etc: os.getenv(..., "1") != "1"). Unlike
+    # those, this gates a public POST endpoint directly, so disabling it 503s
+    # rather than silently skipping a task — the operator's lever against abuse
+    # without a backend redeploy to pull the route.
+    if os.getenv("FEEDBACK_SUBMISSION_ENABLED", "1") != "1":
+        return Response(
+            {'detail': 'Feedback submission is temporarily disabled.'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    from .serializers import FeedbackSerializer
+    serializer = FeedbackSerializer(
+        data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response({'status': 'queued'}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def analytics_entity_view(request) -> Response:
     serializer = EntityVisitIngestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)

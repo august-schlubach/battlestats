@@ -129,10 +129,12 @@ Every event below routes through `trackEvent`. `realm` is `na|eu|asia`. Counts a
 
 | Event | Payload | Trigger & reproduction | Source | Status (30d) |
 |---|---|---|---|---|
-| `footer-lil-boots` | `{realm:'na'}` | Click the "lil_boots" creator link in the footer | `Footer.tsx:20` | ✅ 2 (2) |
-| `outbound-link` | `{target:'reddit'\|'cc-license'\|'github'\|'wows'\|'wg-support'}` | Click an external footer link | `Footer.tsx:28,40,50,73,83` | ✅ live-verified 2026-06-18 (cc-license/github/wows/wg-support). NOTE: the `wg-support` target's URL was dead (`www.support.wargaming.net`) and was repointed to `https://wargaming.net/support/` in v2.5.0 |
-| `streamer-open` | _(none)_ | Click "Add a streamer!" in the footer (submit-funnel denominator) | `Footer.tsx:60` | ✅ live-verified 2026-06-18 |
-| `streamer-submit` | `{status:'success'\|'invalid'\|'error'}` | Submit the streamer form (status = validation/server outcome) | `StreamerSubmissionModal.tsx:83,100,105,109` | ✅ live-verified 2026-06-18 (invalid + success paths) |
+| `footer-lil-boots` | `{realm:'na'}` | Click the "lil_boots" creator link in the footer | `Footer.tsx:24` | ✅ 2 (2) |
+| `outbound-link` | `{target:'reddit'\|'cc-license'\|'wows'\|'wg-support'}` | Click an external footer link. **`github` target removed 2026-08-05** — the "Fork me on GitHub" link itself was removed (spec `agents/work-items/feedback-submission-spec.md`), its footer slot taken by the new `feedback-open` trigger below; the target is gone from the enum, not just unclicked. Historical `target:'github'` rows in the capture log predate this removal | `Footer.tsx:32,44,91,101` | ✅ live-verified 2026-06-18 (cc-license/wows/wg-support) |
+| `streamer-open` | _(none)_ | Click "Add a streamer!" in the footer (submit-funnel denominator). **Gated 2026-08-05** behind `STREAMER_SUBMISSION_ENABLED` (frontend constant in `StreamerSubmissionModal.tsx`, currently `false` — near-zero production usage); the button/modal don't render at all while off, so the event cannot fire. Feature is intact, not removed — flip the constant to restore both the entry point and this event | `Footer.tsx:64` | ⛔ gated off — no captures possible until `STREAMER_SUBMISSION_ENABLED` flips back on; live-verified 2026-06-18 before the gate |
+| `streamer-submit` | `{status:'success'\|'invalid'\|'error'}` | Submit the streamer form (status = validation/server outcome). Same gate as `streamer-open` above — unreachable while `STREAMER_SUBMISSION_ENABLED` is off | `StreamerSubmissionModal.tsx:83,100,105,109` | ⛔ gated off (see `streamer-open`); live-verified 2026-06-18 before the gate |
+| `feedback-open` | _(none)_ | Click "Leave feedback" in the footer — the slot the removed GitHub link used to occupy (submit-funnel denominator) | `Footer.tsx:54` | 🟡 added 2026-08-05, pending deploy+captures |
+| `feedback-submit` | `{category:'language_issue'\|'feature_suggestion'\|'bug_report', status:'success'\|'invalid'\|'error'}` | Submit the feedback form (status = validation/server outcome) | `FeedbackModal.tsx:104,116,121,125` | 🟡 added 2026-08-05, pending deploy+captures |
 
 ## Not exposed (by design)
 

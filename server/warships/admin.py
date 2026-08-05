@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils import timezone
-from .models import Player, Ship, Clan, Snapshot, EntityVisitDaily, EntityVisitEvent, StreamerSubmission
+from .models import Player, Ship, Clan, Snapshot, EntityVisitDaily, EntityVisitEvent, StreamerSubmission, Feedback
 
 
 @admin.register(Player)
@@ -78,6 +78,33 @@ class StreamerSubmissionAdmin(admin.ModelAdmin):
         )
         self.message_user(request, f"{updated} submission(s) rejected.")
     reject_selected.short_description = "Reject selected submissions"
+
+
+@admin.register(Feedback)
+class FeedbackAdmin(admin.ModelAdmin):
+    list_display = ('category', 'locale', 'realm', 'status', 'created_at')
+    list_filter = ('category', 'locale', 'realm', 'status', 'created_at')
+    search_fields = ('message', 'path')
+    readonly_fields = ('created_at',)
+    actions = ('approve_selected', 'reject_selected')
+
+    def approve_selected(self, request, queryset):
+        updated = queryset.update(
+            status=Feedback.STATUS_APPROVED,
+            reviewed_at=timezone.now(),
+            reviewed_by=request.user,
+        )
+        self.message_user(request, f"{updated} feedback item(s) approved.")
+    approve_selected.short_description = "Approve selected feedback"
+
+    def reject_selected(self, request, queryset):
+        updated = queryset.update(
+            status=Feedback.STATUS_REJECTED,
+            reviewed_at=timezone.now(),
+            reviewed_by=request.user,
+        )
+        self.message_user(request, f"{updated} feedback item(s) rejected.")
+    reject_selected.short_description = "Reject selected feedback"
 
 
 @admin.register(EntityVisitEvent)

@@ -3,6 +3,16 @@
 _Created: 2026-04-07_
 _Status: Implemented (submit + queue + admin list slice). Approval-side `Player.is_streamer` promotion is intentionally deferred — see Follow-ups._
 
+**Update 2026-08-05:** the footer entry point is now **hidden** behind
+`STREAMER_SUBMISSION_ENABLED` (exported from `StreamerSubmissionModal.tsx`,
+same kill-switch shape as `PveEnjoyerIcon.tsx`) — production got 2
+submissions ever, both rejected, both on 2026-04-07, nothing in the four
+months since. This is not a decommission: the component, endpoint, model,
+and everything below stays fully intact and this runbook remains accurate
+for it; only the "Footer button" at the top of the Architecture diagram is
+currently unreachable. Flip the constant to restore it. The freed footer
+slot now opens `FeedbackModal.tsx` instead (`feedback-submission-spec.md`).
+
 ## Why
 
 `Player.is_streamer` exists in the model and is filterable in Django admin, but there is no community path to flag a player as a Twitch streamer. Today the field is set by hand. This feature adds a footer link → modal → form so visitors can submit `(IGN, twitch_handle, twitch_url)` into a moderated queue. An admin reviews the queue and approves/rejects.

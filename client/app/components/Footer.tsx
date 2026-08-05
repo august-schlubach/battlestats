@@ -6,10 +6,14 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faReddit } from '@fortawesome/free-brands-svg-icons';
 import { buildPlayerPath } from '../lib/entityRoutes';
 import { trackEvent } from '../lib/umami';
-import StreamerSubmissionModal from './StreamerSubmissionModal';
+import { useT } from '../context/LocaleContext';
+import StreamerSubmissionModal, { STREAMER_SUBMISSION_ENABLED } from './StreamerSubmissionModal';
+import FeedbackModal from './FeedbackModal';
 
 const Footer: React.FC = () => {
+    const t = useT();
     const [streamerModalOpen, setStreamerModalOpen] = useState(false);
+    const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
     return (
         <footer className="mt-6 py-4 text-center text-xs text-[var(--text-secondary)]">
             <div className="space-y-2 leading-5">
@@ -45,23 +49,25 @@ const Footer: React.FC = () => {
                         CC BY-NC-SA 4.0
                     </a>
                     {' · '}
-                    <a
-                        href="https://github.com/nitro-panks/battlestats"
-                        onClick={() => trackEvent('outbound-link', { target: 'github' })}
-                        className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
-                        target="_blank"
-                        rel="noreferrer"
-                    >
-                        Fork me on GitHub
-                    </a>
-                    {' · '}
                     <button
                         type="button"
-                        onClick={() => { trackEvent('streamer-open'); setStreamerModalOpen(true); }}
-                        className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
+                        onClick={() => { trackEvent('feedback-open'); setFeedbackModalOpen(true); }}
+                        className="whitespace-nowrap text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
                     >
-                        Add a streamer!
+                        {t('footer.leaveFeedback')}
                     </button>
+                    {STREAMER_SUBMISSION_ENABLED && (
+                        <>
+                            {' · '}
+                            <button
+                                type="button"
+                                onClick={() => { trackEvent('streamer-open'); setStreamerModalOpen(true); }}
+                                className="text-[var(--accent-mid)] underline-offset-2 hover:text-[var(--accent-dark)] hover:underline"
+                            >
+                                Add a streamer!
+                            </button>
+                        </>
+                    )}
                 </p>
                 <p>
                     World of Warships data is sourced from the official Wargaming API. Battlestats is an independent fan project and is not affiliated with, endorsed by, or sponsored by Wargaming.
@@ -101,10 +107,16 @@ const Footer: React.FC = () => {
                     </a>
                 </p>
             </div>
-            <StreamerSubmissionModal
-                open={streamerModalOpen}
-                onClose={() => setStreamerModalOpen(false)}
+            <FeedbackModal
+                open={feedbackModalOpen}
+                onClose={() => setFeedbackModalOpen(false)}
             />
+            {STREAMER_SUBMISSION_ENABLED && (
+                <StreamerSubmissionModal
+                    open={streamerModalOpen}
+                    onClose={() => setStreamerModalOpen(false)}
+                />
+            )}
         </footer>
     );
 };

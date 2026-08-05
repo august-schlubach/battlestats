@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
-from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, ranked_season_catalog, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, player_name_suggestions, clan_name_suggestions, player_summary, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, sitemap_entities, streamer_submission_view, battle_history, realm_top_ships, realm_ships_by_tier_type, ship_leaderboard, ship_combat_stats
+from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, ranked_season_catalog, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, player_name_suggestions, clan_name_suggestions, player_summary, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, sitemap_entities, streamer_submission_view, feedback_view, battle_history, realm_top_ships, realm_ships_by_tier_type, ship_leaderboard, ship_combat_stats
 from django.conf import settings
 from django.conf.urls.static import static
 
@@ -140,6 +140,10 @@ urlpatterns = [
          streamer_submission_view, name='streamer_submission'),
     path('api/streamer-submissions',
          streamer_submission_view, name='streamer_submission_no_slash'),
+    path('api/feedback/',
+         feedback_view, name='feedback'),
+    path('api/feedback',
+         feedback_view, name='feedback_no_slash'),
     path('api/analytics/entity-view/',
          analytics_entity_view, name='analytics_entity_view'),
     path('api/analytics/entity-view',

@@ -24,6 +24,9 @@ export const en: Record<StringKey, string> = {
     // word — is a single translated sentence; see ThemeToggle.tsx.
     'nav.themeCurrent': 'Theme: {label}',
     'footer.lastViewed': 'Last viewed:',
+    // Third slot in the footer byline row, the exact slot the removed "Fork me
+    // on GitHub" link used to occupy — see Footer.tsx.
+    'footer.leaveFeedback': 'Leave feedback',
 
     'insights.tabs.activity': 'Activity',
     'insights.tabs.ships': 'Ships',
@@ -149,4 +152,25 @@ export const en: Record<StringKey, string> = {
 
     'notFound.title': 'Page Not Found',
     'notFound.body': 'The requested page could not be found.',
+
+    // FeedbackModal.tsx. Generic UI chrome (form labels/states, not WoWS
+    // vocabulary) — admitted per the research doc's two-tier standard, see
+    // agents/work-items/i18n-terminology-research.md.
+    'feedback.modal.title': 'Leave feedback',
+    // These three MUST send the backend's machine value (language_issue /
+    // feature_suggestion / bug_report), never this display label — see
+    // FeedbackModal.tsx's CATEGORY_LABEL_KEY map.
+    'feedback.category.languageIssue': 'Report a language issue',
+    'feedback.category.featureSuggestion': 'Suggest a feature',
+    'feedback.category.bugReport': 'Report a bug',
+    'feedback.messagePlaceholder': 'Describe the issue or suggestion',
+    'feedback.submit': 'Submit',
+    'feedback.submitting': 'Submitting…',
+    'feedback.cancel': 'Cancel',
+    // The × button's accessible name (aria-label), not visible text.
+    'feedback.close': 'Close',
+    'feedback.success': 'Thanks! Your feedback is queued for review.',
+    'feedback.error.correctBelow': 'Please correct the errors below.',
+    'feedback.error.generic': 'Something went wrong. Please try again later.',
+    'feedback.error.network': 'Network error. Please try again.',
 };
