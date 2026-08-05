@@ -579,20 +579,39 @@ PY
   # and the worker will silently fall back to the settings.py default. Fail
   # the deploy hard — see the 2026-04-08 incident in
   # agents/runbooks/runbook-enrichment-crawler-2026-04-03.md.
+  # The check RETRIES for a bounded window. `systemctl restart` returns before
+  # the new MainPID has finished exec'ing, so a single immediate read can catch
+  # a pid whose /proc/<pid>/environ is not yet the final one — a false FATAL
+  # that aborts the deploy after the work is already applied (observed
+  # 2026-08-05 on battlestats-celery-hydration; every unit was in fact correct).
+  # Retrying does NOT weaken the guard: a genuinely mutated EnvironmentFile
+  # stays wrong for every attempt, so the incident case still fails hard.
+  local settle_deadline=$((SECONDS + 30))
   for svc in battlestats-celery battlestats-celery-hydration battlestats-celery-background battlestats-celery-crawls battlestats-celery-floor; do
-    local pid
-    pid="$(systemctl show -p MainPID --value "${svc}")"
-    if [[ -z "${pid}" || "${pid}" == "0" ]]; then
-      echo "FATAL: ${svc} has no MainPID after restart" >&2
-      exit 1
-    fi
-    if ! tr '\0' '\n' < "/proc/${pid}/environ" | grep -q '^CELERY_BROKER_URL=amqp://battlestats:'; then
-      echo "FATAL: ${svc} MainPID ${pid} missing or wrong CELERY_BROKER_URL in process env" >&2
-      echo "       env file shows: $(grep '^CELERY_BROKER_URL=' /etc/battlestats-server.env || echo '(missing)')" >&2
+    local pid ok=0
+    while :; do
+      # Re-read MainPID each pass — it changes as the unit settles.
+      pid="$(systemctl show -p MainPID --value "${svc}")"
+      if [[ -n "${pid}" && "${pid}" != "0" ]] \
+         && tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null \
+            | grep -q '^CELERY_BROKER_URL=amqp://battlestats:'; then
+        ok=1
+        break
+      fi
+      (( SECONDS >= settle_deadline )) && break
+      sleep 2
+    done
+    if [[ "${ok}" != "1" ]]; then
+      if [[ -z "${pid}" || "${pid}" == "0" ]]; then
+        echo "FATAL: ${svc} has no MainPID 30s after restart" >&2
+      else
+        echo "FATAL: ${svc} MainPID ${pid} missing or wrong CELERY_BROKER_URL in process env after 30s" >&2
+        echo "       env file shows: $(grep '^CELERY_BROKER_URL=' /etc/battlestats-server.env || echo '(missing)')" >&2
+      fi
       exit 1
     fi
   done
-  echo "Celery worker process env verified (CELERY_BROKER_URL present in all 3 workers)"
+  echo "Celery worker process env verified (CELERY_BROKER_URL present in all 5 workers)"
 }
 
 activate_release() {
