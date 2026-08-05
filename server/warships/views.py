@@ -2138,6 +2138,17 @@ def streamer_submission_view(request) -> Response:
 
 @api_view(["POST"])
 @throttle_classes(PUBLIC_API_THROTTLES)
+def feedback_view(request) -> Response:
+    from .serializers import FeedbackSerializer
+    serializer = FeedbackSerializer(
+        data=request.data, context={'request': request})
+    serializer.is_valid(raise_exception=True)
+    serializer.save()
+    return Response({'status': 'queued'}, status=status.HTTP_201_CREATED)
+
+
+@api_view(["POST"])
+@throttle_classes(PUBLIC_API_THROTTLES)
 def analytics_entity_view(request) -> Response:
     serializer = EntityVisitIngestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)

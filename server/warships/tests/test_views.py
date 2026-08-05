@@ -3530,6 +3530,152 @@ class StreamerSubmissionViewTests(TestCase):
         self.assertEqual(StreamerSubmission.objects.count(), 0)
 
 
+class FeedbackViewTests(TestCase):
+    URL = '/api/feedback/'
+
+    def setUp(self):
+        cache.clear()
+
+    def _payload(self, **overrides):
+        payload = {
+            'category': 'bug_report',
+            'message': 'The battle history strip does not render on Safari.',
+            'locale': 'en',
+            'realm': 'na',
+            'path': '/player/SomePlayer',
+            'website': '',
+            'form_loaded_at': 1,  # ancient timestamp passes the > 2s gate
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_happy_path_creates_pending_submission_per_category(self):
+        from warships.models import Feedback
+        for category in ('language_issue', 'feature_suggestion', 'bug_report'):
+            with self.subTest(category=category):
+                Feedback.objects.all().delete()
+                response = self.client.post(
+                    self.URL, data=self._payload(category=category),
+                    content_type='application/json')
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json(), {'status': 'queued'})
+                self.assertEqual(Feedback.objects.count(), 1)
+                fb = Feedback.objects.first()
+                self.assertEqual(fb.category, category)
+                self.assertEqual(fb.status, Feedback.STATUS_PENDING)
+                self.assertEqual(fb.locale, 'en')
+                self.assertEqual(fb.realm, 'na')
+                self.assertEqual(fb.path, '/player/SomePlayer')
+                self.assertEqual(
+                    fb.message,
+                    'The battle history strip does not render on Safari.')
+
+    def test_invalid_category_rejected(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(category='not_a_real_category'),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_empty_message_rejected(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(message=''),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_whitespace_only_message_rejected(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(message='   \n\t  '),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_over_cap_message_rejected(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(message='x' * 2001),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_invalid_locale_rejected(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(locale='fr'),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_missing_locale_rejected(self):
+        payload = self._payload()
+        del payload['locale']
+        response = self.client.post(
+            self.URL, data=payload, content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_invalid_realm_rejected(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL, data=self._payload(realm='xx'),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_locale_realm_path_persist(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL,
+            data=self._payload(
+                category='feature_suggestion',
+                locale='ko',
+                realm='eu',
+                path='/clan/123-SomeClan',
+            ),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201)
+        fb = Feedback.objects.first()
+        self.assertEqual(fb.locale, 'ko')
+        self.assertEqual(fb.realm, 'eu')
+        self.assertEqual(fb.path, '/clan/123-SomeClan')
+
+    def test_honeypot_trips(self):
+        from warships.models import Feedback
+        response = self.client.post(
+            self.URL,
+            data=self._payload(website='spamspam'),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_too_fast_submission_rejected(self):
+        import time as _time
+        from warships.models import Feedback
+        now_ms = int(_time.time() * 1000)
+        response = self.client.post(
+            self.URL,
+            data=self._payload(form_loaded_at=now_ms),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Feedback.objects.count(), 0)
+
+    def test_no_pii_persisted(self):
+        """The Feedback model carries no account/email/IP field at all —
+        assert it has none, rather than merely asserting a value is blank."""
+        from warships.models import Feedback
+        field_names = {f.name for f in Feedback._meta.get_fields()}
+        self.assertNotIn('submitter_ip', field_names)
+        self.assertNotIn('submitter_ua', field_names)
+        self.assertNotIn('email', field_names)
+        self.assertNotIn('account', field_names)
+
+
 class PlayerLiveRefreshSignalTests(TestCase):
     """Live-update contract: the player-detail response advertises whether a
     visit-driven refresh is pending and when the next one is allowed, so the

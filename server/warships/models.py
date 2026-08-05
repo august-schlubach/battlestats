@@ -540,6 +540,54 @@ class StreamerSubmission(models.Model):
         return f"StreamerSubmission({self.ign} -> {self.twitch_handle}, {self.status})"
 
 
+class Feedback(models.Model):
+    """Visitor-submitted feedback (language issue / feature suggestion / bug
+    report), moderated through Django admin exactly like StreamerSubmission.
+    No account, no email, no PII is collected."""
+
+    class Category(models.TextChoices):
+        LANGUAGE_ISSUE = 'language_issue', 'Report a language issue'
+        FEATURE_SUGGESTION = 'feature_suggestion', 'Suggest a feature'
+        BUG_REPORT = 'bug_report', 'Report a bug'
+
+    STATUS_PENDING = 'pending'
+    STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
+    ]
+
+    category = models.CharField(max_length=32, choices=Category.choices)
+    message = models.CharField(max_length=2000)
+    locale = models.CharField(max_length=8)
+    realm = models.CharField(max_length=8, blank=True, default='')
+    path = models.CharField(max_length=255, blank=True, default='')
+    status = models.CharField(
+        max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='feedback_reviewed',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'created_at'],
+                         name='feedback_status_idx'),
+        ]
+
+    def __str__(self):
+        return f"Feedback({self.category} @ {self.locale}, {self.status})"
+
+
 class MvPlayerDistributionStats(models.Model):
     """Unmanaged model backed by the mv_player_distribution_stats materialized view."""
     realm = models.CharField(max_length=4)
