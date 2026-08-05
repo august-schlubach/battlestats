@@ -1,7 +1,7 @@
 # "Leave feedback" — footer link + categorized submission modal
 
 **Date:** 2026-08-04
-**Status:** queued (next step after `client-locale-toggle-spec.md`)
+**Status:** backend implemented 2026-08-05 (`feat/feedback-submission`, `Feedback` model + `POST /api/feedback/`) — wire contract in `.superpowers/sdd/feedback/backend-report.md`; frontend (`FeedbackModal` + footer link) still pending
 **Surface:** footer (all routes) + new modal; new backend model/endpoint
 **Depends on:** the locale toggle — the categories and the link text are localized
 

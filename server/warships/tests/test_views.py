@@ -3665,6 +3665,30 @@ class FeedbackViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Feedback.objects.count(), 0)
 
+    def test_optional_fields_default_and_long_path_truncates(self):
+        from warships.models import Feedback
+        payload = self._payload()
+        del payload['realm']
+        del payload['path']
+        response = self.client.post(
+            self.URL, data=payload, content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        fb = Feedback.objects.first()
+        self.assertEqual(fb.realm, '')
+        self.assertEqual(fb.path, '')
+
+        Feedback.objects.all().delete()
+        response = self.client.post(
+            self.URL, data=self._payload(path='/player/' + 'x' * 400),
+            content_type='application/json')
+        self.assertEqual(response.status_code, 201)
+        fb = Feedback.objects.first()
+        # The model column is varchar(255); sqlite won't enforce that at the
+        # DB layer, so this length assertion is what actually guards against
+        # a 500 on real Postgres if the serializer's [:255] truncation ever
+        # regresses.
+        self.assertEqual(len(fb.path), 255)
+
     def test_no_pii_persisted(self):
         """The Feedback model carries no account/email/IP field at all —
         assert it has none, rather than merely asserting a value is blank."""

@@ -231,6 +231,21 @@ shared on-disk `.env` state and `cloud` would point at production); env vars
 were passed inline to one-off `manage.py` invocations instead, and the
 worktree's `server/` has no `.env` file to pick up accidentally.
 
+Also re-ran the new `FeedbackViewTests` (13 tests) directly against this
+Postgres container (not just sqlite `--nomigrations`) — all pass, including
+`test_optional_fields_default_and_long_path_truncates`, which is the one
+assertion that actually matters here: sqlite doesn't enforce `varchar(n)`
+column widths, so a regression in the serializer's `path[:255]` truncation
+would pass on sqlite and 500 with "value too long for type character
+varying(255)" on real Postgres. Confirmed it doesn't.
+
+One side effect worth flagging: migrating this container to head also ran
+`post_migrate`, which `signals.py` uses to register every Celery Beat
+periodic task — so this run seeded a full set of `PeriodicTask` rows into
+that container's `django_celery_beat` tables. No Beat/worker process was
+attached (only `battlestats-db` itself was running), so nothing executed;
+this is inert until a worker points at that database.
+
 ## Self-review
 
 - Verified every response shape in this report empirically against a live
