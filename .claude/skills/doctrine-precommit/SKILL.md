@@ -40,7 +40,7 @@ For each changed file, tag what kind of change it is. This drives which checks m
 
 For each item in `pre_commit_requirements`, report **PASS / FAIL / N/A** with a one-line reason and a concrete pointer (file path) when failing.
 
-The five current requirements (verify against the JSON; the JSON wins if it has drifted):
+The current requirements (verify against the JSON; the JSON wins if it has drifted):
 
 1. **Documentation review** — If code paths or contracts changed, are the durable docs that describe that behavior updated? Check `CLAUDE.md` sections relevant to the touched area, and any runbook in `agents/runbooks/` whose topic matches. FAIL if behavior changed but the matching doc still describes the old behavior.
 
@@ -51,6 +51,18 @@ The five current requirements (verify against the JSON; the JSON wins if it has 
 4. **Runbook archiving** — Does this change supersede any active runbook in `agents/runbooks/`? Check filenames and titles for matches against the topic. If a runbook is now historical, it must move to `agents/runbooks/archive/`. FAIL with the specific runbook path.
 
 5. **Runbook/spec reconciliation** — If the change implements something described in an active runbook or `spec-*.md`, that runbook must be updated in the same commit with implementation status, fixes applied, and validation results. FAIL with the specific runbook path.
+
+6. **Env-value authority** — Does the diff state, rely on, or change a **production configuration value**? If so, every such value must name its authority (`server/deploy/deploy_to_droplet.sh` or the live `/etc/battlestats-*.env`) and the date observed. FAIL on any bare number asserted as a live value, on any value inferred from a code default, and on any behavior claimed to be running that was inferred from data shape rather than from its gate.
+
+   When the diff touches env-gated behavior or any doc that names an env var, run:
+
+   ```bash
+   server/scripts/check_env_drift.sh          # checks 1 + 3 gate; check 2 is informational
+   ```
+
+   FAIL on any check-1 row (a pin production is ignoring) or check-3 row (a doc contradicting production). Check 2 (documented-but-unpinned keys) is a standing backlog, not a blocker — do not fail on it unless the diff added to it. If SSH is unavailable, report the check as **N/A (could not run)** rather than PASS.
+
+   *Why this exists*: on 2026-08-05 a disk investigation lost time three ways on this one error class — docs saying 92d retention when prod was 105d (leading an agent to propose undoing a roadmap commitment), `BATTLE_OBSERVATION_COMPACT_KEEP` inferred from a code default, and the 07-19 audit's F6 asserting a prune was "visibly working" when its gate was off.
 
 Additionally, check the contract-safety decision rule: if a payload shape, endpoint, or query parameter changed, contract docs **and** API-facing tests must change in the same tranche. Surface as a FAIL if not.
 

@@ -66,7 +66,13 @@ The table has **zero lifetime deletes** (`n_tup_del = 0`); rows go back to 2026-
 
 ### F6: Player JSON columns: weight is where it should be
 
-Per-column sampling (2%, extrapolated): `battles_json` ≈ **4.3 GB** (avg 11 kB where present; 37% of players), `tiers_json` ≈ 650 MB, `ranked_json` ≈ 600 MB, `achievements_json` ≈ 550 MB, `randoms_json` ≈ 485 MB, rest smaller. By activity bucket, `battles_json` sits on the players being served: est. 3.2 GB on active-30d, 1.0 GB on 31–180d, 164 MB on 181–365d, **14 MB on >1y**; the 180d `prune_inactive_player_battles_json` path (`incremental_battles.py:1804`) is visibly working. **No large waste here.** Two code-side notes:
+Per-column sampling (2%, extrapolated): `battles_json` ≈ **4.3 GB** (avg 11 kB where present; 37% of players), `tiers_json` ≈ 650 MB, `ranked_json` ≈ 600 MB, `achievements_json` ≈ 550 MB, `randoms_json` ≈ 485 MB, rest smaller. By activity bucket, `battles_json` sits on the players being served: est. 3.2 GB on active-30d, 1.0 GB on 31–180d, 164 MB on 181–365d, **14 MB on >1y**.
+
+> **CORRECTION 2026-08-05 — this finding's central claim was wrong.** The original text read the light long-inactive tail as evidence that "the 180d `prune_inactive_player_battles_json` path is visibly working." **It has never run in production**: `PRUNE_BATTLES_JSON_ENABLED=0` in both `server/deploy/deploy_to_droplet.sh:751` and the live `/etc/battlestats-server.env`. The light tail has a different cause — `battles_json` is written by the observation floor's refresh (`FLOOR_REFRESH_BATTLES_JSON_ENABLED=1`), so it simply concentrates on recently-observed players; it is not being aged out. Consequence: `battles_json` is an **unbounded per-player ratchet** (~11.1 kB × every player ever observed, 433K today ≈ 4.85 GB) rather than a rolling 180-day window, and the "no large waste here" verdict rests on a false premise. See `agents/work-items/db-growth-capacity-2026-08-05.md` F6 + Lever 2.
+>
+> **The error class matters more than the instance**: this was a live *behavior* inferred from *data shape* without checking the gate that controls it. Verify env-gated behavior against the deploy script and the live `/etc`, never by inference — see `server/scripts/check_env_drift.sh`.
+
+**No large waste here** *(as measured; but see the correction above — the bound does not exist).* Two code-side notes:
 
 - Only `battles_json` has a prune; `tiers/type/activity/achievements/ranked/randoms/efficiency_json` are kept forever, but their combined tail-weight (~2.5 GB across *all* players) makes a prune a marginal win at best.
 - `models.py:45` carries a TODO to extract these blobs relationally. For a final-form app, do not: `battles_json` is the only career-scope per-ship store (BattleEvent/PDSS cover only 32d), and the serializer already excludes the four heaviest blobs from the payload (`serializers.py:117–120`).

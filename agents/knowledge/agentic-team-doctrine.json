@@ -26,7 +26,8 @@
         "When documentation is uncertain or lags reality, check the docs against the live code and tests before committing.",
         "Before every commit, ensure the touched behavior has appropriate automated coverage; add or update focused tests when the current suite no longer proves the changed behavior.",
         "Before every commit, move superseded or historical runbooks out of agents/runbooks/ into agents/runbooks/archive/ so active runbooks remain the current source of truth.",
-        "Before every commit that implements changes described in a runbook or spec, update the corresponding runbook to reflect the implementation status, fixes applied, and validation results."
+        "Before every commit that implements changes described in a runbook or spec, update the corresponding runbook to reflect the implementation status, fixes applied, and validation results.",
+        "Never state a production configuration value in a doc, a commit message, or an analysis without naming its authority and the date observed. The authority is server/deploy/deploy_to_droplet.sh or the live /etc/battlestats-*.env -- never a code default, never prose in another doc, never inference from data shape. Prefer a pointer (\"prod=105, pinned in deploy_to_droplet.sh\") over a copied number. When a change touches env-gated behavior, run server/scripts/check_env_drift.sh and resolve checks 1 and 3 before committing."
     ],
     "decision_rules": [
         "Prefer the smallest safe vertical slice.",
@@ -34,13 +35,15 @@
         "Validate touched areas with focused tests before widening scope.",
         "Preserve current user-facing behavior unless the task explicitly changes it.",
         "When an endpoint or payload changes, update contract docs and API-facing tests in the same tranche.",
-        "Do not commit until documentation review, code-vs-doc reconciliation for uncertainties, appropriate test updates, and runbook archiving have been completed."
+        "Do not commit until documentation review, code-vs-doc reconciliation for uncertainties, appropriate test updates, and runbook archiving have been completed.",
+        "Before proposing that a production setting be reduced, reversed, or removed, establish why it holds its current value. A setting sized for a roadmap commitment is not slack to reclaim -- confirm intent against the runbooks and work-items, or ask, before recommending a rollback."
     ],
     "claude_md_rules": [
         "CLAUDE.md is always-loaded default context; keep it a thin dispatch file (repo-global defaults + pointers), targeting under ~1,500 words / ~200 lines.",
         "Do not inline environment-variable catalogs in CLAUDE.md; move them to a runbook/reference doc and link it.",
         "Do not inline deep architecture, queue/cache/scheduling internals, or incident history in CLAUDE.md; these belong in agents/runbooks/.",
         "Recurring multi-step workflows belong in .claude/skills/, not as inline procedures in CLAUDE.md.",
-        "Prefer a file-path pointer over an embedded explanation whenever one exists. Full re-slim procedure: agents/runbooks/runbook-claude-md-durability.md."
+        "Prefer a file-path pointer over an embedded explanation whenever one exists. Full re-slim procedure: agents/runbooks/runbook-claude-md-durability.md.",
+        "When CLAUDE.md names a live env value, use the authority-carrying form: value, date set, and the file that pins it (see BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS and SHIP_LEADERBOARD_WINDOW_DAYS). A bare number with no authority is the drift pattern that costs debugging time."
     ]
 }
