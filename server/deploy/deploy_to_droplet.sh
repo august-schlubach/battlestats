@@ -724,6 +724,14 @@ set_env_value BATTLE_OBSERVATION_ROW_RETENTION_DAYS 32
 set_env_value BATTLE_OBSERVATION_EMPTY_RETENTION_DAYS 7
 # Daily observation-payload compaction: ON in prod since 2026-05-24 (was only a manual /etc edit); pinned explicitly per DB-audit item 10.
 set_env_value BATTLE_OBSERVATION_COMPACT_ENABLED 1
+# Live value has been 1 since 2026-05-24 but existed ONLY as a manual /etc edit
+# (code default is 3) -- an audit agent inferred 3 from the deploy script's
+# silence and built a phantom lever on it. Pinned per the env-value authority
+# rule: agents/runbooks/runbook-env-value-authority-2026-08-05.md
+set_env_value BATTLE_OBSERVATION_COMPACT_KEEP 1
+# Generous because the candidate scan is O(table): an unfiltered full-table
+# double-window pass. 180s was killing it mid-scan every night.
+set_env_value BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT 1800
 
 # Storage-retention maintenance jobs (data-lifecycle assessment 2026-06-21,
 # runbook-data-lifecycle-architecture-2026-06-21.md). Each runs as a systemd
@@ -1098,6 +1106,48 @@ EnvironmentFile=/etc/battlestats-server.secrets.env
 ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py downsample_snapshots --sleep 0.5'
 EOF
 
+# --- BattleObservation payload compaction (moved off Celery 2026-08-05) ------
+# Was a Beat task on the `background` queue and FAILED ON EVERY RUN: the
+# candidate scan is an unfiltered full-table double-window pass over ~3.5M rows,
+# so it blew either its own 180s statement timeout or the 540s Celery
+# soft_time_limit (verified in the droplet journal, Aug 02-05 2026). Nothing was
+# compacted, leaving ~2.1 GB of residue and a ~116 MB/day leak, which made
+# warships_battleobservation the largest table and the largest disk-growth
+# driver. Retention sweeps belong on timers, not worker slots -- same
+# convention as the archive job above. Runbook:
+# agents/runbooks/runbook-db-disk-remediation-2026-08-05.md (Step 1).
+cat > /etc/systemd/system/battlestats-compact-observations.service <<EOF
+[Unit]
+Description=Battlestats daily BattleObservation JSON compaction
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+# No Celery soft limit here; the statement timeout is the only bound and it is
+# generous because the candidate scan is O(table), not O(candidates).
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py prune_battle_observations --statement-timeout "\${BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT:-1800}"'
+TimeoutStartSec=7200
+EOF
+
+cat > /etc/systemd/system/battlestats-compact-observations.timer <<'EOF'
+[Unit]
+Description=Run Battlestats BattleObservation compaction daily
+
+[Timer]
+OnCalendar=*-*-* 12:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
 cat > /etc/systemd/system/battlestats-downsample-snapshots.timer <<'EOF'
 [Unit]
 Description=Run Battlestats Snapshot downsample weekly (Mon 04:30 UTC)
@@ -1184,6 +1234,7 @@ systemctl enable battlestats-celery-floor 2>/dev/null || true
 systemctl enable --now battlestats-celery-watchdog.timer 2>/dev/null || true
 systemctl enable --now battlestats-archive-battle-history.timer 2>/dev/null || true
 # Storage-retention timers (gated OFF via env — fire but no-op until flipped).
+systemctl enable --now battlestats-compact-observations.timer 2>/dev/null || true
 systemctl enable --now battlestats-downsample-snapshots.timer 2>/dev/null || true
 systemctl enable --now battlestats-prune-battles-json.timer 2>/dev/null || true
 systemctl enable --now battlestats-cleanup-entity-visits.timer 2>/dev/null || true

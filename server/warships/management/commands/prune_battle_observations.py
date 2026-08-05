@@ -26,6 +26,8 @@ Usage:
 """
 from __future__ import annotations
 
+import os
+
 from django.core.management.base import BaseCommand, CommandError
 
 from warships.incremental_battles import (
@@ -95,6 +97,18 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--dormant-after-days",
+            type=int,
+            default=int(os.getenv(
+                "BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS", "0")),
+            help=(
+                "Also clear JSON for players whose LATEST observation is older "
+                "than N days, overriding the keep-newest-N and ranked-baseline "
+                "protections. 0 (default) disables. IRREVERSIBLE: a returning "
+                "dormant player's diff baseline cannot be re-fetched from WG."
+            ),
+        )
+        parser.add_argument(
             "--dry-run", action="store_true",
             help="Report candidates + reclaimable bytes without writing.",
         )
@@ -103,6 +117,8 @@ class Command(BaseCommand):
         keep_per_player = options["keep_per_player"]
         if keep_per_player < 1:
             raise CommandError("--keep-per-player must be >= 1")
+        if options["dormant_after_days"] < 0:
+            raise CommandError("--dormant-after-days must be >= 0")
         if options["min_age_hours"] < 0:
             raise CommandError("--min-age-hours must be >= 0")
         if options["batch_size"] < 1:
@@ -114,6 +130,7 @@ class Command(BaseCommand):
 
         result = compact_battle_observation_payloads(
             keep_per_player=keep_per_player,
+            dormant_after_days=options["dormant_after_days"],
             min_age_hours=options["min_age_hours"],
             batch_size=options["batch_size"],
             max_rows=options["max_rows"],

@@ -2774,6 +2774,12 @@ def prune_battle_observations_task(self):
         result = compact_battle_observation_payloads(
             keep_per_player=int(
                 os.getenv("BATTLE_OBSERVATION_COMPACT_KEEP", "3")),
+            # Age bound (disk remediation Step 3). 0 = off, preserving the
+            # historical "keep newest N forever" behaviour. Arming it is
+            # IRREVERSIBLE for dormant players: their diff baseline cannot be
+            # re-fetched from WG, which serves only current cumulative stats.
+            dormant_after_days=int(
+                os.getenv("BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS", "0")),
             min_age_hours=int(
                 os.getenv("BATTLE_OBSERVATION_COMPACT_MIN_AGE_HOURS", "0")),
             batch_size=int(

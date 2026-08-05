@@ -3,7 +3,25 @@
 _Created: 2026-08-05_
 _Lifecycle: dated-active · Owner: platform_
 _Context: managed-PG disk went 45% (07-22) → 49.7% (07-29) → 55% (08-05), ~600 MB/day. A two-agent investigation produced `agents/work-items/db-growth-capacity-2026-08-05.md` (growth/capacity) and `agents/work-items/data-capture-utility-audit-2026-08-05.md` (G-series data-utility delta). This runbook is the **execution plan** those two reports imply: what to do, in what order, with what gate between each._
-_QA: every figure here traces to one of those two work-items or to a live check recorded in this runbook's Validation section. Nothing here has been executed yet — this is the plan, not a log._
+_QA: every figure here traces to one of those two work-items or to a live check recorded in this runbook's Validation section._
+_Status 2026-08-06: **code for Steps 1, 3 and 4b is implemented and merged** (TDD, 874 backend tests green). **No production mutation has been made** — the levers below are still un-armed, and each needs its own operator acknowledgement per the one-lever-at-a-time rule. See "Implementation status" immediately below._
+
+## Implementation status
+
+| Step | Code | Armed in prod | What remains |
+|---|---|---|---|
+| 0 — disk alerts | n/a | ☐ | Operator action in the DO console |
+| 1 — compaction on a timer | ✅ shipped | ☐ | Deploy installs the timer; then run `--dry-run`, then the first catch-up pass in `--max-rows` slices |
+| 2 — arm `PRUNE_BATTLES_JSON_ENABLED=1` | n/a (config) | ☐ | Deploy-script one-liner + Pass; `--dry-run` first |
+| 3 — age-bound observation JSON | ✅ shipped, **default off** | ☐ | Set `BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS=105`. **Irreversible** — do after Step 1 has run clean |
+| 4 — soft-limit triage | n/a | ☐ | Investigation, not a lever |
+| 4b — rollup Phase-7 fix | ✅ shipped | ☐ | Deploy, then backfill affected days |
+
+Code landed (branch `fix/disk-remediation-2026-08-05`):
+- `rebuild_daily_ship_stats_for_date` now carries all 14 Phase-7 columns via `_PHASE7_ROLLUP_COLUMNS` (Step 4b).
+- `battlestats-compact-observations.{service,timer}` in the backend deploy script; the Beat row is explicitly **disabled** via `BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED` (default 0) rather than deleted, so prod's existing DB row cannot double-run against the timer (Step 1).
+- `BATTLE_OBSERVATION_COMPACT_KEEP=1` and `_STATEMENT_TIMEOUT=1800` pinned in the deploy script (were manual-`/etc`-only / too low).
+- `compact_battle_observation_payloads(dormant_after_days=N)` + `--dormant-after-days` + `BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS`, default 0 (Step 3).
 
 ## Purpose
 

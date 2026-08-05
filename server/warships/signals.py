@@ -903,8 +903,21 @@ def register_periodic_schedules(sender, **kwargs):
     # to disable). Scheduled at the histogram's quietest UTC hour (12:30) to
     # stay clear of the 03:00 / 23:00 CPU peaks.
     # Runbook: agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md
-    compact_enabled = os.getenv(
-        "BATTLE_OBSERVATION_COMPACT_ENABLED", "1") == "1"
+    # RETIRED FROM BEAT 2026-08-05. Compaction now runs from
+    # `battlestats-compact-observations.timer` (installed by the backend deploy
+    # script): as a Celery task it hit the 540s soft_time_limit or its own
+    # statement timeout on EVERY run and compacted nothing, because the
+    # candidate scan is an unfiltered full-table double-window pass.
+    #
+    # The row is kept and explicitly DISABLED rather than deleted: PeriodicTask
+    # rows live in the DB, so dropping this block would leave prod's existing
+    # row enabled and double-run alongside the timer.
+    # `BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED=1` restores the Beat path.
+    # Runbook: agents/runbooks/runbook-db-disk-remediation-2026-08-05.md
+    compact_enabled = (
+        os.getenv("BATTLE_OBSERVATION_COMPACT_ENABLED", "1") == "1"
+        and os.getenv("BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED", "0") == "1"
+    )
     compact_hour = os.getenv("BATTLE_OBSERVATION_COMPACT_HOUR", "12")
     compact_minute = os.getenv("BATTLE_OBSERVATION_COMPACT_MINUTE", "30")
     compact_schedule, _ = CrontabSchedule.objects.get_or_create(

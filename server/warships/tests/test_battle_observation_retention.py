@@ -17,7 +17,10 @@ from unittest.mock import patch
 from django.core.management import call_command
 from django.test import TestCase
 
-from warships.incremental_battles import prune_battle_observation_rows
+from warships.incremental_battles import (
+    compact_battle_observation_payloads,
+    prune_battle_observation_rows,
+)
 from warships.models import BattleObservation, Player
 
 
@@ -150,3 +153,58 @@ class ArchiveCommandObservationTierTests(TestCase):
             "--dry-run", env={"BATTLE_OBSERVATION_ROW_RETENTION_ENABLED": "1"})
         self.assertIn("battleobservation", out)
         self.assertEqual(BattleObservation.objects.count(), 2)
+
+
+class CompactDormantPlayerJsonTests(TestCase):
+    """Step 3: age-bound the observation JSON (disk remediation 2026-08-05).
+
+    `compact_battle_observation_payloads` keeps the latest N observations per
+    player with **no upper age bound**, so a player observed once in April and
+    never again keeps their raw JSON forever. Combined with row-retention
+    (which never deletes a JSON-carrying row), that JSON is immune to both
+    mechanisms — which is what couples disk capacity to the *player pool*
+    rather than to the retention window.
+    """
+
+    def setUp(self):
+        self.dormant = Player.objects.create(
+            name="Dormant", player_id=3001, realm="na")
+        self.active = Player.objects.create(
+            name="Active", player_id=3002, realm="na")
+
+    def test_dormant_player_sole_json_row_is_cleared_when_age_bound_set(self):
+        pk = _obs(self.dormant, days_ago=200, json_payload={"a": 1})
+        compact_battle_observation_payloads(
+            keep_per_player=1, dormant_after_days=105)
+        self.assertIsNone(
+            BattleObservation.objects.get(pk=pk).ships_stats_json)
+
+    def test_dormant_row_is_kept_when_no_age_bound(self):
+        """Default behaviour is unchanged — the bound is opt-in."""
+        pk = _obs(self.dormant, days_ago=200, json_payload={"a": 1})
+        compact_battle_observation_payloads(keep_per_player=1)
+        self.assertIsNotNone(
+            BattleObservation.objects.get(pk=pk).ships_stats_json)
+
+    def test_active_player_latest_json_survives_the_age_bound(self):
+        """An in-window player keeps their diff baseline."""
+        pk = _obs(self.active, days_ago=1, json_payload={"a": 1})
+        compact_battle_observation_payloads(
+            keep_per_player=1, dormant_after_days=105)
+        self.assertIsNotNone(
+            BattleObservation.objects.get(pk=pk).ships_stats_json)
+
+    def test_recently_seen_player_keeps_baseline_despite_old_row(self):
+        """Dormancy is per *player*, not per row.
+
+        A player observed yesterday keeps their latest JSON even if they also
+        have a 200-day-old JSON row; only the stale extra is cleared.
+        """
+        old = _obs(self.active, days_ago=200, json_payload={"a": 1})
+        recent = _obs(self.active, days_ago=1, json_payload={"b": 2})
+        compact_battle_observation_payloads(
+            keep_per_player=1, dormant_after_days=105)
+        self.assertIsNotNone(
+            BattleObservation.objects.get(pk=recent).ships_stats_json)
+        self.assertIsNone(
+            BattleObservation.objects.get(pk=old).ships_stats_json)

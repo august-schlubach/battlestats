@@ -1418,6 +1418,30 @@ def _utc_day_bounds(target_date) -> Tuple[datetime, datetime]:
     return day_start, day_start + timedelta(days=1)
 
 
+# PlayerDailyShipStats column -> the BattleEvent delta column it sums.
+# These are the "Phase 7" widening columns. They must be carried through every
+# rebuild path: `roll_up_player_daily_ship_stats_task` is a nightly delete+
+# rebuild over a trailing window, so anything the rebuild omits is not merely
+# stale — it is zeroed on live rows. `data.py`'s ship-combat hit-ratio brackets
+# read these, and BattleEvent is the only other copy.
+_PHASE7_ROLLUP_COLUMNS: Dict[str, str] = {
+    "main_shots": "main_shots_delta",
+    "main_hits": "main_hits_delta",
+    "main_frags": "main_frags_delta",
+    "secondary_shots": "secondary_shots_delta",
+    "secondary_hits": "secondary_hits_delta",
+    "secondary_frags": "secondary_frags_delta",
+    "torpedo_shots": "torpedo_shots_delta",
+    "torpedo_hits": "torpedo_hits_delta",
+    "torpedo_frags": "torpedo_frags_delta",
+    "damage_scouting": "damage_scouting_delta",
+    "ships_spotted": "ships_spotted_delta",
+    "capture_points": "capture_points_delta",
+    "dropped_capture_points": "dropped_capture_points_delta",
+    "team_capture_points": "team_capture_points_delta",
+}
+
+
 def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
     """Rebuild `PlayerDailyShipStats` rows for `target_date` from BattleEvent.
 
@@ -1471,6 +1495,7 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
                     "battles": 0, "wins": 0, "losses": 0, "frags": 0,
                     "damage": 0, "xp": 0, "planes_killed": 0,
                     "survived_battles": 0,
+                    **{col: 0 for col in _PHASE7_ROLLUP_COLUMNS},
                     "first_event_at": event.detected_at,
                     "last_event_at": event.detected_at,
                 }
@@ -1482,6 +1507,11 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
             row["damage"] += event.damage_delta or 0
             row["xp"] += event.xp_delta or 0
             row["planes_killed"] += event.planes_killed_delta or 0
+            # Phase-7 widening columns. Omitting these let every nightly
+            # delete+rebuild reset them to the model default of 0, silently
+            # emptying the ship combat profile's hit-ratio source.
+            for col, delta_attr in _PHASE7_ROLLUP_COLUMNS.items():
+                row[col] += getattr(event, delta_attr, 0) or 0
             if event.survived:
                 row["survived_battles"] += 1
             row["last_event_at"] = event.detected_at
@@ -1514,7 +1544,7 @@ COMPACT_BATCH_SIZE_DEFAULT = 2000
 COMPACT_STATEMENT_TIMEOUT_DEFAULT = 180
 
 
-def _compact_candidate_sql() -> str:
+def _compact_candidate_sql(*, age_bound: bool = False) -> str:
     """SQL selecting observations whose JSON payloads are safe to clear.
 
     A single table scan with two window functions — deliberately NOT the
@@ -1533,7 +1563,19 @@ def _compact_candidate_sql() -> str:
     statement timeout. Reclaim is now estimated from catalog stats instead.)
     Window functions work on both Postgres and the sqlite used in tests.
     """
-    return """
+    # The baseline-protection rules (keep the newest `keep` observations and the
+    # newest ranked-carrying one) are what make a *dormant* player's JSON
+    # immortal: their sole observation is always rn = 1. `age_bound` adds an
+    # OR-branch that overrides those protections once the player's own latest
+    # observation is older than `dormant_cutoff` — dormancy is a property of the
+    # PLAYER (MAX(observed_at) over their partition), never of the single row,
+    # so an active player with one stale extra row keeps their real baseline.
+    dormant_branch = (
+        "OR w.player_last_seen < %(dormant_cutoff)s" if age_bound else "")
+    player_last_seen = (
+        "MAX(observed_at) OVER (PARTITION BY player_id) AS player_last_seen,"
+        if age_bound else "")
+    return f"""
         SELECT id, player_id
         FROM (
             SELECT
@@ -1542,6 +1584,7 @@ def _compact_candidate_sql() -> str:
                 (ships_stats_json IS NOT NULL) AS has_ships,
                 (ranked_ships_stats_json IS NOT NULL) AS has_ranked,
                 observed_at,
+                {player_last_seen}
                 ROW_NUMBER() OVER (
                     PARTITION BY player_id ORDER BY observed_at DESC, id DESC
                 ) AS rn,
@@ -1553,8 +1596,10 @@ def _compact_candidate_sql() -> str:
         ) w
         WHERE (w.has_ships OR w.has_ranked)
           AND w.observed_at < %(cutoff)s
-          AND w.rn > %(keep)s
-          AND NOT (w.has_ranked AND w.rrn = 1)
+          AND (
+                (w.rn > %(keep)s AND NOT (w.has_ranked AND w.rrn = 1))
+                {dormant_branch}
+              )
     """
 
 
@@ -1590,6 +1635,7 @@ def _apply_statement_timeout(cur, seconds, is_pg) -> None:
 def compact_battle_observation_payloads(
     *,
     keep_per_player: int = COMPACT_KEEP_PER_PLAYER_DEFAULT,
+    dormant_after_days: int = 0,
     min_age_hours: int = 0,
     batch_size: int = COMPACT_BATCH_SIZE_DEFAULT,
     max_rows: int = 0,
@@ -1634,10 +1680,16 @@ def compact_battle_observation_payloads(
     cutoff = datetime.now(timezone.utc) - timedelta(
         hours=max(0, int(min_age_hours)))
     params = {"cutoff": cutoff, "keep": keep}
+    # Opt-in age bound. 0/absent preserves the historical behaviour exactly.
+    age_bound = int(dormant_after_days or 0) > 0
+    if age_bound:
+        params["dormant_cutoff"] = (
+            datetime.now(timezone.utc)
+            - timedelta(days=int(dormant_after_days)))
     is_pg = connection.vendor == "postgresql"
 
     if dry_run:
-        candidate_sql = _compact_candidate_sql()
+        candidate_sql = _compact_candidate_sql(age_bound=age_bound)
         with transaction.atomic():
             with connection.cursor() as cur:
                 _apply_statement_timeout(cur, statement_timeout_s, is_pg)
@@ -1655,6 +1707,7 @@ def compact_battle_observation_payloads(
             "status": "completed",
             "dry_run": True,
             "keep_per_player": keep,
+            "dormant_after_days": int(dormant_after_days or 0),
             "min_age_hours": int(min_age_hours),
             "candidates": count,
             "players_affected": players,
@@ -1665,7 +1718,7 @@ def compact_battle_observation_payloads(
 
     # One scan to collect candidate ids (capped by max_rows), then clear by
     # primary key in chunks. Avoids re-scanning the whole table per batch.
-    candidate_sql = _compact_candidate_sql()
+    candidate_sql = _compact_candidate_sql(age_bound=age_bound)
     if max_rows and max_rows > 0:
         candidate_sql += " LIMIT %(maxrows)s"
         params["maxrows"] = int(max_rows)

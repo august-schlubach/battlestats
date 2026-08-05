@@ -475,14 +475,30 @@ class EnvGateDefaultAlignmentTests(TestCase):
     def _env_without(name):
         return {k: v for k, v in os.environ.items() if k != name}
 
-    def test_prune_battle_observations_enabled_by_default(self):
+    def test_prune_battle_observations_beat_disabled_by_default(self):
+        """The systemd timer owns compaction now; Beat must not also fire it.
+
+        The Beat row is kept and explicitly disabled rather than deleted:
+        `PeriodicTask` rows live in the database, so removing the registration
+        would leave prod's existing row **enabled** and double-run alongside
+        `battlestats-compact-observations.timer`.
+        """
         self._register_with_env(
-            self._env_without("BATTLE_OBSERVATION_COMPACT_ENABLED"))
+            self._env_without("BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED"))
+        self.assertFalse(PeriodicTask.objects.get(
+            name="prune-battle-observations").enabled)
+
+    def test_prune_battle_observations_beat_can_be_re_enabled(self):
+        """Explicit opt-in restores the Beat path (rollback lever)."""
+        env = self._env_without("BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED")
+        env["BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED"] = "1"
+        self._register_with_env(env)
         self.assertTrue(PeriodicTask.objects.get(
             name="prune-battle-observations").enabled)
 
-    def test_prune_battle_observations_explicit_zero_disables(self):
-        env = self._env_without("BATTLE_OBSERVATION_COMPACT_ENABLED")
+    def test_prune_battle_observations_master_gate_still_disables_beat(self):
+        env = self._env_without("BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED")
+        env["BATTLE_OBSERVATION_COMPACT_BEAT_ENABLED"] = "1"
         env["BATTLE_OBSERVATION_COMPACT_ENABLED"] = "0"
         self._register_with_env(env)
         self.assertFalse(PeriodicTask.objects.get(
