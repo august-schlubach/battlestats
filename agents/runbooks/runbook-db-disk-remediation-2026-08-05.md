@@ -8,14 +8,14 @@ _Status 2026-08-06: **code for Steps 1, 3 and 4b is implemented and merged** (TD
 
 ## Implementation status
 
-| Step | Code | Armed in prod | What remains |
-|---|---|---|---|
-| 0 — disk alerts | n/a | ☐ | Operator action in the DO console |
-| 1 — compaction on a timer | ✅ shipped | ☐ | Deploy installs the timer; then run `--dry-run`, then the first catch-up pass in `--max-rows` slices |
-| 2 — arm `PRUNE_BATTLES_JSON_ENABLED=1` | n/a (config) | ☐ | Deploy-script one-liner + Pass; `--dry-run` first |
-| 3 — age-bound observation JSON | ✅ shipped, **default off** | ☐ | Set `BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS=105`. **Irreversible** — do after Step 1 has run clean |
-| 4 — soft-limit triage | n/a | ☐ | Investigation, not a lever |
-| 4b — rollup Phase-7 fix | ✅ shipped | ☐ | Deploy, then backfill affected days |
+| Step | Code | Deployed | Armed / done in prod | What remains |
+|---|---|---|---|---|
+| 0 — disk alerts | n/a | n/a | ☐ | Operator action in the DO console. 70% ≈ 2026-09-11 |
+| 1 — compaction on a timer | ✅ | ✅ v5.1.3 | ✅ **timer armed** | Watch the first fire (below), then the catch-up pass |
+| 2 — arm `PRUNE_BATTLES_JSON_ENABLED=1` | n/a (config) | — | ☐ | Deploy-script one-liner + Pass; `--dry-run` first |
+| 3 — age-bound observation JSON | ✅ **default off** | ✅ v5.1.3 | ☐ | Set `BATTLE_OBSERVATION_COMPACT_DORMANT_DAYS=105`. **Irreversible** — only after Step 1 runs clean |
+| 4 — soft-limit triage | n/a | n/a | ☐ | Investigation, not a lever |
+| 4b — rollup Phase-7 fix | ✅ | ✅ v5.1.3 | ☐ **backfill pending** | 37 days to rebuild (below) |
 
 Code landed (branch `fix/disk-remediation-2026-08-05`):
 - `rebuild_daily_ship_stats_for_date` now carries all 14 Phase-7 columns via `_PHASE7_ROLLUP_COLUMNS` (Step 4b).
@@ -281,6 +281,42 @@ Legitimate, and should not be treated as defeat — the volume was already resiz
 1. Work Steps 0 → 4 in order, one lever per acknowledgement.
 2. Re-measure the whole picture at the 70% alert and update this runbook's TL;DR in place.
 3. Archive this runbook when Steps 0–3 have shipped and the plateau has been confirmed at the 70% gate.
+
+## Pickup pointer (session close 2026-08-05 ~22:00 UTC)
+
+**v5.1.3 is live** — backend `releases/20260805174844`, client `releases/20260805175214`, footer verified 5.1.3, healthcheck exit 0.
+
+Live state confirmed on the droplet at close:
+
+```
+battlestats-compact-observations.timer   enabled, active
+next fire: Thu 2026-08-06 12:32:51 UTC
+Beat row `prune-battle-observations`:    enabled = False
+BATTLE_OBSERVATION_COMPACT_KEEP=1  BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT=1800
+```
+
+**Resume here, in this order:**
+
+1. **Check the first timer fire** (after 12:32 UTC 2026-08-06). This is the whole point of Step 1 — it has never once completed.
+   ```bash
+   ssh root@battlestats.online 'systemctl status battlestats-compact-observations.service --no-pager | head -20;
+     journalctl -u battlestats-compact-observations --since "-1 day" --no-pager | tail -30'
+   ```
+   Expect exit 0 and a non-zero `cleared` count. **If it times out again**, the scan is structurally too big and the durable fix is restructuring `_compact_candidate_sql`, not a larger timeout (Step 1's "why 180s is not merely tight").
+   Then re-measure the table: `warships_battleobservation` was 15.84 GB with ~149K uncompacted rows ≈ 2.1 GB residue + a ~116 MB/day leak.
+
+2. **Backfill Phase-7** (Step 4b). Scope measured 2026-08-05: **37 days, 2026-06-13 → 2026-08-02** — the whole live window, wider than the 15-day sample first suggested. Deployed code now carries the columns, so the existing repair command is sufficient:
+   ```bash
+   # on the droplet, in current/server, with the env sourced
+   manage.py rebuild_player_daily_ship_stats --since 2026-06-13 --until 2026-08-02 --dry-run
+   ```
+   Not urgent — the first archive prune with candidates is **2026-10-01**, so no zeroed day is frozen into a CSV before then. Verify with the two queries in "How to re-measure": every in-window day non-zero in both PDSS and BattleEvent, maxima matching.
+
+3. **Step 2**, then **Step 3** (irreversible), one operator acknowledgement each.
+
+**Deploy note.** The v5.1.3 backend deploy aborted on a false FATAL from the celery env canary — `systemctl restart` returns before MainPID finishes exec'ing, so an immediate `/proc/<pid>/environ` read can catch a stale pid. Everything had already applied; only the drift check and the old-release cleanup were skipped (cleanup was run by hand, 6→5 releases). Fixed in `5385961`: the canary now retries for a bounded 30s, re-reading MainPID each pass. **The fix is committed but has not yet run a deploy** — the next backend deploy exercises it.
+
+**Not started:** Step 0 (DO console alerts) and Step 4 (soft-limit triage — 22 `SoftTimeLimitExceeded` on 2026-08-05 before 19:00 UTC, incl. `roll_up_player_daily_ship_stats_task`, which is worth checking for *correctness* and not just freshness).
 
 ## Related
 
