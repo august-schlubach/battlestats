@@ -75,7 +75,11 @@ const LocaleSelector: React.FC = () => {
             <button
                 type="button"
                 onClick={() => setOpen((prev) => !prev)}
-                className="inline-flex items-center gap-1.5 rounded-md px-[10px] transition-colors"
+                // 11.5px horizontal padding, not the 10px the sibling realm/theme
+                // chips use: this chip's only content is a 16px flag plus the
+                // chevron, so at 10px it read visibly tighter than its neighbours.
+                // 1.5px per side = 3px wider overall.
+                className="inline-flex items-center gap-1.5 rounded-md px-[11.5px] transition-colors"
                 style={{
                     height: '28px',
                     border: '1px solid var(--border)',
