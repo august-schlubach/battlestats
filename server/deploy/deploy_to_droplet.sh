@@ -51,6 +51,31 @@ install -d -o "${APP_USER}" -g "${APP_USER}" "${REMOTE_RELEASE}/server"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/logs"
 touch "${APP_ROOT}/shared/logs/django.log"
 chown "${APP_USER}:${APP_USER}" "${APP_ROOT}/shared/logs/django.log"
+# Rotation for django.log. It had never been rotated and reached 615 MB by
+# 2026-08-06 spanning four months, which made it simultaneously the only error
+# record outliving journald (~3.4 days) and a slow-growth disk item.
+#
+# copytruncate is REQUIRED, not stylistic: settings.py configures a plain
+# `logging.FileHandler`, so gunicorn holds the descriptor open for the life of the
+# process. A rename-based rotation would leave every worker writing to the detached
+# inode and the new django.log permanently empty until a restart. Verified live on
+# 2026-08-06: inode preserved across a forced rotation and gunicorn kept writing.
+#
+# Retention is deliberately >= 30 days because this file is the error record that
+# outlives journald. Do not shorten it without moving that capability elsewhere.
+cat > /etc/logrotate.d/battlestats <<'LOGROTATE'
+/opt/battlestats-server/shared/logs/django.log {
+    daily
+    rotate 30
+    maxsize 200M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su battlestats battlestats
+}
+LOGROTATE
 # Per-run recapture yield snapshots (the /recapture skill reads these). The
 # benchmarks/ parent is root-owned, so the worker (battlestats) can't makedirs the
 # subdir itself — pre-create it owned by the app user.

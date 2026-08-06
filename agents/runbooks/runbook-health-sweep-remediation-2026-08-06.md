@@ -359,7 +359,51 @@ can no longer name its largest component.
   `agents/work-items/snapshot-delta-gated-writes-spec.md`, which did not anticipate this
   reader.
 
-### F5 (LOW, housekeeping): unrotated and stale logs on the droplet
+### F5 (LOW, housekeeping): unrotated and stale logs on the droplet — **CLOSED 2026-08-06**
+
+**Shipped 05:16–05:17 UTC.** The rotation policy lives in
+`server/deploy/deploy_to_droplet.sh` (not only on the box) and is byte-identical to
+`/etc/logrotate.d/battlestats` as deployed:
+
+```
+/opt/battlestats-server/shared/logs/django.log {
+    daily
+    rotate 30
+    maxsize 200M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su battlestats battlestats
+}
+```
+
+**`copytruncate` is load-bearing, not stylistic.** `settings.py` configures a plain
+`logging.FileHandler`, so gunicorn holds the descriptor open for the life of the process
+(confirmed with `lsof`: six gunicorn PIDs on inode 1598417). A rename-based rotation would
+have left every worker writing to the detached inode and the new `django.log` permanently
+empty until a restart — silently destroying the only error record that outlives journald,
+which is the exact capability this finding exists to protect.
+
+**Verified live rather than assumed.** Forced one rotation under observation instead of
+letting the 00:00 cron do 615 MB unattended: it completed in 2.2 s, `django.log` truncated
+to 0 with **inode 1598417 unchanged**, `django.log.1` holding the full 615 MB history. Then
+curled three endpoints; a new line appeared at **05:17:35, after the rotation**, from the
+same gunicorn PIDs. Retention is 30 days deliberately — do not shorten it without moving
+the outlives-journald capability somewhere else first.
+
+**Deleted (125 MB, no references anywhere in the repo):** `drain_p0..p4.log` (June 9–10
+one-off), and two April run artifacts the original finding had missed —
+`eu_incremental_player_refresh_20260402232622.log` and
+`eu_incremental_ranked_data_20260402232622.log`.
+
+**Deliberately left alone:** `observation-floor-snapshot.log` and
+`crawl-productivity-snapshot.log` are ~16 KB after months of daily cron appends. They are
+not a problem and widening the stanza to cover root-owned files in the same directory would
+break the `su battlestats battlestats` scoping.
+
+#### Original finding
 
 In `/opt/battlestats-server/shared/logs/`:
 
@@ -476,7 +520,7 @@ the measured before/after.
 | F2 | ✅ | ✅ | per-bucket commit + dry-run rework + wall-clock budget + order rotation + `partial` status | **pending first scheduled run** — 08:20/08:40/09:00 UTC |
 | F3 | ✅ | ✅ | `(data.get(...) or {})` at `clans.py:81` | 0 new 5xx since deploy; bursty + WG-dependent, so absence is weak evidence — watch `AttributeError` counts |
 | F4 | ✅ | ✅ | classifier reads `Player.activity_updated_at` | **pending** — the benchmark runs 04:30 UTC, so the first clean reading is 2026-08-07 |
-| F5 | ☐ | ☐ | **operator lever, untouched** | — |
+| F5 | ✅ | ✅ | logrotate w/ `copytruncate` (deploy script) + 125 MB of stale one-off logs deleted | **forced rotation 05:17 UTC: inode 1598417 preserved, `django.log.1` holds the 615 MB history, and a fresh gunicorn line landed at 05:17:35 from the same PIDs** |
 | F6 | ✅ | ✅ | `PlayerIdConverter` on 16 route entries | **`Detralon` and `None` now 404 on `ranked_data`/`player_summary`/`tier_data`; numeric id still 200; metric-only `player_correlation` still 200** |
 
 **Two findings cannot be confirmed yet, by schedule rather than doubt.** F2 next runs at
