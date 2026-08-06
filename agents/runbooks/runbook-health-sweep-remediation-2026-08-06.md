@@ -466,20 +466,31 @@ need neither.
 To be filled in as each finding closes. Each entry should carry the date, the lever, and
 the measured before/after.
 
-| # | Code | Deployed | Lever applied | Evidence |
-|---|---|---|---|---|
-| F1 | ✅ | ☐ | negative cache on a separate key + logs demoted to debug + catalog-sync invalidation | `test_f1_*` (5 tests) |
-| F2 | ✅ | ☐ | per-bucket commit + dry-run rework + wall-clock budget + order rotation + `partial` status | `test_f2_*` (16 tests) |
-| F3 | ✅ | ☐ | `(data.get(...) or {})` at `clans.py:81` | `test_f3_*` (6 cases) |
-| F4 | ✅ | ☐ | classifier reads `Player.activity_updated_at` | `test_f4_*` |
-| F5 | ☐ | ☐ | **operator lever, untouched** | — |
-| F6 | ✅ | ☐ | `PlayerIdConverter` on 16 route entries | `test_f6_*` (24 cases) |
+**Shipped as v5.1.5 on 2026-08-06 04:59 UTC** (backend release `20260806005814`, client
+`20260806005954`; CI green on `b2a78501` before deploy; all six Celery workers restarted
+04:59:41 onto the new release, floor included).
 
-**Deployment is a separate, gated step.** `VERSION` is unbumped and nothing is on the
-droplet. Per the standing rule these ship one lever at a time with an acknowledgement
-between each; and per the versioning rule every bump — even backend-only — must be
-followed by `./client/deploy/deploy_to_droplet.sh battlestats.online`, because
-`NEXT_PUBLIC_APP_VERSION` is captured at frontend build time.
+| # | Code | Deployed | Lever applied | Live evidence |
+|---|---|---|---|---|
+| F1 | ✅ | ✅ | negative cache on a separate key + logs demoted to debug + catalog-sync invalidation | **floor remote-fetch 3 in 3 min vs ~238/min before (>99% gone); null-response ERROR lines 0 across floor+background+hydration; 37 `ship:unresolvable:*` sentinels in Redis** |
+| F2 | ✅ | ✅ | per-bucket commit + dry-run rework + wall-clock budget + order rotation + `partial` status | **pending first scheduled run** — 08:20/08:40/09:00 UTC |
+| F3 | ✅ | ✅ | `(data.get(...) or {})` at `clans.py:81` | 0 new 5xx since deploy; bursty + WG-dependent, so absence is weak evidence — watch `AttributeError` counts |
+| F4 | ✅ | ✅ | classifier reads `Player.activity_updated_at` | **pending** — the benchmark runs 04:30 UTC, so the first clean reading is 2026-08-07 |
+| F5 | ☐ | ☐ | **operator lever, untouched** | — |
+| F6 | ✅ | ✅ | `PlayerIdConverter` on 16 route entries | **`Detralon` and `None` now 404 on `ranked_data`/`player_summary`/`tier_data`; numeric id still 200; metric-only `player_correlation` still 200** |
+
+**Two findings cannot be confirmed yet, by schedule rather than doubt.** F2 next runs at
+08:20 UTC and should log `enrichment_reclassify_drift[eu]` completing rather than a 420 s
+timeout; a `partial` status is now an honest degraded result, not a failure. F4's
+instrument only recomputes at the 04:30 UTC benchmark, so **2026-08-07's snapshot is the
+first with a trustworthy `non_pvp_active`** — and per the note in
+`.claude/skills/observation/SKILL.md`, do not trend that bucket across the fix.
+
+The journal is still 3.9 GB because that is accumulated history; **retention should lengthen
+over the coming days** as the pre-fix volume ages out. Re-check with
+`journalctl --disk-usage` and the oldest-entry timestamp in about a week — that is F1's
+second-order payoff and the reason a real error older than 3.4 days was previously
+unrecoverable.
 
 **Re-measure recipes.**
 
