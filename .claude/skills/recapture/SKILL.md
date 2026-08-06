@@ -56,9 +56,16 @@ grep -E "^RECAPTURE_LAPSED_" /etc/battlestats-server.env || echo "(no RECAPTURE_
 '
 ```
 
-If a realm shows "(no run yet)": either the Beat hasn't fired yet (it runs
-~10:10/10:30/10:50 UTC) or `RECAPTURE_LAPSED_ENABLED` is not `1` (gated off — say
-so). A manual kick is `recapture_lapsed_players_task.delay(realm="eu")` from a
+If a realm shows "(no run yet)", or its newest file is days old while another
+realm's is current, the run is failing before it writes. Check the worker:
+
+```bash
+ssh root@battlestats.online 'journalctl -u battlestats-celery-background \
+  --since "7 days ago" --no-pager | grep -E "recapture.*(succeeded|Soft time limit|raised)"'
+```
+
+Otherwise: either the Beat hasn't fired yet (it runs ~10:10/10:30/10:50 UTC) or
+`RECAPTURE_LAPSED_ENABLED` is not `1` (gated off — say so). A manual kick is `recapture_lapsed_players_task.delay(realm="eu")` from a
 server-venv `manage.py shell` (or `manage.py recapture_lapsed_players --realm eu
 --limit 5000` for a one-off detect-only sample). Snapshots are timestamped and
 kept, so a realm's `ls -1t … | head` is "the last run"; older files are history.
@@ -66,8 +73,19 @@ kept, so a realm's `ls -1t … | head` is "the last run"; older files are histor
 ## The snapshot fields
 
 Each JSON snapshot carries: `realm`, `mode` (`apply` writes + rotates; `detect`
-measures only), `band_days`, `scanned`, `wg_calls`, `cursor_stamped`, and the
-yield breakdown:
+measures only), `band_days`, `partial`, `candidates`, `scanned`, `wg_calls`,
+`cursor_stamped`, and the yield breakdown.
+
+**Read `partial` first.** `true` means the worker's soft time limit cut the pass
+short: everything reported is real and durable (writes flush incrementally), but
+it covers only `scanned` of `candidates` rows. A partial run has the *same*
+`scanned < limit` signature as a healthy pass that exhausted the pool, so without
+this check a truncated realm reads as "maintenance mode, steady state" — which is
+exactly how EU/ASIA went unnoticed for two weeks before 2026-08-06. Say
+"partial (N of M)" in the readout and treat repeated partials as the signal that
+the run no longer fits its budget (runbook §2026-08-06).
+
+The yield fields:
 
 - **`advanced`** — players whose WG `last_battle_time` moved past our stored value
   = genuine new activity since we last knew. This is the headline "returners
@@ -87,18 +105,23 @@ yield breakdown:
 
 ## Readout shape
 
-Present a compact per-realm table (realm · mode · scanned · advanced (yield%) ·
-into7d · into7d_clanless · still_lapsed), then 2–4 sentences of interpretation:
+Present a compact per-realm table (realm · mode · partial · scanned · advanced
+(yield%) · into7d · into7d_clanless · still_lapsed), then 2–4 sentences of
+interpretation:
+
+- **Date-check every row.** A snapshot older than ~2 days for a daily task is
+  itself the finding; lead with it rather than reporting its numbers as current.
 
 - Lead with the **into7d_clanless** count across realms — that's the returners
   *only* this sweep recovers; it's the number that justifies the feature.
 - Note the **yield rate** (advanced/scanned) and whether it's worth the cadence;
   a healthy dormant pool is mostly `still_dormant`, so low single-digit % yield is
   expected and fine — the question is absolute returner count, not the rate.
-- Flag anomalies: `mode=detect` (writes are off — returners are being *measured*
+- Flag anomalies: `partial=true` (the pass was truncated — see above); a stale
+  `captured_at`; `mode=detect` (writes are off — returners are being *measured*
   not *recaptured*, flip `RECAPTURE_LAPSED_APPLY=1`); high `errors`/`no_data`
-  (WG trouble); `scanned` much smaller than the band (cursor exhausted the pool
-  → it's in maintenance mode, which is the steady state).
+  (WG trouble); `scanned` much smaller than the band **on a non-partial run**
+  (cursor exhausted the pool → maintenance mode, which is the steady state).
 
 End with the live config line: `ENABLED=<0/1> APPLY=<0/1> band=<min-max>d
 limit=<n>`, and whether the sweep is doing real work or just measuring.

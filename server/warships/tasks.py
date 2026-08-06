@@ -39,6 +39,20 @@ SHIP_PCT_WARM_TASK_OPTS = {
     "soft_time_limit": 27 * 60,   # 27 min soft
     "ignore_result": True,
 }
+# The lapsed-player recapture sweep is one serial pass over RECAPTURE_LAPSED_LIMIT
+# candidates: a 20-45s ordering query plus ~1 WG call + RECAPTURE_LAPSED_DELAY per
+# 100 players. At the prod limit (30k) that is ~470-520s for the slower realms, so
+# TASK_OPTS' 540s soft limit truncated EU and ASIA *every day* (ASIA's last complete
+# pass was 2026-07-20). The command now flushes writes incrementally and finalizes
+# on SoftTimeLimitExceeded, so truncation is survivable; this budget makes it rare.
+# Invariant (tasks.py `_run_reclassify_bucket` note): soft < hard <= lock TTL, and
+# PLAYER_REFRESH_LOCK_TIMEOUT is 6h. Stripes are 20 min apart per realm, and the
+# per-realm lock plus the background worker's -c 3 make an overlap harmless.
+RECAPTURE_TASK_OPTS = {
+    "time_limit": 16 * 60,        # 16 min hard — 60s of headroom for the final flush
+    "soft_time_limit": 15 * 60,   # 15 min soft
+    "ignore_result": True,
+}
 # Short DB-breather between heavy percentile buckets (load-spreading on the shared
 # 2-vCPU managed Postgres). Tunable; 0 disables.
 SHIP_PCT_WARM_PAUSE_SECONDS = float(
@@ -1998,7 +2012,7 @@ def snapshot_active_players_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
 
 
-@app.task(bind=True, **TASK_OPTS)
+@app.task(bind=True, **RECAPTURE_TASK_OPTS)
 def recapture_lapsed_players_task(self, realm=DEFAULT_REALM):
     """Cheap bulk re-discovery of returning ("lapsed") players.
 
@@ -2037,8 +2051,10 @@ def recapture_lapsed_players_task(self, realm=DEFAULT_REALM):
         )
         if os.getenv('RECAPTURE_LAPSED_APPLY', '0') == '1':
             kwargs['apply'] = True
-        call_command('recapture_lapsed_players', **kwargs)
-        return {"status": "completed"}
+        # The command returns "partial" when the soft time limit truncated the
+        # pass; its writes up to that point are durable (incremental flush).
+        outcome = call_command('recapture_lapsed_players', **kwargs)
+        return {"status": "partial" if outcome == "partial" else "completed"}
     finally:
         cache.delete(lock_key)
 

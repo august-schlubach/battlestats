@@ -65,6 +65,23 @@ See `ops-env-reference.md` for the full list. Summary: `RECAPTURE_LAPSED_ENABLED
 - **Why a model field, not a Redis cursor / id-modulo:** the field filters *in* the candidate SQL (the cursor advances with the query) and survives restarts; it also gives an observable "when last checked" per row. No new index for v1 (seq-scan + top-N, once/realm/day, same shape as `snapshot_active_players`).
 - **Safety finding (why yield must be measured on the droplet):** the WG token-bucket limiter lives in Redis. Locally there is no `REDIS_URL`, so the cache falls back to `LocMemCache` and the limiter would not coordinate with prod; a laptop run's ~5 req/s could push the global WG budget over and 407 live users. Run any WG-calling measurement on the droplet, where it shares the real bucket.
 
+## 2026-08-06 — the silent daily truncation (EU/ASIA)
+
+**Symptom.** The daily `/recapture` mail read ASIA's snapshot as sixteen days old (2026-07-20) while NA was current. Snapshot files existed for NA on every date; EU was intermittent; ASIA stopped dead after 07-20.
+
+**Cause.** The task ran under `TASK_OPTS` (540s soft / 600s hard), and one pass costs ~470–520s on the slower realms: a candidate query that sorts the whole in-band pool by `last_idle_check_at` (measured **43.7s ASIA**, 18.0s NA — the "no new index for v1" call above is now the difference between the realms), plus 300 WG calls, plus 300×`RECAPTURE_LAPSED_DELAY` (60s of pure sleep at the 0.2 default), plus the cursor-stamp UPDATEs. NA finished at 380–489s. EU and ASIA blew the limit **every day**.
+
+**Why that lost the whole pass.** Every write sat *past the end of the scan*: `bulk_update(promote)` then the cursor stamps, both after the loop. `SoftTimeLimitExceeded` raised mid-loop discarded the entire run — WG calls spent, no promotes, no cursor advance, no snapshot. Two distinct failure points in the journal: line 159 (mid-scan, nothing written at all) and line 228 (the cursor-stamp loop, so promotes landed and the rotation advanced only partway). ASIA's cursor reaching 2026-07-29 while its last snapshot read 07-20 is that second case.
+
+**Fix (this change).**
+1. **Incremental flush.** Promotes and cursor stamps flush every `CURSOR_STAMP_CHUNK` (2000) checked rows, **promotes first, then the stamp, for the same ids**. Order is load-bearing: stamping `last_idle_check_at` on a row whose promote has not landed rotates that returner past unpromoted, and the LRU cursor then hides them for a whole pool cycle (~a week) — a silent loss strictly worse than the truncation being guarded against.
+2. **Survive the limit.** The scan catches `SoftTimeLimitExceeded`, finalizes the tail, and reports a **partial** run: `partial: true` + `candidates` in the snapshot, a WARNING in the journal, and `{'status': 'partial'}` from the task. `scanned` now means *rows actually answered*, not candidates pulled.
+3. **A budget that fits.** `RECAPTURE_TASK_OPTS` = 15 min soft / 16 min hard (invariant: soft < hard ≤ the 6h `PLAYER_REFRESH_LOCK_TIMEOUT`; realm stripes are 20 min apart and the per-realm lock plus `-c 3` make an overlap harmless).
+
+**Reading a partial snapshot.** `partial` must be checked **before** `scanned`: a truncated run has the same `scanned < limit` signature the `/recapture` skill otherwise reads as the healthy "cursor exhausted the pool" steady state.
+
+**Deliberately not done.** An index on the candidate ordering (44s is not the binding cost; ~360s of WG calls is) and `RECAPTURE_LAPSED_DELAY=0` (worth ~60s/run, but a prod env lever kept separate from this deploy). Both remain available if truncation returns.
+
 ## Test-harness gotcha (for whoever runs the suite next)
 
 Run backend tests on sqlite: `DJANGO_SECRET_KEY=x DB_ENGINE=sqlite3 python -m pytest warships/tests/ --nomigrations -q`. Two traps:

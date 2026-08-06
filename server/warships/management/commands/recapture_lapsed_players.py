@@ -48,6 +48,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone as dt_timezone
 
+from celery.exceptions import SoftTimeLimitExceeded
 from django.core.management.base import BaseCommand
 from django.db.models import F
 from django.utils import timezone
@@ -150,99 +151,140 @@ class Command(BaseCommand):
         wg_calls = chunk_errors = no_data = hidden = still_dormant = 0
         into7d_clanned = into7d_clanless = 0
         lapsed_clanned = lapsed_clanless = 0
-        promote = []
-        checked_ids = []   # rows we got a definitive answer for -> advance cursor
+        promote = []       # flush buffer: returners awaiting bulk_update
+        checked_ids = []   # flush buffer: rows we got a definitive answer for
+        advanced = 0       # cumulative across flushes
+        cursor_stamped = 0  # cumulative across flushes
+        examined = 0       # ids actually iterated (< len(ids) when truncated)
         samples = []
 
-        for start in range(0, len(ids), batch):
-            chunk = ids[start:start + batch]
-            data, err = _bulk_fetch_account_info(chunk, realm)
-            wg_calls += 1
-            if err == 'INVALID_ACCOUNT_ID':
-                data = _per_player_account_fallback(chunk, realm)
-            elif err:
-                # Transient batch failure: leave the cursor untouched so these
-                # rows are retried next run rather than rotated past unchecked.
-                chunk_errors += 1
-                self.stderr.write(
-                    f"recapture_lapsed_players: batch failed realm={realm} err={err}")
-                continue
+        def flush():
+            """Persist one incremental slice: promotes FIRST, then the cursor.
 
-            for pid in chunk:
-                info = data.get(str(pid)) if data else None
-                if not info:
-                    no_data += 1
+            Order matters. Stamping `last_idle_check_at` on a row whose promote
+            has not landed rotates that returner past unpromoted, and the LRU
+            cursor then hides them for a whole pool cycle (~a week) — a silent
+            loss strictly worse than the truncation this guards against.
+            """
+            nonlocal advanced, cursor_stamped
+            advanced += len(promote)
+            if apply:
+                if promote:
+                    Player.objects.bulk_update(
+                        promote, ['last_battle_date', 'days_since_last_battle'])
+                # Advance the rotation cursor for every row we actually checked
+                # (never last_fetch — that would suppress the floor's real refresh).
+                for i in range(0, len(checked_ids), CURSOR_STAMP_CHUNK):
+                    Player.objects.filter(
+                        id__in=checked_ids[i:i + CURSOR_STAMP_CHUNK]
+                    ).update(last_idle_check_at=now_dt)
+                cursor_stamped += len(checked_ids)
+            promote.clear()
+            checked_ids.clear()
+
+        # Writes flush incrementally so a truncated run keeps everything it
+        # earned. Before this, promotes and the cursor stamp both sat past the
+        # end of the scan: EU/ASIA blew the worker's soft time limit every day
+        # (ASIA last completed 2026-07-20) and lost the whole pass — WG calls
+        # spent, no promotes, no cursor advance, no snapshot.
+        truncated = False
+        try:
+            for start in range(0, len(ids), batch):
+                chunk = ids[start:start + batch]
+                data, err = _bulk_fetch_account_info(chunk, realm)
+                wg_calls += 1
+                # Counted once the call returns (error included, as before) so a
+                # chunk cut short by the soft limit is excluded from `scanned`.
+                examined += len(chunk)
+                if err == 'INVALID_ACCOUNT_ID':
+                    data = _per_player_account_fallback(chunk, realm)
+                elif err:
+                    # Transient batch failure: leave the cursor untouched so these
+                    # rows are retried next run rather than rotated past unchecked.
+                    chunk_errors += 1
+                    self.stderr.write(
+                        f"recapture_lapsed_players: batch failed realm={realm} err={err}")
+                    continue
+
+                for pid in chunk:
+                    info = data.get(str(pid)) if data else None
+                    if not info:
+                        no_data += 1
+                        checked_ids.append(by_id[pid][0])
+                        continue
+                    # We got a real answer for this row -> it counts toward rotation.
                     checked_ids.append(by_id[pid][0])
-                    continue
-                # We got a real answer for this row -> it counts toward rotation.
-                checked_ids.append(by_id[pid][0])
-                if info.get('hidden_profile'):
-                    hidden += 1
-                    continue
-                lbt = info.get('last_battle_time')
-                new_date = (
-                    datetime.fromtimestamp(lbt, tz=dt_timezone.utc).date()
-                    if lbt else None
-                )
-                row_id, name, stored, clan_id = by_id[pid]
-                if not new_date or (stored and new_date <= stored):
-                    still_dormant += 1
-                    continue
+                    if info.get('hidden_profile'):
+                        hidden += 1
+                        continue
+                    lbt = info.get('last_battle_time')
+                    new_date = (
+                        datetime.fromtimestamp(lbt, tz=dt_timezone.utc).date()
+                        if lbt else None
+                    )
+                    row_id, name, stored, clan_id = by_id[pid]
+                    if not new_date or (stored and new_date <= stored):
+                        still_dormant += 1
+                        continue
 
-                # Advanced: real new activity since our stored value.
-                into_7d = new_date >= (today - timedelta(days=active_days))
-                clanless = clan_id is None
-                if into_7d and clanless:
-                    into7d_clanless += 1
-                elif into_7d:
-                    into7d_clanned += 1
-                elif clanless:
-                    lapsed_clanless += 1
-                else:
-                    lapsed_clanned += 1
+                    # Advanced: real new activity since our stored value.
+                    into_7d = new_date >= (today - timedelta(days=active_days))
+                    clanless = clan_id is None
+                    if into_7d and clanless:
+                        into7d_clanless += 1
+                    elif into_7d:
+                        into7d_clanned += 1
+                    elif clanless:
+                        lapsed_clanless += 1
+                    else:
+                        lapsed_clanned += 1
 
-                if len(samples) < sample_n:
-                    samples.append((
-                        name, stored, new_date,
-                        (new_date - stored).days if stored else None,
-                        clan_id,
-                        'into-7d' if into_7d else 'still-lapsed',
-                    ))
+                    if len(samples) < sample_n:
+                        samples.append((
+                            name, stored, new_date,
+                            (new_date - stored).days if stored else None,
+                            clan_id,
+                            'into-7d' if into_7d else 'still-lapsed',
+                        ))
 
-                # bulk_update only touches the listed fields, keyed by pk (id).
-                promote.append(Player(
-                    id=row_id, last_battle_date=new_date,
-                    days_since_last_battle=(today - new_date).days))
-            if delay:
-                time.sleep(delay)
+                    # bulk_update only touches the listed fields, keyed by pk (id).
+                    promote.append(Player(
+                        id=row_id, last_battle_date=new_date,
+                        days_since_last_battle=(today - new_date).days))
 
-        if apply:
-            if promote:
-                Player.objects.bulk_update(
-                    promote, ['last_battle_date', 'days_since_last_battle'])
-            # Advance the rotation cursor for every row we actually checked
-            # (never last_fetch — that would suppress the floor's real refresh).
-            for i in range(0, len(checked_ids), CURSOR_STAMP_CHUNK):
-                Player.objects.filter(
-                    id__in=checked_ids[i:i + CURSOR_STAMP_CHUNK]
-                ).update(last_idle_check_at=now_dt)
+                if len(checked_ids) >= CURSOR_STAMP_CHUNK:
+                    flush()
+                if delay:
+                    time.sleep(delay)
+        except SoftTimeLimitExceeded:
+            # The worker's soft limit landed mid-scan. Everything already flushed
+            # is durable; finalize the tail and report a PARTIAL run rather than
+            # discarding the whole pass. The hard limit is the finalizer's budget.
+            truncated = True
+
+        flush()
 
         into7d = into7d_clanned + into7d_clanless
         still_lapsed = lapsed_clanned + lapsed_clanless
-        advanced = len(promote)
-        scanned = len(ids)
+        scanned = examined
         mode = "APPLY (promoted + cursor stamped)" if apply else "DETECT-ONLY (no writes)"
         rate = (advanced / scanned * 100) if scanned else 0.0
 
         # One structured line for any worker whose INFO does propagate (secondary).
         logger.info(
-            "recapture-summary realm=%s mode=%s band=%d-%d scanned=%d wg_calls=%d "
-            "advanced=%d into7d=%d into7d_clanless=%d still_lapsed=%d "
+            "recapture-summary realm=%s mode=%s band=%d-%d scanned=%d/%d partial=%s "
+            "wg_calls=%d advanced=%d into7d=%d into7d_clanless=%d still_lapsed=%d "
             "still_dormant=%d hidden=%d no_data=%d errors=%d",
             realm, ("apply" if apply else "detect"), min_days, max_days, scanned,
-            wg_calls, advanced, into7d, into7d_clanless, still_lapsed,
-            still_dormant, hidden, no_data, chunk_errors,
+            len(ids), truncated, wg_calls, advanced, into7d, into7d_clanless,
+            still_lapsed, still_dormant, hidden, no_data, chunk_errors,
         )
+        if truncated:
+            logger.warning(
+                "recapture_lapsed_players realm=%s TRUNCATED by the worker soft time "
+                "limit after %d/%d candidates — writes up to that point are durable",
+                realm, scanned, len(ids),
+            )
 
         # Durable per-run snapshot — the /recapture skill's source of truth.
         snapshot = {
@@ -252,6 +294,10 @@ class Command(BaseCommand):
             "band_days": [min_days, max_days],
             "active_days": active_days,
             "limit": limit,
+            # `partial` MUST be read before `scanned`: a truncated run has the same
+            # scanned-below-limit signature as a healthy pass that exhausted the pool.
+            "partial": truncated,
+            "candidates": len(ids),
             "scanned": scanned,
             "wg_calls": wg_calls,
             "chunk_errors": chunk_errors,
@@ -265,7 +311,7 @@ class Command(BaseCommand):
             "into7d_clanless": into7d_clanless,
             "still_lapsed": still_lapsed,
             "still_lapsed_clanless": lapsed_clanless,
-            "cursor_stamped": len(checked_ids) if apply else 0,
+            "cursor_stamped": cursor_stamped,
         }
         try:
             os.makedirs(RECAPTURE_BENCHMARK_DIR, exist_ok=True)
@@ -277,6 +323,9 @@ class Command(BaseCommand):
                            RECAPTURE_BENCHMARK_DIR, exc_info=True)
 
         out(f"=== recapture_lapsed_players  realm={realm}  band={min_days}-{max_days}d  {mode} ===")
+        if truncated:
+            out(f"  *** PARTIAL: soft time limit hit after {scanned}/{len(ids)} candidates "
+                f"(everything below is what this run actually persisted) ***")
         out(f"  scanned={scanned}  WG_calls={wg_calls}  chunk_errors={chunk_errors}  "
             f"no_data={no_data}  hidden={hidden}")
         out(f"  still_dormant={still_dormant}  advanced(returned)={advanced}  "
@@ -286,7 +335,7 @@ class Command(BaseCommand):
         out(f"  -> advanced but STILL lapsed (out of floor scope): {still_lapsed}  "
             f"[clanned={lapsed_clanned}  CLANLESS={lapsed_clanless}]")
         if apply:
-            out(f"  cursor stamped on {len(checked_ids)} checked rows (LRU rotation advanced)")
+            out(f"  cursor stamped on {cursor_stamped} checked rows (LRU rotation advanced)")
         else:
             out(f"  (detect-only: {wg_calls} WG calls made, {advanced} reactivations detected, 0 writes)")
         if samples:
@@ -299,3 +348,7 @@ class Command(BaseCommand):
                 clan = 'clanless' if clan_id is None else (clan_names.get(clan_id) or '?')
                 out(f"    {name[:24]:24}  {str(stored):10} -> {str(new_date):10}  "
                     f"+{adv}d  {clan[:18]:18}  {bucket}")
+
+        # BaseCommand.execute() returns handle()'s value to call_command, so the
+        # Beat task can report a truncated pass honestly instead of "completed".
+        return "partial" if truncated else None
