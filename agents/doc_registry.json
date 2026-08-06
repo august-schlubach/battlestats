@@ -3655,6 +3655,31 @@
             "archive_on": [
                 "steps-0-3-shipped-and-plateau-confirmed"
             ]
+        },
+        "agents/work-items/droplet-outbound-mail-spec.md": {
+            "kind": "work-item",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "outbound mail",
+                "droplet email",
+                "feedback notifications",
+                "purelymail smtp",
+                "ops digest"
+            ],
+            "tags": [
+                "mail",
+                "smtp",
+                "purelymail",
+                "feedback",
+                "systemd",
+                "notifications"
+            ],
+            "archive_on": [
+                "notifier-and-digest-shipped-and-verified"
+            ]
         }
     }
 }
