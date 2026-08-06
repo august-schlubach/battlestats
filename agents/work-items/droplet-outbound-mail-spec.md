@@ -1,7 +1,10 @@
 # Outbound mail from the droplet: feedback notifications + ops digest re-arm
 
 **Date:** 2026-08-06
-**Status:** specified; not implemented
+**Status:** specified; not implemented. QA pass 2026-08-06 verified every factual
+claim against the live system (see *Claims verified*), proved the section-3
+concurrency hazard by experiment, and corrected two wrong claims about systemd
+installation.
 **Surface:** production droplet only (no client, no API); one new Django management command, one shared mail module, two systemd timers
 **Depends on:** the `Feedback` model and its `pending` status (`feedback-submission-spec.md`); the existing `server/scripts/daily_ops_email.py`
 
@@ -74,9 +77,9 @@ reuse it rather than mint a parallel mailbox.
 No other key in the env file changes. `SMTP_USER` and `MAIL_FROM` already name
 this address; only `SMTP_PASS` is rewritten.
 
-#### Unresolved: `tamezz.com` is derby's mail domain
+#### `tamezz.com` is derby's mail domain, and the routing rule overrides mailboxes
 
-**This must be settled before `createUser` runs.** `listRoutingRules` shows one
+**This must be handled in the same step as `createUser`, not after it.** `listRoutingRules` shows one
 rule on `tamezz.com`:
 
 ```
@@ -99,22 +102,38 @@ was never built to see.
 `etro.email` has the identical structure pointing at `boston@etro.email`, so it
 is not an escape.
 
-Three ways out, in the order I would consider them:
+Purelymail's routing documentation confirms this directly, with an example that
+is exactly our case: *"If you have a User at me@domain.com but a routing rule for
+\*@domain.com, all mail will follow the rule. The me@domain.com inbox will stay
+empty."* It also states the rule this design depends on: *"Exact match will
+always take priority over a prefix match."*
 
-1. **Add an exact rule for `sysop@tamezz.com` targeting itself**, so the mailbox
-   receives its own bounces. This requires confirming Purelymail's precedence
-   between an exact rule and a prefix rule; the API models both, but the spec
-   does not state which wins, so it needs an empirical check before being relied
-   upon.
-2. **Accept the coupling** and instead harden derby's classifier against
-   bounce-shaped mail. Cheapest in mail configuration, but it puts battlestats'
-   operational failure modes inside another project's ingest path.
-3. **Use a domain neither project ingests from.** Cleanest isolation; costs a new
-   domain and DNS setup, which is disproportionate to a notification mailbox.
+**Decision: add an exact routing rule for `sysop@tamezz.com` targeting
+`sysop@tamezz.com`.** Exact beats prefix, so the new mailbox receives its own
+bounces and replies while derby's blanket prefix rule continues to carry
+everything else to `tjones86@tamezz.com` unchanged. The change is **additive**:
+derby's existing rule is not edited, so there is no way for this to alter
+derby's current delivery.
 
-Option 1 is the likely answer, but it is a live question rather than a decided
-one, and it touches another project's mail. It is called out here rather than
-resolved silently.
+Rejected alternatives:
+
+- **Flip derby's existing rule to `catchall=True`.** Arguably the more correct
+  configuration, since that flag means precisely "yield to a real mailbox", and
+  it would fix the problem for every future mailbox at once. Rejected because it
+  mutates another project's routing rule to serve this one; the additive fix
+  achieves the same outcome here without touching derby.
+- **Accept the coupling** and harden derby's classifier against bounce-shaped
+  mail. Cheapest in mail configuration, but it puts battlestats' operational
+  failure modes inside another project's ingest path.
+- **Use a domain neither project ingests from.** Cleanest isolation; costs a new
+  domain and DNS setup, disproportionate to a notification mailbox.
+
+Step 1 is therefore **two** API calls, `createUser` then `createRoutingRule`,
+and the rule must exist before the first send so that no bounce can reach derby.
+
+Note that Purelymail's default "send from whoever they want" policy is **not**
+relied upon by this design: `sysop@tamezz.com` authenticates and sends as
+itself.
 
 **Verification is two-staged and the second stage is not optional.** First,
 `SMTP_SSL` connect plus `login()` against `smtp.purelymail.com:465`, proving
@@ -152,8 +171,8 @@ operator has been taught to trust. This is the convention `daily_ops_email.py`
 already established.
 
 **Credit floor.** Each run reads `checkAccountCredit`. When the balance is below
-**$5.00** the warning is folded into any outgoing feedback mail, and — this part
-is load-bearing — **it also sends on its own when there is no feedback to
+**$5.00** the warning is folded into any outgoing feedback mail; and, this part
+being load-bearing, **it also sends on its own when there is no feedback to
 report**, rate-limited to at most once every seven days by a second watermark
 file holding the last warning date.
 
@@ -221,18 +240,34 @@ snapshots still use cron, and the migration has been running the other way.
 - `battlestats-ops-digest.timer`: daily at 11:30 UTC, the time
   `daily_ops_email.py` documents. Re-armed unchanged, with the LLM path intact.
 
-Each pair is a `.timer` carrying `Unit=` plus a `Type=oneshot` `.service`. (The
-`Wants=` over `Requires=` convention elsewhere in this project governs the Celery
-services' dependency on RabbitMQ and Redis; it does not apply to a timer and its
-oneshot, and is noted here only so it is not copied across by analogy.)
+**Installation goes in `server/deploy/deploy_to_droplet.sh`, following the
+pattern already there.** That script writes all six existing timers and their
+services into `/etc/systemd/system/` via heredoc, then runs `systemctl
+daemon-reload` (line 1248) followed by idempotent `systemctl enable --now` calls.
+The new units are added the same way; no manual droplet step, and no separate
+install mechanism.
 
-**Installation is a named step, not an implication.** `server/` reaches the
-droplet through the backend deploy script, which rsyncs the working tree; unit
-files do not, because they belong in `/etc/systemd/system/`. The plan must
-therefore cover: writing both unit pairs to `/etc/systemd/system/`, creating
-`/opt/battlestats-server/shared/state/` (which does not exist yet and is where
-both state files live), `systemctl daemon-reload`, and `enable --now` on both
-timers. Left implicit, this gets discovered on the droplet at the worst moment.
+Match the established unit shape rather than inventing one. Per
+`battlestats-compact-observations`:
+
+- The `.timer` carries `[Timer] OnCalendar=`, `Persistent=true`,
+  `RandomizedDelaySec=300`, and `[Install] WantedBy=timers.target`. It does
+  **not** carry `Unit=`; these units rely on systemd's default of activating the
+  `.service` of the same name, and adding `Unit=` would depart from every
+  existing pair.
+- The `.service` is `Type=oneshot`, runs as `${APP_USER}` with
+  `WorkingDirectory=${APP_ROOT}/current/server`, and invokes
+  `${APP_ROOT}/venv/bin/python manage.py <command>`.
+- Existing services load `EnvironmentFile=/etc/battlestats-server.env` and
+  `/etc/battlestats-server.secrets.env`. The notifier needs a **third**,
+  `/etc/battlestats-ops-email.env`, for the SMTP settings; that file is not
+  currently read by any systemd unit, only by `daily_ops_email.py` at runtime.
+
+**One genuinely new step:** `/opt/battlestats-server/shared/state/` does not
+exist. `shared/` currently holds `archives`, `benchmarks`, `bin` and `logs`, and
+the deploy script contains no `mkdir` for any of them, so there is no precedent
+to copy. The script must `mkdir -p` the state directory, owned by `${APP_USER}`,
+before either timer first fires.
 
 ### 5. Shared send path
 
@@ -319,6 +354,45 @@ only on the Purelymail billing page in the web UI.
 - **Watermark loss.** A wiped `shared/state/` re-sends already-seen submissions.
   Bounded, low-volume, and self-correcting after one run.
 
+## Claims verified
+
+Every factual assertion in this spec was checked against the live system on
+2026-08-06 rather than taken on trust. Recorded so a later reader knows which
+statements are evidence and which are judgement.
+
+**Confirmed by measurement:**
+
+- `daily_ops_email.py` is 496 lines, and the deployed copy is byte-identical to
+  `main` (sha256 `a447eb8a542d4008…` on both). It is not a stale deploy.
+- `/etc/battlestats-ops-email.env` exists at mode 600 with all nine keys listed.
+- The root crontab holds exactly two non-comment entries; no systemd unit matches
+  mail, ops or feedback.
+- `/opt/battlestats-server/shared/` contains `archives`, `benchmarks`, `bin`,
+  `logs`; `state` is absent.
+- `Feedback.STATUS_PENDING` exists (`models.py:504`) and the model declares no
+  explicit primary key, so `id` is an implicit `AutoField`.
+- `server/warships/management/commands/` already exists.
+- Purelymail: `sysop@tamezz.com` is absent from `listUser`; SMTP login as it
+  returns `535`; credit is $7.3492982623; both domains pass MX/SPF/DKIM/DMARC and
+  report `isShared: false`.
+
+**Confirmed by experiment** (Postgres 15, three concurrent connections):
+
+The commit-ordering hazard in section 3 is real, not theoretical. T1 was assigned
+id 1 and T2 id 2; T2 committed first; a reader at that instant saw `[2]` only. A
+max-id watermark set to 2 then **permanently skipped id 1** once it committed,
+mailing nothing for it ever. The id-set form mailed id 1 on the next run. This is
+the test that justifies the state file's shape.
+
+**Confirmed by vendor documentation:** routing priority (exact beats prefix) and
+the overlap behaviour that causes the `tamezz.com` collision, quoted in section 1.
+
+**Corrected during QA:** an earlier draft claimed systemd unit files do not reach
+the droplet via the deploy script and would need a manual install step. That was
+wrong: the script writes all six existing timer/service pairs itself. It also
+specified a `Unit=` directive that no existing timer here uses. Section 4 now
+follows the actual convention.
+
 ## Acceptance
 
 1. `SMTP_SSL` login as `sysop@tamezz.com` succeeds from the droplet.
@@ -330,8 +404,12 @@ only on the Purelymail billing page in the web UI.
 3. `notify_pending_feedback` on an empty queue sends nothing and exits 0.
 4. A newly submitted feedback row produces exactly one email containing its full
    verbatim message, and a second run produces none.
-5. Both timers appear in `systemctl list-timers` with a populated `NEXT`.
-6. The ops digest sends on its next scheduled fire.
+5. `listRoutingRules` shows an exact rule for `sysop@tamezz.com` targeting
+   itself, and a message addressed to `sysop@tamezz.com` lands in that mailbox
+   rather than in `tjones86@tamezz.com`. This is the check that proves derby is
+   not receiving battlestats' bounces.
+6. Both timers appear in `systemctl list-timers` with a populated `NEXT`.
+7. The ops digest sends on its next scheduled fire.
 
 ## Follow-ups, explicitly not done here
 
