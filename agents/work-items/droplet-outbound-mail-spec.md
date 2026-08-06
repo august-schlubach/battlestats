@@ -409,10 +409,13 @@ follows the actual convention.
 
 1. `SMTP_SSL` login as `sysop@tamezz.com` succeeds from the droplet.
 2. A test message arrives in the Gmail **inbox**, not spam. **This is an operator
-   step and cannot be verified from the droplet or by any automated check.** The
-   implementation is not done until a human has confirmed placement; reporting
-   completion with this unchecked would assert exactly the thing that has not
-   been established.
+   step and cannot be verified from the droplet or by any automated check.**
+   **Confirmed by the operator 2026-08-06:** both the feedback notification and
+   the ops digest landed in the inbox, sending as
+   `Zeta Region CloudOps <sysop@tamezz.com>`. Deliverability rests on the clean
+   SPF/DKIM/DMARC posture recorded above; if that ever changes, this is the check
+   to repeat, because filtered mail restores the polling this system exists to
+   end and does so without any signal.
 3. `notify_pending_feedback` on an empty queue sends nothing and exits 0.
 4. A newly submitted feedback row produces exactly one email containing its full
    verbatim message, and a second run produces none.
