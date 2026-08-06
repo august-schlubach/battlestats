@@ -167,7 +167,7 @@ Project skills live in `.claude/skills/<name>/SKILL.md`, auto-loaded on trigger 
 - **`observation`** ("/observation", "observation readout") — day-over-day observation-floor coverage/freshness from the nightly snapshots. Read-only.
 - **`crawl-yield`** ("/crawl-yield", "is the crawler still earning its cost") — per-pass clan-crawl yield (discovery + dormant→active re-detection) vs. floor overlap, from the per-pass snapshots. Read-only.
 - **`recapture`** ("/recapture", "recapture readout") — last lapsed-player recapture sweep yield (returning dormant players found, into-7d/clanless split) from the background worker journal. Read-only.
-- **`feedback`** ("/feedback", "any feedback?") — prints unreviewed visitor submissions from the prod `Feedback` table in full (category, locale, realm, path, verbatim message). Nothing notifies the operator, so this is the only way the queue gets read. Read-only unless explicitly asked to mark items reviewed.
+- **`feedback`** ("/feedback", "any feedback?") — prints unreviewed visitor submissions from the prod `Feedback` table in full (category, locale, realm, path, verbatim message). Since 2026-08-06 the queue also **mails itself**: `notify_pending_feedback` runs daily at 13:00 UTC and sends each submission exactly once, so this skill is the on-demand read rather than the only one. Read-only unless explicitly asked to mark items reviewed.
 
 ## Versioning
 

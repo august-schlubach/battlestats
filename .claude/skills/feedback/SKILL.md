@@ -6,18 +6,34 @@ description: Check the production visitor-feedback queue and print any unreviewe
 # feedback
 
 Reads the `Feedback` table on production and prints unreviewed submissions in
-full. This is the visitor's only channel to the operator — there is no email, no
-account, no reply path — so the queue is the entire signal, and a submission
-nobody reads is a submission that never happened.
+full. This is the visitor's only channel to the operator: there is no account and
+no reply path, so the queue is the entire signal, and a submission nobody reads
+is a submission that never happened.
 
 Volume is expected to be low. Optimise for **reading every word of what did
 arrive**, not for summarising a firehose. Never truncate a visitor's message.
 
 Background: the footer's **Leave feedback** link opens a modal with three
 categories, `POST`s to `/api/feedback/`, and the row lands `status='pending'`.
-Moderation is Django admin only — nothing notifies anyone, which is exactly why
-this skill exists. Spec, including the wire contract:
+Moderation is Django admin only. Spec, including the wire contract:
 `agents/work-items/feedback-submission-spec.md`.
+
+**Since 2026-08-06 the queue also mails itself.** The `notify_pending_feedback`
+systemd timer runs daily at 13:00 UTC on the droplet and emails each pending
+submission exactly once, as `Zeta Region CloudOps <sysop@tamezz.com>`. This skill
+is therefore the **on-demand** read, not the only one; it stays useful for
+checking mid-day, re-reading something already mailed, or marking items reviewed.
+
+Two consequences worth knowing when you run it:
+
+- **A row you see here may already have been mailed.** The notifier tracks what
+  it has sent in `/opt/battlestats-server/shared/state/feedback-notify-watermark`
+  and nothing moves a row off `pending` except a human in Django admin, so
+  "unreviewed" and "unmailed" are different questions.
+- **Silence from the mailer is not proof the queue is empty.** If the operator
+  says they have heard nothing, that could equally mean the notifier is broken;
+  it fails loud by email, but only if mail itself works. Runbook:
+  `agents/runbooks/runbook-droplet-outbound-mail-2026-08-06.md`.
 
 **Scope.** This reads visitor feedback. It is not an ops health check: for worker
 and queue health use `event-check`, for the enrichment crawler use

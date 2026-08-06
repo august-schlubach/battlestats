@@ -126,3 +126,10 @@ them.
   write.
 - **Notification: Django admin only**, as with streamer submissions. No email, no
   webhook. Revisit if volume ever justifies it.
+  **Superseded 2026-08-06:** it was not volume that justified it but the fact
+  that a queue nobody is told about is a queue nobody reads. `notify_pending_feedback`
+  now mails each pending submission exactly once, daily at 13:00 UTC. Moderation
+  is still Django admin only; what changed is that the operator learns a
+  submission exists without having to remember to look.
+  Spec: `droplet-outbound-mail-spec.md`. Runbook:
+  `agents/runbooks/runbook-droplet-outbound-mail-2026-08-06.md`.

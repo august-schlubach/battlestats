@@ -98,7 +98,7 @@ Every backwards-incompatible item in the 6.0 notes that could plausibly apply:
 | Database backend API renames (`returning_columns`, `fetch_returned_rows`) | **No** | third-party-backend surface; we use stock `django.db.backends.postgresql`. The five `connection.cursor()` sites in `data.py` are unaffected — that is public API |
 | Dropped MariaDB 10.5 | **No** | PostgreSQL 18 |
 | PostgreSQL floor raised | **No** | notes reference PG16 features; we run 18 |
-| Adoption of Python's modern email API | **No** | the app sends no email |
+| Adoption of Python's modern email API | **No** | the app sent no email when this was assessed. Since 2026-08-06 it does (`warships/opsmail.py`), but through **stdlib `smtplib`/`EmailMessage` directly**, never `django.core.mail`, so Django's email API is still not on the path and this row's verdict is unchanged |
 
 **Ecosystem readiness** — every Django-coupled dependency already declares 6.0,
 and for three of them the version we already pin is sufficient:
