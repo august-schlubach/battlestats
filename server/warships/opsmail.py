@@ -19,9 +19,11 @@ import os
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formataddr
 from pathlib import Path
 
 DEFAULT_ENV_FILE = "/etc/battlestats-ops-email.env"
+DEFAULT_MAIL_FROM_NAME = "Zeta Region CloudOps"
 
 
 def load_env_file(path: str = DEFAULT_ENV_FILE) -> None:
@@ -69,9 +71,14 @@ def send_email(subject: str, html_body: str, text_body: str) -> None:
     if not (user and pw and mail_from and mail_to):
         raise RuntimeError("SMTP_USER/SMTP_PASS/MAIL_FROM/MAIL_TO must all be set")
 
+    # Display name on the From header. formataddr rather than an f-string so a
+    # name containing a comma, a quote or a non-ASCII character is encoded
+    # correctly instead of producing a malformed header.
+    from_name = cfg("MAIL_FROM_NAME", DEFAULT_MAIL_FROM_NAME)
+
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = mail_from
+    msg["From"] = formataddr((from_name, mail_from)) if from_name else mail_from
     msg["To"] = mail_to
     msg.set_content(text_body or "See the HTML version of this message.")
     msg.add_alternative(html_body, subtype="html")

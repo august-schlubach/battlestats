@@ -1,10 +1,22 @@
 # Outbound mail from the droplet: feedback notifications + ops digest re-arm
 
 **Date:** 2026-08-06
-**Status:** specified; not implemented. QA pass 2026-08-06 verified every factual
-claim against the live system (see *Claims verified*), proved the section-3
-concurrency hazard by experiment, and corrected two wrong claims about systemd
-installation.
+**Status:** **implemented and live 2026-08-06.** Both timers are armed on the
+droplet, `sysop@tamezz.com` exists with its exact routing rule, and both the
+feedback notifier and the ops digest have sent successfully. Operating
+procedures: `agents/runbooks/runbook-droplet-outbound-mail-2026-08-06.md`.
+Implementation plan: `droplet-outbound-mail-plan.md`.
+
+Two things were learned during implementation that this spec did not anticipate.
+The env file is mode 600 and root-owned, so the app user cannot read it at
+runtime even though systemd injects its values; `opsmail.load_env_file` now
+treats an unreadable file as a no-op, which is what makes the timer-driven runs
+work at all. And outgoing mail carries the display name `Zeta Region CloudOps`
+via `MAIL_FROM_NAME`, applied with `formataddr`.
+
+QA pass 2026-08-06 verified every factual claim against the live system (see
+*Claims verified*), proved the section-3 concurrency hazard by experiment, and
+corrected two wrong claims about systemd installation.
 **Surface:** production droplet only (no client, no API); one new Django management command, one shared mail module, two systemd timers
 **Depends on:** the `Feedback` model and its `pending` status (`feedback-submission-spec.md`); the existing `server/scripts/daily_ops_email.py`
 

@@ -3680,6 +3680,48 @@
             "archive_on": [
                 "notifier-and-digest-shipped-and-verified"
             ]
+        },
+        "agents/runbooks/runbook-droplet-outbound-mail-2026-08-06.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "outbound mail",
+                "droplet email",
+                "feedback notifier",
+                "ops digest",
+                "purelymail sysop"
+            ],
+            "tags": [
+                "mail",
+                "smtp",
+                "purelymail",
+                "feedback",
+                "systemd",
+                "notifications"
+            ]
+        },
+        "agents/work-items/droplet-outbound-mail-plan.md": {
+            "kind": "work-item",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "outbound mail plan",
+                "feedback notifier plan"
+            ],
+            "tags": [
+                "mail",
+                "smtp",
+                "feedback",
+                "systemd"
+            ],
+            "archive_on": [
+                "notifier-and-digest-shipped-and-verified"
+            ]
         }
     }
 }

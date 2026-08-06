@@ -70,6 +70,38 @@ class SendEmailTests(SimpleTestCase):
         self.assertEqual(msg['Subject'], 'Subj')
         self.assertEqual(msg['To'], 'op@example.com')
 
+    def test_from_header_carries_the_readable_display_name(self):
+        with mock.patch.dict(os.environ, self.ENV, clear=True), \
+             mock.patch.object(opsmail.smtplib, 'SMTP_SSL') as ssl_cls:
+            opsmail.send_email('Subj', '<p>h</p>', 't')
+        msg = ssl_cls.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertEqual(msg['From'], 'Zeta Region CloudOps <sysop@example.com>')
+
+    def test_from_name_is_overridable_by_env(self):
+        env = dict(self.ENV, MAIL_FROM_NAME='Something Else')
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(opsmail.smtplib, 'SMTP_SSL') as ssl_cls:
+            opsmail.send_email('Subj', '<p>h</p>', 't')
+        msg = ssl_cls.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertEqual(msg['From'], 'Something Else <sysop@example.com>')
+
+    def test_blank_from_name_falls_back_to_a_bare_address(self):
+        env = dict(self.ENV, MAIL_FROM_NAME='')
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(opsmail.smtplib, 'SMTP_SSL') as ssl_cls:
+            opsmail.send_email('Subj', '<p>h</p>', 't')
+        msg = ssl_cls.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertEqual(msg['From'], 'sysop@example.com')
+
+    def test_from_name_with_a_comma_is_quoted_not_malformed(self):
+        """A bare f-string would split this into two addresses."""
+        env = dict(self.ENV, MAIL_FROM_NAME='CloudOps, Zeta Region')
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(opsmail.smtplib, 'SMTP_SSL') as ssl_cls:
+            opsmail.send_email('Subj', '<p>h</p>', 't')
+        msg = ssl_cls.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertEqual(msg['From'], '"CloudOps, Zeta Region" <sysop@example.com>')
+
     def test_non_465_port_uses_starttls(self):
         env = dict(self.ENV, SMTP_PORT='587')
         with mock.patch.dict(os.environ, env, clear=True), \
