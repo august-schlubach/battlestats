@@ -74,6 +74,48 @@ reuse it rather than mint a parallel mailbox.
 No other key in the env file changes. `SMTP_USER` and `MAIL_FROM` already name
 this address; only `SMTP_PASS` is rewritten.
 
+#### Unresolved: `tamezz.com` is derby's mail domain
+
+**This must be settled before `createUser` runs.** `listRoutingRules` shows one
+rule on `tamezz.com`:
+
+```
+domain=tamezz.com  matchUser=''  prefix=True  catchall=False  ->  ['tjones86@tamezz.com']
+```
+
+An empty `matchUser` with `prefix=True` matches every local-part on the domain,
+and `catchall=False` means the rule fires **even when an exact mailbox exists**
+(a catch-all, by Purelymail's definition, is the flag that makes a rule yield to
+a real mailbox; this rule does not have it). So creating `sysop@tamezz.com` does
+not by itself give that address its own inbox: mail addressed to it would still
+route to `tjones86@tamezz.com`, which is derby's ingest mailbox.
+
+Sending does not require receiving, so this does not block outbound mail. What it
+does affect is everything that comes *back* to the envelope sender: bounces,
+delivery status notifications, and any human who hits reply. Those would land in
+derby's `INBOX`, which derby's classifier ingests. Derby would be reading mail it
+was never built to see.
+
+`etro.email` has the identical structure pointing at `boston@etro.email`, so it
+is not an escape.
+
+Three ways out, in the order I would consider them:
+
+1. **Add an exact rule for `sysop@tamezz.com` targeting itself**, so the mailbox
+   receives its own bounces. This requires confirming Purelymail's precedence
+   between an exact rule and a prefix rule; the API models both, but the spec
+   does not state which wins, so it needs an empirical check before being relied
+   upon.
+2. **Accept the coupling** and instead harden derby's classifier against
+   bounce-shaped mail. Cheapest in mail configuration, but it puts battlestats'
+   operational failure modes inside another project's ingest path.
+3. **Use a domain neither project ingests from.** Cleanest isolation; costs a new
+   domain and DNS setup, which is disproportionate to a notification mailbox.
+
+Option 1 is the likely answer, but it is a live question rather than a decided
+one, and it touches another project's mail. It is called out here rather than
+resolved silently.
+
 **Verification is two-staged and the second stage is not optional.** First,
 `SMTP_SSL` connect plus `login()` against `smtp.purelymail.com:465`, proving
 credentials without sending. Then one real message to `MAIL_TO`, confirmed to
@@ -138,10 +180,25 @@ Django admin. A naive daily run would therefore mail the same submission every
 day until it is cleared, and a notifier that nags is a notifier that gets
 filtered.
 
-A watermark file at `/opt/battlestats-server/shared/state/feedback-notify-watermark`
-holds the highest `Feedback.id` already mailed. Each submission mails exactly
-once. Deleting the file re-arms everything above zero, which is the whole
-recovery procedure.
+A state file at `/opt/battlestats-server/shared/state/feedback-notify-watermark`
+holds a **JSON array of the `Feedback.id` values already mailed**. Each
+submission mails exactly once. Deleting the file re-arms everything, which is the
+whole recovery procedure.
+
+**It stores a set, not a maximum, and that distinction is load-bearing.** A
+max-id watermark is unsafe here. Postgres assigns a sequence value at `INSERT`
+but a row only becomes visible at `COMMIT`, so two overlapping submissions can
+commit out of order: T1 takes id 5, T2 takes id 6, T2 commits first. A run
+landing in that window sees 6 and not 5, and a max-based watermark would move to
+6; when T1 commits, row 5 is visible but permanently `<= watermark` and is never
+mailed. Nothing would record that it existed. That is precisely the silent loss
+this feature exists to prevent, on a public endpoint with no rate control over
+submission timing.
+
+Storing the id set removes the ordering hazard outright rather than narrowing it.
+Volume is human-scale (single digits to date), so the file stays trivially small;
+if it ever grows unreasonably, prune ids below the oldest still-`pending` row,
+never by count.
 
 **Rejected: a `notified_at` column.** Tidier, and it would survive a wiped
 filesystem; but it costs a migration for state with no product meaning, and it
@@ -149,7 +206,9 @@ puts operational bookkeeping in a table that exists to hold what visitors said.
 The watermark is recoverable by deleting a file, and the failure mode of losing
 it is one duplicate email.
 
-Ids are monotonic (autoincrement), so a max-id watermark cannot skip a row.
+The `notified_at` column would also have been immune to the ordering hazard
+above, since it marks the row rather than a boundary. The id set buys the same
+immunity without a migration, which is why the rejection stands.
 
 ### 4. Scheduling
 
@@ -162,8 +221,18 @@ snapshots still use cron, and the migration has been running the other way.
 - `battlestats-ops-digest.timer`: daily at 11:30 UTC, the time
   `daily_ops_email.py` documents. Re-armed unchanged, with the LLM path intact.
 
-Both `Wants=`, not `Requires=`, per the soft-dependency convention already used
-for the Celery units.
+Each pair is a `.timer` carrying `Unit=` plus a `Type=oneshot` `.service`. (The
+`Wants=` over `Requires=` convention elsewhere in this project governs the Celery
+services' dependency on RabbitMQ and Redis; it does not apply to a timer and its
+oneshot, and is noted here only so it is not copied across by analogy.)
+
+**Installation is a named step, not an implication.** `server/` reaches the
+droplet through the backend deploy script, which rsyncs the working tree; unit
+files do not, because they belong in `/etc/systemd/system/`. The plan must
+therefore cover: writing both unit pairs to `/etc/systemd/system/`, creating
+`/opt/battlestats-server/shared/state/` (which does not exist yet and is where
+both state files live), `systemctl daemon-reload`, and `enable --now` on both
+timers. Left implicit, this gets discovered on the droplet at the worst moment.
 
 ### 5. Shared send path
 
@@ -191,6 +260,9 @@ mocked:
   **full** text, verifying no truncation.
 - Two runs, unchanged queue: the second sends nothing (watermark honoured).
 - A new row after a notified one: only the new row appears.
+- A row that becomes visible with an id **lower** than one already notified still
+  mails. This is the out-of-order-commit case, and it is the test a max-id
+  watermark fails.
 - Raised exception mid-run: a `FAILED` mail is sent and the exit code is non-zero.
 - Send failure: the watermark does **not** advance.
 - Credit below the floor with an empty queue: a warning mail is sent anyway.
@@ -250,7 +322,11 @@ only on the Purelymail billing page in the web UI.
 ## Acceptance
 
 1. `SMTP_SSL` login as `sysop@tamezz.com` succeeds from the droplet.
-2. A test message arrives in the Gmail **inbox**, not spam.
+2. A test message arrives in the Gmail **inbox**, not spam. **This is an operator
+   step and cannot be verified from the droplet or by any automated check.** The
+   implementation is not done until a human has confirmed placement; reporting
+   completion with this unchecked would assert exactly the thing that has not
+   been established.
 3. `notify_pending_feedback` on an empty queue sends nothing and exits 0.
 4. A newly submitted feedback row produces exactly one email containing its full
    verbatim message, and a second run produces none.
