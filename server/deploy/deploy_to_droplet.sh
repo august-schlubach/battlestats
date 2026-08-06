@@ -1245,6 +1245,78 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+# State for the feedback notifier (notified-id set + last credit warning).
+# shared/ has no mkdir precedent in this script; its other subdirectories
+# (archives, benchmarks, bin, logs) were created by hand, so this one is
+# made explicitly rather than assumed.
+mkdir -p "${APP_ROOT}/shared/state"
+chown "${APP_USER}:${APP_USER}" "${APP_ROOT}/shared/state"
+
+cat > /etc/systemd/system/battlestats-feedback-notify.service <<EOF
+[Unit]
+Description=Battlestats visitor-feedback notifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-server.env
+EnvironmentFile=/etc/battlestats-server.secrets.env
+# Third env file, unlike every other unit here: the SMTP settings and the
+# Purelymail API token live in the ops-email env file, which until now was
+# read only by daily_ops_email.py at runtime.
+EnvironmentFile=/etc/battlestats-ops-email.env
+ExecStart=/bin/bash -lc 'exec "${APP_ROOT}/venv/bin/python" manage.py notify_pending_feedback'
+TimeoutStartSec=600
+EOF
+
+cat > /etc/systemd/system/battlestats-feedback-notify.timer <<'EOF'
+[Unit]
+Description=Check the Battlestats feedback queue daily
+
+[Timer]
+OnCalendar=*-*-* 13:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+cat > /etc/systemd/system/battlestats-ops-digest.service <<EOF
+[Unit]
+Description=Battlestats daily ops digest email
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=${APP_USER}
+Group=${APP_USER}
+WorkingDirectory=${APP_ROOT}/current/server
+EnvironmentFile=/etc/battlestats-ops-email.env
+# Deliberately /usr/bin/python3, not the venv: daily_ops_email.py is
+# stdlib-only by design and running it this way keeps that property honest.
+ExecStart=/bin/bash -lc 'exec /usr/bin/python3 scripts/daily_ops_email.py'
+TimeoutStartSec=900
+EOF
+
+cat > /etc/systemd/system/battlestats-ops-digest.timer <<'EOF'
+[Unit]
+Description=Send the Battlestats ops digest each morning
+
+[Timer]
+OnCalendar=*-*-* 11:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 # Enable the new crawls unit on first install so it auto-starts on reboot.
 # Idempotent — `systemctl enable` is a no-op when the unit is already enabled.
@@ -1257,6 +1329,10 @@ systemctl enable --now battlestats-compact-observations.timer 2>/dev/null || tru
 systemctl enable --now battlestats-downsample-snapshots.timer 2>/dev/null || true
 systemctl enable --now battlestats-prune-battles-json.timer 2>/dev/null || true
 systemctl enable --now battlestats-cleanup-entity-visits.timer 2>/dev/null || true
+# Outbound mail: the feedback notifier, and the ops digest that has been
+# deployed since July with nothing scheduling it.
+systemctl enable --now battlestats-feedback-notify.timer 2>/dev/null || true
+systemctl enable --now battlestats-ops-digest.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.
 redis-cli --scan --pattern 'warships:tasks:crawl_all_clans:*' | xargs -r redis-cli DEL >/dev/null 2>&1 || true
