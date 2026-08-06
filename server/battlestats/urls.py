@@ -1,10 +1,36 @@
 from django.contrib import admin
-from django.urls import path, include, re_path
+from django.urls import path, include, re_path, register_converter
 from rest_framework import routers
 from warships.views import PlayerViewSet, ClanViewSet, ShipViewSet
 from warships.views import tier_data, activity_data, type_data, randoms_data, ranked_data, ranked_season_catalog, clan_members, clan_data, clan_tier_distribution, clan_member_tiers, clan_battle_seasons, player_clan_battle_seasons, player_name_suggestions, clan_name_suggestions, player_summary, wr_distribution, player_distribution, player_correlation_distribution, db_stats, analytics_entity_view, sitemap_entities, streamer_submission_view, feedback_view, battle_history, realm_top_ships, realm_ships_by_tier_type, ship_leaderboard, ship_combat_stats
 from django.conf import settings
 from django.conf.urls.static import static
+
+class PlayerIdConverter:
+    """Match a WG account id: digits only, kept as ``str``.
+
+    The ``/api/fetch/*`` views hand their ``player_id`` straight to a numeric ORM
+    filter, so a non-numeric segment used to escape as an unhandled 500
+    (``ValueError: Field 'player_id' expected a number but got 'Detralon'``) --
+    once per chart endpoint, so a single bad id broke the whole player page.
+    Constraining the segment here turns that into a routing-level 404.
+
+    ``to_python`` deliberately returns the **string**, not ``int``: the views and
+    everything downstream of them are typed ``player_id: str`` and build cache keys
+    from it, so widening the type would be a contract change this guard does not
+    need. The only job here is rejecting non-numeric input at the boundary.
+    """
+
+    regex = r'[0-9]+'
+
+    def to_python(self, value: str) -> str:
+        return value
+
+    def to_url(self, value) -> str:
+        return str(value)
+
+
+register_converter(PlayerIdConverter, 'player_id')
 
 router = routers.DefaultRouter()
 router.register(r'player', PlayerViewSet, basename='player')
@@ -32,25 +58,25 @@ urlpatterns = [
             clan_detail_view, name='clan_detail_no_slash'),
     path('api/', include(router.urls)),  # Include the router URLs
     path('api-auth/', include('rest_framework.urls', namespace='rest_framework')),
-    path('api/fetch/tier_data/<str:player_id>/',
+    path('api/fetch/tier_data/<player_id:player_id>/',
          tier_data, name='fetch_tier_data'),
-    path('api/fetch/tier_data/<str:player_id>',
+    path('api/fetch/tier_data/<player_id:player_id>',
          tier_data, name='fetch_tier_data_no_slash'),
-    path('api/fetch/activity_data/<str:player_id>/',
+    path('api/fetch/activity_data/<player_id:player_id>/',
          activity_data, name='fetch_activity_data'),
-    path('api/fetch/activity_data/<str:player_id>',
+    path('api/fetch/activity_data/<player_id:player_id>',
          activity_data, name='fetch_activity_data_no_slash'),
-    path('api/fetch/type_data/<str:player_id>/',
+    path('api/fetch/type_data/<player_id:player_id>/',
          type_data, name='fetch_type_data'),
-    path('api/fetch/type_data/<str:player_id>',
+    path('api/fetch/type_data/<player_id:player_id>',
          type_data, name='fetch_type_data_no_slash'),
-    path('api/fetch/randoms_data/<str:player_id>/',
+    path('api/fetch/randoms_data/<player_id:player_id>/',
          randoms_data, name='fetch_randoms_data'),
-    path('api/fetch/randoms_data/<str:player_id>',
+    path('api/fetch/randoms_data/<player_id:player_id>',
          randoms_data, name='fetch_randoms_data_no_slash'),
-    path('api/fetch/ranked_data/<str:player_id>/',
+    path('api/fetch/ranked_data/<player_id:player_id>/',
          ranked_data, name='fetch_ranked_data'),
-    path('api/fetch/ranked_data/<str:player_id>',
+    path('api/fetch/ranked_data/<player_id:player_id>',
          ranked_data, name='fetch_ranked_data_no_slash'),
     # Player-independent season catalog (every ranked season WG has run) —
     # the lattice the ranked-tab timeline draws played seasons onto.
@@ -58,9 +84,9 @@ urlpatterns = [
          ranked_season_catalog, name='ranked_season_catalog'),
     path('api/ranked_seasons',
          ranked_season_catalog, name='ranked_season_catalog_no_slash'),
-    path('api/fetch/player_summary/<str:player_id>/',
+    path('api/fetch/player_summary/<player_id:player_id>/',
          player_summary, name='fetch_player_summary'),
-    path('api/fetch/player_summary/<str:player_id>',
+    path('api/fetch/player_summary/<player_id:player_id>',
          player_summary, name='fetch_player_summary_no_slash'),
     path('api/player/<str:player_name>/battle-history/',
          battle_history, name='battle_history'),
@@ -100,9 +126,9 @@ urlpatterns = [
          clan_battle_seasons, name='fetch_clan_battle_seasons'),
     path('api/fetch/clan_battle_seasons/<str:clan_id>',
          clan_battle_seasons, name='fetch_clan_battle_seasons_no_slash'),
-    path('api/fetch/player_clan_battle_seasons/<str:player_id>/',
+    path('api/fetch/player_clan_battle_seasons/<player_id:player_id>/',
          player_clan_battle_seasons, name='fetch_player_clan_battle_seasons'),
-    path('api/fetch/player_clan_battle_seasons/<str:player_id>',
+    path('api/fetch/player_clan_battle_seasons/<player_id:player_id>',
          player_clan_battle_seasons, name='fetch_player_clan_battle_seasons_no_slash'),
     path('api/landing/player-suggestions/',
          player_name_suggestions, name='player_name_suggestions'),
@@ -124,9 +150,9 @@ urlpatterns = [
          player_distribution, name='fetch_player_distribution'),
     path('api/fetch/player_distribution/<str:metric>',
          player_distribution, name='fetch_player_distribution_no_slash'),
-    path('api/fetch/player_correlation/<str:metric>/<str:player_id>/',
+    path('api/fetch/player_correlation/<str:metric>/<player_id:player_id>/',
          player_correlation_distribution, name='fetch_player_correlation_distribution_for_player'),
-    path('api/fetch/player_correlation/<str:metric>/<str:player_id>',
+    path('api/fetch/player_correlation/<str:metric>/<player_id:player_id>',
          player_correlation_distribution, name='fetch_player_correlation_distribution_for_player_no_slash'),
     path('api/fetch/player_correlation/<str:metric>/',
          player_correlation_distribution, name='fetch_player_correlation_distribution'),

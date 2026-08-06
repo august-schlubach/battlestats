@@ -72,6 +72,26 @@ _GAP_KEYS = (
     "no_snapshot_pair",         # missing today/prior snapshot row → unclassifiable
 )
 
+def _was_checked_on_latest_date(activity_updated_at, latest_date) -> bool:
+    """Did the snapshot path run for this player on the day being measured?
+
+    ``update_snapshot_data`` refreshes ``activity_updated_at`` on both of its
+    branches — the written path and the delta-gated ``skipped-unchanged`` path — so
+    a value dated to ``latest_date`` proves the player was checked even though the
+    gate wrote no Snapshot row. Durable DB state, so the 04:30Z benchmark can still
+    read it for the day it is measuring (a cache TTL could not be relied on).
+
+    Tolerates naive and aware datetimes: the writer uses ``datetime.now()`` while
+    the ORM may hand back an aware value depending on ``USE_TZ``.
+    """
+    if activity_updated_at is None or latest_date is None:
+        return False
+    value = activity_updated_at
+    if timezone.is_aware(value):
+        value = timezone.localtime(value)
+    return value.date() >= latest_date
+
+
 FLOOR_FLAGS = [
     "BATTLE_OBSERVATION_FLOOR_BULK_ENABLED",
     "BATTLE_OBSERVATION_FLOOR_BULK_REALMS",
@@ -208,10 +228,17 @@ class Command(BaseCommand):
         gap_stats: dict[str, dict[str, int]] = {}
         if latest_date is not None and prior_date is not None:
             since48 = now - timedelta(hours=48)
-            active1_realm = dict(
+            # `activity_updated_at` rides along so a gate-skipped player can be told
+            # apart from an unchecked one — see `_was_checked_on_latest_date`.
+            active1_rows = list(
                 Player.objects.filter(is_hidden=False, last_battle_date__gte=cut1)
-                .values_list("id", "realm").iterator()
+                .values_list("id", "realm", "activity_updated_at").iterator()
             )
+            active1_realm = {pid: prealm for pid, prealm, _ in active1_rows}
+            active1_checked = {
+                pid: _was_checked_on_latest_date(act_at, latest_date)
+                for pid, _, act_at in active1_rows
+            }
             prod_ids = set(
                 BattleEvent.objects.filter(detected_at__gte=since)
                 .values_list("player_id", flat=True)
@@ -225,9 +252,21 @@ class Command(BaseCommand):
                     continue
                 mover = _is_mover(pid)
                 if mover is None:
-                    # No today-row (unchanged-under-gating or unchecked —
-                    # indistinguishable) or NULL interval without a pair.
-                    bucket = "no_snapshot_pair"
+                    # No today-row. Since SNAPSHOT_DELTA_GATE_ENABLED (2026-07-20)
+                    # that has two very different meanings, and conflating them
+                    # collapsed `non_pvp_active` from ~18,400 to ~64 overnight while
+                    # `no_snapshot_pair` absorbed the difference — the gap itself
+                    # never changed size, only our ability to name it.
+                    #
+                    #   checked today, no row  -> the gate found cumulative PvP flat
+                    #                             -> non_pvp_active (co-op/Ops)
+                    #   never checked          -> genuinely unclassifiable
+                    #
+                    # `activity_updated_at` separates them: the snapshot path
+                    # refreshes activity on BOTH the written and skipped-unchanged
+                    # branches, so a same-day value proves the player was checked.
+                    bucket = ("non_pvp_active" if active1_checked.get(pid)
+                              else "no_snapshot_pair")
                 elif mover:
                     bucket = "pvp_mover"
                 else:

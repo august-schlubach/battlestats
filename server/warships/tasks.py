@@ -1,6 +1,7 @@
 from __future__ import absolute_import, unicode_literals
 import logging
 import os
+import re
 import time
 
 from io import StringIO
@@ -2824,6 +2825,37 @@ def startup_warm_caches_task():
 # Lock must outlive the per-realm reclassify hard time_limit so a slow run can't
 # lose its lock mid-pass and let a second invocation start on top of it.
 ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT = 25 * 60
+# Named so _reclassify_budget_seconds() and the task decorator cannot drift apart.
+ENRICHMENT_RECLASSIFY_TIME_LIMIT = 1200       # 20 min hard
+ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT = 1080  # 18 min soft
+
+
+def _reclassify_budget_seconds() -> int:
+    """Wall-clock budget for one reclassify pass.
+
+    Buckets commit individually now, which removed the accidental fail-fast bound:
+    previously the first bucket to hit ``statement_timeout`` aborted the pass, so it
+    could never outrun the Celery limits. Without a bound a pathological pass could
+    attempt every bucket at the full statement timeout and be killed mid-flight.
+
+    Derived rather than hardcoded so it cannot drift out of the ordering it depends
+    on. The budget is checked *before* dispatching each bucket, so a bucket started
+    just under the wire still needs a whole ``statement_timeout`` to finish::
+
+        budget + statement_timeout <= soft_time_limit < time_limit <= lock TTL
+
+    Override with ``ENRICHMENT_RECLASSIFY_BUDGET_SECONDS`` (a raw value is trusted
+    as-is; the caller owns the arithmetic then).
+    """
+    override = os.getenv("ENRICHMENT_RECLASSIFY_BUDGET_SECONDS")
+    if override:
+        return int(override)
+
+    statement_timeout = int(
+        os.getenv("ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT", "420"))
+    soft_limit = ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT
+    slack = 60
+    return max(60, soft_limit - statement_timeout - slack)
 
 
 @app.task(
@@ -2882,8 +2914,8 @@ def enrichment_pool_maintenance_task():
 @app.task(
     bind=True,
     queue='background',
-    time_limit=1200,        # 20 min hard — generous headroom over the heaviest realm
-    soft_time_limit=1080,   # 18 min soft (eu measured ~11 min under load; variance is high)
+    time_limit=ENRICHMENT_RECLASSIFY_TIME_LIMIT,        # 20 min hard
+    soft_time_limit=ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT,  # 18 min soft (eu ~11 min under load)
     ignore_result=True,
 )
 def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
@@ -2917,6 +2949,7 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
         return {"status": "skipped", "reason": "already-running", "realm": realm}
 
     recent_hours = int(os.getenv("ENRICHMENT_RECLASSIFY_RECENT_HOURS", "25"))
+    budget_seconds = _reclassify_budget_seconds()
     # Per-statement blast-radius cap. Sized well above a single bucket UPDATE's real
     # cost (~2-3 min under load) so it caps a runaway without aborting normal work —
     # 120s was too tight and silently rolled back the whole pass. statement_timeout
@@ -2931,10 +2964,34 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
         buf = StringIO()
         call_command(
             "reclassify_enrichment_status", "--realm", realm,
-            "--recent-hours", str(recent_hours), stdout=buf)
+            "--recent-hours", str(recent_hours),
+            "--budget-seconds", str(budget_seconds), stdout=buf)
+        output = buf.getvalue()
         logger.info(
             "enrichment_reclassify_drift[%s]: %s",
-            realm, buf.getvalue().replace("\n", " | ").strip())
+            realm, output.replace("\n", " | ").strip())
+
+        # Buckets now commit individually, so a bad pass is partial rather than
+        # total. Surface that: reporting "ok" for a pass that lost buckets is how
+        # the original all-or-nothing failure went unnoticed for days.
+        failed_buckets = re.findall(r"FAILED bucket -> ([a-z_]+):", output)
+        budget_skipped = re.findall(
+            r"Skipped \(budget exhausted\) -> (.+)", output)
+        skipped_buckets = [
+            name.strip()
+            for line in budget_skipped for name in line.split(",")
+        ]
+        if failed_buckets or skipped_buckets:
+            logger.error(
+                "enrichment_reclassify_drift[%s] INCOMPLETE — failed=%s skipped=%s",
+                realm, failed_buckets, skipped_buckets)
+            return {
+                "status": "partial",
+                "realm": realm,
+                "recent_hours": recent_hours,
+                "failed_buckets": failed_buckets,
+                "skipped_buckets": skipped_buckets,
+            }
     except Exception:
         logger.exception(
             "enrichment_reclassify_drift_task failed for %s", realm)

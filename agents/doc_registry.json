@@ -3631,6 +3631,34 @@
                 "remediations-shipped"
             ]
         },
+        "agents/runbooks/runbook-health-sweep-remediation-2026-08-06.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "health sweep",
+                "health sweep findings",
+                "observation and crawl sweep",
+                "wg null fetch loop",
+                "health sweep qa"
+            ],
+            "tags": [
+                "health-check",
+                "observation-floor",
+                "clan-crawl",
+                "error-logs",
+                "wg-api",
+                "enrichment",
+                "logging",
+                "remediation",
+                "500s"
+            ],
+            "archive_on": [
+                "all-six-findings-closed"
+            ]
+        },
         "agents/runbooks/runbook-db-disk-remediation-2026-08-05.md": {
             "kind": "runbook",
             "status": "active",

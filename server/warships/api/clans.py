@@ -78,7 +78,10 @@ def _fetch_clan_membership_for_player(player_id: int, realm: str = DEFAULT_REALM
     logging.info(
         f' ---> Remote fetching clan membership for player_id: {player_id}')
     data = _make_api_request("clans/accountinfo/", params, realm=realm)
-    return data.get(str(player_id), {}) if data else {}
+    # WG returns the key with a *null* value for accounts it will not serve, so
+    # `.get(key, {})` yields None rather than the default -- callers then blow up on
+    # `.get()`. Coerce with `or {}` so a present-but-null payload degrades to empty.
+    return (data.get(str(player_id)) or {}) if data else {}
 
 
 def _make_api_request(endpoint: str, params: Dict, realm: str = DEFAULT_REALM) -> Optional[Dict]:

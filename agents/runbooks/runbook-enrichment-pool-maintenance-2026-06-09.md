@@ -166,3 +166,40 @@ cd server && python manage.py shell -c \
 - Memory: `project_enrichment_misses_elite_empty_falseneg`, `project_coverage_ceiling_daily_active`,
   `reference_wg_ships_stats_no_bulk`, `reference_do_db_cpu_metrics_endpoint`
 </content>
+
+---
+
+## Reconciliation 2026-08-06 — the drift reclassify was failing daily on eu + asia
+
+A health sweep found `enrichment_reclassify_drift_task` timing out at exactly 420 s
+(`statement_timeout`) for **eu and asia on every observed day** (08-03, 08-04, 08-05; na
+usually passed). Because all seven buckets shared one `transaction.atomic()`, the timeout
+rolled the whole pass back, so **those two realms had been getting zero `skipped_*` drift
+rescue** — the thing this runbook's design exists to deliver.
+
+It went unnoticed because the task caught the exception, logged it with
+`logger.exception`, and then **returned normally**, so Celery recorded
+`succeeded in 420.02s: {'status': 'error', …}`. The log was loud; the task status was not.
+
+**Fixed in code 2026-08-06** (not yet deployed; see
+`runbook-health-sweep-remediation-2026-08-06.md` F2 for the full analysis):
+
+- **Buckets commit individually.** They are pairwise disjoint — proved by test, not
+  argued — so splitting the transaction cannot change the classification of a complete
+  pass; it only changes how much survives a failure. A failing bucket is recorded and the
+  remaining buckets still run.
+- **Dry-run reworked.** It no longer writes-then-`set_rollback`; it simply does not write
+  (the shared block that made rollback work is gone).
+- **A wall-clock budget** (`--budget-seconds`, derived from the Celery soft limit minus
+  the statement timeout) replaces the accidental fail-fast bound that per-bucket commit
+  removed.
+- **Bucket order rotates by day** (`--rotation`). The budget can only be ~600 s, below the
+  slowest observed pass (~660 s), so truncation is expected; a fixed order would drop the
+  same tail buckets forever.
+- **Partial passes report as partial**: `{'status': 'partial', 'failed_buckets': [...],
+  'skipped_buckets': [...]}` plus an ERROR-level `INCOMPLETE` log line.
+
+**Still open**: the plan is disjoint but **not exhaustive** — a player with a NULL
+`pvp_ratio` matches no bucket at all and is never reclassified, independent of the
+timeout. Size it before deciding whether to add a terminal bucket; query in the
+health-sweep runbook's F2.

@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from typing import Optional, Dict, Any
 
@@ -90,6 +91,21 @@ def _ship_cache_is_complete(ship: Ship) -> bool:
     return bool(ship.name and ship.ship_type and ship.tier is not None and ship.chart_name)
 
 
+# How long to remember that WG will not serve a given ship id. Bounded rather than
+# permanent so a ship published by a later WoWS patch heals on its own.
+SHIP_UNRESOLVABLE_CACHE_SECONDS = int(
+    os.getenv('SHIP_UNRESOLVABLE_CACHE_SECONDS', str(24 * 60 * 60)))
+
+
+def _unresolvable_cache_key(ship_id: int) -> str:
+    """Key for the negative cache.
+
+    Deliberately NOT `ship:<id>`: that key holds a `Ship` instance and is passed to
+    `_ship_cache_is_complete()`, which would reject a sentinel and then delete it.
+    """
+    return f'ship:unresolvable:{ship_id}'
+
+
 def _upsert_ship_from_api_payload(ship: Ship, ship_data: Dict[str, Any]) -> Ship:
     ship.name = ship_data.get('name') or ''
     ship.chart_name = build_ship_chart_name(ship.name)
@@ -178,6 +194,9 @@ def sync_ship_catalog(page_size: int = 100) -> dict[str, int]:
 
         for ship_id in ship_ids:
             cache.delete(f"ship:{ship_id}")
+            # An id the catalog just published is by definition resolvable, so
+            # drop any negative-cache entry instead of waiting out its TTL.
+            cache.delete(_unresolvable_cache_key(ship_id))
 
         processed_count += len(ship_rows)
         page_total = meta.get("page_total") or meta.get(
@@ -380,6 +399,15 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
     if cached is not None:
         cache.delete(cache_key)
 
+    # Negative cache. WG serves `{"<id>": null}` for ships it will not publish
+    # (test ships, chiefly), which leaves the Ship row permanently incomplete, so
+    # `needs_refresh` below can never go False and every caller re-fetches forever.
+    # A separate key is required: a sentinel stored under `cache_key` would be
+    # handed to `_ship_cache_is_complete()` above and then deleted, which would
+    # destroy the negative cache on the very next call.
+    if cache.get(_unresolvable_cache_key(clean_ship_id)):
+        return None
+
     ship, created = Ship.objects.get_or_create(ship_id=clean_ship_id)
     needs_refresh = created or not ship.name or not ship.ship_type or ship.tier is None
     if not needs_refresh:
@@ -404,9 +432,16 @@ def _fetch_ship_info(ship_id: str) -> Optional[Ship]:
             else:
                 logging.info(f'Refreshed ship metadata for {ship.name}')
         else:
-            logging.error(
-                f"ERROR: Null or invalid response data for ship_id: {ship_id}")
-            logging.error(f"Response data: {data}")
+            # Expected upstream condition, not an error: WG withholds some ship
+            # ids entirely. Logged at debug because at ERROR this pair produced
+            # ~800k lines/day across the workers and capped journald retention
+            # at ~3.4 days, burying real failures.
+            logging.debug(
+                "No encyclopedia payload for ship_id %s (response=%s); "
+                "negative-caching for %ss", ship_id, data,
+                SHIP_UNRESOLVABLE_CACHE_SECONDS)
+            cache.set(_unresolvable_cache_key(clean_ship_id), True,
+                      SHIP_UNRESOLVABLE_CACHE_SECONDS)
             return None
 
     return ship

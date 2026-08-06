@@ -44,3 +44,30 @@ Gate the write in `update_snapshot_data` — the single choke point shared by al
 - The engine reports `Written` / `Unchanged-skipped` counters (from `update_snapshot_data`'s return value).
 - Rollback: `SNAPSHOT_DELTA_GATE_ENABLED=0` restores dense writes immediately. No backfill needed in either direction — readers synthesize zeros for missing dates.
 - Expected effect: ~150K fewer rows/day (~68% of the stream), no per-player 29-row same-value bulk_update, no per-player purge DELETE on the skip path; with the 90d downsampler armed (2026-07-20) the table plateaus well under the previous ~3.7 GB projection.
+
+---
+
+## Downstream reader found 2026-08-06: the `gap_1d` benchmark decomposition
+
+The delta gate had one reader this spec did not anticipate. `benchmark_observation_floor`
+classifies the 24h capture gap by looking for a **Snapshot pair**; the gate stopped writing
+a today-row for players whose PvP stats had not moved, which is precisely the
+`non_pvp_active` population. On the first snapshot after the gate went live (2026-07-21)
+that bucket collapsed **18,380 → 64** while `no_snapshot_pair` rose **5,856 → 21,088**.
+
+The gap itself never changed size (~21–25k throughout), so this was an **instrument
+regression, not a data regression** — but it silently disabled the `/observation` skill's
+routing rule ("a dominant `non_pvp_active` means the residual gap is a capture-surface
+question, not a floor-throughput deficit"), which could have led an operator to tune floor
+cadence against a phantom.
+
+**Fixed 2026-08-06** without changing the gate: `update_snapshot_data` already refreshes
+`Player.activity_updated_at` on **both** branches — the written path and the
+`skipped-unchanged` path — so a same-day value proves the player was checked even though no
+row was written. The classifier now uses it to separate "checked today, PvP flat"
+(`non_pvp_active`) from "never checked" (`no_snapshot_pair`). Durable DB state, not a
+cache, so the 04:30Z benchmark can read it for the day it is measuring.
+
+**Any future work that suppresses a write must ask what reads the absence of that write.**
+Snapshots captured 2026-07-21 → 2026-08-06 understate `non_pvp_active`; do not trend that
+bucket across the fix. Runbook: `agents/runbooks/runbook-health-sweep-remediation-2026-08-06.md` F4.
