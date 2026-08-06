@@ -234,6 +234,40 @@ class RecaptureSoftTimeLimitTests(TestCase):
         self.assertFalse(snap["partial"])
         self.assertEqual(snap["scanned"], snap["candidates"])
 
+    def test_advanced_accumulates_across_flushes_without_double_counting(self):
+        """`advanced` is the headline number in the daily mail.
+
+        It used to be `len(promote)` read once at the end; it now sums across
+        flushes, so a failed chunk between two good ones is the case to pin.
+        """
+        import tempfile
+        self._mk_band(30)
+        calls = {"n": 0}
+
+        def side(ids, realm):
+            calls["n"] += 1
+            if calls["n"] == 2:                       # middle chunk fails
+                return (None, "REQUEST_LIMIT_EXCEEDED")
+            return ({str(i): _info(i, 1) for i in ids}, None)
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch("warships.api.players._bulk_fetch_account_info",
+                       side_effect=side):
+                with patch("warships.management.commands."
+                           "recapture_lapsed_players.RECAPTURE_BENCHMARK_DIR", d):
+                    call_command("recapture_lapsed_players", "--realm", "na",
+                                 "--delay", "0", "--batch-size", "10",
+                                 apply=True, stdout=StringIO(), stderr=StringIO())
+            snap = _read_snapshot(d)
+        self.assertEqual(snap["advanced"], 20, "the failed chunk must not count")
+        self.assertEqual(snap["cursor_stamped"], 20)
+        self.assertEqual(snap["chunk_errors"], 1)
+        self.assertFalse(snap["partial"])
+        # The failed chunk's rows keep a NULL cursor -> retried next run.
+        self.assertEqual(
+            Player.objects.filter(realm="na",
+                                  last_idle_check_at__isnull=True).count(), 10)
+
     def test_incremental_flush_lands_before_the_end_of_the_scan(self):
         """Writes must not all sit past the scan — that was the original defect."""
         import tempfile
