@@ -25,11 +25,26 @@ DEFAULT_ENV_FILE = "/etc/battlestats-ops-email.env"
 
 
 def load_env_file(path: str = DEFAULT_ENV_FILE) -> None:
-    """Merge KEY=VALUE lines from an env file into os.environ (env wins if set)."""
+    """Merge KEY=VALUE lines from an env file into os.environ (env wins if set).
+
+    Unreadable is not an error. Under systemd the env file is mode 600 and
+    root-owned: systemd reads it as root via EnvironmentFile= and injects the
+    values before dropping to the app user, so by the time this runs the
+    variables are already in os.environ and the file itself is deliberately
+    out of reach. Raising here would break every timer-driven run.
+
+    Swallowing the error is safe because it cannot hide a real misconfiguration:
+    if the variables are genuinely absent, send_email raises a named RuntimeError
+    listing exactly which ones are missing.
+    """
     p = Path(path)
-    if not p.exists():
+    try:
+        if not p.exists():
+            return
+        content = p.read_text()
+    except (PermissionError, OSError):
         return
-    for raw in p.read_text().splitlines():
+    for raw in content.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue

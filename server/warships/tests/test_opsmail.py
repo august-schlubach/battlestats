@@ -31,6 +31,25 @@ class LoadEnvFileTests(SimpleTestCase):
     def test_missing_file_is_not_an_error(self):
         opsmail.load_env_file('/nonexistent/path/to.env')  # must not raise
 
+    def test_unreadable_file_is_not_an_error(self):
+        """Under systemd the env file is mode 600 root-owned: systemd injects the
+        values as root, then the unit runs as the app user which cannot read it.
+        Raising here would break every timer-driven run. Regression test for a
+        PermissionError that took down the first live unit invocation."""
+        with tempfile.NamedTemporaryFile('w', suffix='.env', delete=False) as fh:
+            fh.write('SMTP_HOST=unreadable\n')
+            path = fh.name
+        os.chmod(path, 0o000)
+        try:
+            if os.access(path, os.R_OK):
+                self.skipTest('running as root; cannot make a file unreadable')
+            with mock.patch.dict(os.environ, {}, clear=True):
+                opsmail.load_env_file(path)  # must not raise
+                self.assertNotIn('SMTP_HOST', os.environ)
+        finally:
+            os.chmod(path, 0o600)
+            os.unlink(path)
+
 
 class SendEmailTests(SimpleTestCase):
     ENV = {
