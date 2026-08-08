@@ -139,8 +139,10 @@ Note this also corrects the 07-19 audit's F6, which asserted the prune was "visi
 
 ### ⚠ Blocker found 2026-08-08 — arming the flag alone would ship a silent weekly no-op
 
-The gating `--dry-run` **exceeds the command's 180s default statement timeout**, twice on a
-busy DB and again on a quiet one. It is not contention and it is **not** detoast — the
+The gating `--dry-run` **exceeds 900s** — it was run three times: twice at the 180s default
+(busy DB, then quiet) and once at `--statement-timeout 900` on a quiet DB, where it still
+died at 15m03s. **A bigger timeout is therefore not the fix**; the candidate `COUNT(*)` alone
+is structurally too expensive. It is not contention and it is **not** detoast — the
 docstrings are right that `battles_json IS NOT NULL` reads the null bitmap. The cost is
 random heap I/O:
 
@@ -150,10 +152,17 @@ Parallel Index Scan using player_realm_lbd_active_idx on warships_player  (cost=
   Filter: ((battles_json IS NOT NULL) AND ((enrichment_status)::text <> 'pending'::text))
 ```
 
-`warships_player` is now **1,091,997 rows / 1643 MB heap / 10 GB total**. The index is
-ordered `(realm, last_battle_date DESC)` and the query supplies no realm, so it walks a large
-slice of the index and then **heap-fetches every candidate** to evaluate the two filter
-columns — no locality, on a shared 2-vCPU PG.
+`warships_player` is now **1,091,997 rows / 1643 MB heap / 10 GB total**. The index it picks is
+
+```sql
+CREATE INDEX player_realm_lbd_active_idx ON warships_player (realm, last_battle_date DESC)
+  WHERE last_battle_date IS NOT NULL AND NOT is_hidden;
+```
+
+**`realm` is the leading column and the query supplies no realm**, so `last_battle_date <
+cutoff` cannot be an index range — Postgres walks every realm group, then **heap-fetches each
+candidate** to evaluate `battles_json IS NOT NULL` and `enrichment_status`. No locality, on a
+shared 2-vCPU PG. That is the >900s.
 
 **Why this blocks arming.** The live path is not cheaper than the dry-run: it runs the *same*
 `SELECT id FROM (candidate_sql)` to materialise ids before batching its UPDATEs. The systemd
@@ -169,15 +178,33 @@ while doing nothing. That is precisely the failure class fixed twice this week
 (`recapture_lapsed_players_task`, `enrichment_reclassify_drift_task`): **an end-of-scan write
 that never arrives, reported as silence rather than failure.**
 
-**Do this first, then arm:**
+**Do this first, then arm.** The index is required — a longer timeout was tried and failed:
 
-1. Add `--statement-timeout 900` to the unit's `ExecStart` in `deploy_to_droplet.sh` (matches
-   what the query measurably needs; the batched UPDATEs themselves are small).
-2. *Or* add a partial index matching the candidate predicate so the scan stops heap-fetching
-   — better asymptotically, but it is a new index on the hottest, widest table, so weigh it
-   against item 6/9's write-amplification findings.
-3. Re-run the dry-run to completion, confirm the candidate count against the ~178 MB estimate,
-   **then** flip the flag.
+1. Add a partial index whose *predicate* carries the cheap filters and whose *key* is the
+   ranged column, so the scan becomes a range over exactly the candidate set:
+
+   ```sql
+   CREATE INDEX CONCURRENTLY player_battles_json_prune_idx
+     ON warships_player (last_battle_date)
+     WHERE battles_json IS NOT NULL AND NOT is_hidden
+       AND enrichment_status <> 'pending';
+   ```
+
+   **Unlike the reclassify case, this predicate is cheap to maintain on write**: all three
+   terms are null-bitmap or scalar reads, with no jsonb comparison — the reason an index was
+   rejected there does not apply here. Size is small (one date key over the
+   `battles_json IS NOT NULL` subset). The real cost to weigh is churn: `last_battle_date` is
+   written by both the floor and the recapture sweep, so the index is maintained on a hot
+   path — check it against items 6 and 9 (write-amplification) before committing.
+2. Re-run the dry-run to completion, confirm the candidate count against the ~178 MB estimate.
+3. Raise the unit's `--statement-timeout` anyway as a belt-and-braces measure, since the live
+   path materialises the same id list.
+4. **Then** flip the flag.
+
+**Do not simply raise the timeout.** That was attempted (900s) and still failed, and it is the
+same mistake the `enrichment_reclassify_drift_task` fix rejected on 2026-08-07: when a
+statement is structurally too expensive, a bigger ceiling buys nothing and hides the problem
+one run longer.
 
 Until then Step 2 is **not** a one-line env change, and the runbook's "one line, no code"
 framing under **Why now** is no longer accurate.
