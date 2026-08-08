@@ -542,8 +542,39 @@ def register_periodic_schedules(sender, **kwargs):
                 "interval": None,
                 "enabled": pool_maint_enabled,
                 "args": json.dumps([]),
-                "kwargs": json.dumps({"realm": realm}),
-                "description": f"Daily incremental enrichment_status drift rescue ({realm.upper()}) over last_fetch<=25h — index-backed, DB-only, coexists with crawls. Striped per realm.",
+                "kwargs": json.dumps({"realm": realm, "buckets": "drift"}),
+                "description": f"Daily incremental enrichment_status drift rescue ({realm.upper()}) over last_fetch<=25h — the five cheap buckets only (battles_json IS NULL, null-bitmap). Index-backed, DB-only, coexists with crawls. Striped per realm.",
+            },
+        )
+
+    # -- battles_json reclassify (per realm, WEEKLY, one realm per day) --
+    # The `enriched`/`empty` buckets compare battles_json itself, so Postgres must
+    # DETOAST the JSON column for every row the scan touches: ~420s each against a
+    # 420s statement timeout, i.e. they could never both finish, while writing 0 rows
+    # on every run that did complete. They are a crawler-bug backstop, not drift
+    # rescue, so daily is the wrong cadence. Weekly, on its own day per realm, with a
+    # 900s statement timeout that gives them room to actually complete.
+    # See runbook-post-deploy-verification-2026-08-07.md.
+    reclass_json_days = {"na": "1", "eu": "3", "asia": "5"}  # Mon / Wed / Fri
+    for realm in sorted(VALID_REALMS):
+        reclass_json_schedule, _ = CrontabSchedule.objects.get_or_create(
+            minute="40",
+            hour="9",
+            day_of_week=reclass_json_days.get(realm, "1"),
+            day_of_month="*",
+            month_of_year="*",
+            timezone="UTC",
+        )
+        PeriodicTask.objects.update_or_create(
+            name=f"enrichment-reclassify-json-{realm}",
+            defaults={
+                "task": "warships.tasks.enrichment_reclassify_drift_task",
+                "crontab": reclass_json_schedule,
+                "interval": None,
+                "enabled": pool_maint_enabled,
+                "args": json.dumps([]),
+                "kwargs": json.dumps({"realm": realm, "buckets": "json"}),
+                "description": f"Weekly enrichment_status battles_json reclassify ({realm.upper()}) — the two detoast-heavy buckets (enriched/empty) at a 900s statement timeout. One realm per day so the shared PG sees one long scan at a time.",
             },
         )
 

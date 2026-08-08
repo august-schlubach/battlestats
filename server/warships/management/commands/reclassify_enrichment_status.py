@@ -67,6 +67,18 @@ class Command(BaseCommand):
                  'every run. Default: day of year.',
         )
         parser.add_argument(
+            '--buckets', choices=('all', 'drift', 'json'), default='all',
+            help='Which bucket family to run. "json" is the two battles_json '
+                 'buckets (enriched/empty); "drift" is the other five; "all" '
+                 '(default) is every bucket, as the supervised full-catalog pass '
+                 'needs. The split exists because the json pair costs ~420s each '
+                 'while writing 0 rows on every completed run: their predicate '
+                 '(battles_json = \'[]\') must detoast the JSON column for every '
+                 'row in the scan, where the drift five test battles_json IS NULL '
+                 'and cost ~76-128s for all five together. See '
+                 'runbook-post-deploy-verification-2026-08-07.md.',
+        )
+        parser.add_argument(
             '--budget-seconds', type=int, default=None,
             help='Stop dispatching further buckets once this many seconds have '
                  'elapsed. Buckets commit individually, so there is no longer a '
@@ -133,7 +145,12 @@ class Command(BaseCommand):
                 ),
         ]
 
-    def build_plan(self, base, rotation=None):
+    #: The two buckets whose predicate compares ``battles_json`` itself and so must
+    #: detoast the column for every row the scan touches. Kept as a named constant so
+    #: the command, the tasks and the tests cannot drift on which buckets are "heavy".
+    JSON_BUCKETS = ('enriched', 'empty')
+
+    def build_plan(self, base, rotation=None, buckets='all'):
         """The ordered ``(status, queryset)`` buckets.
 
         The listed order is the documented one: most specific first. That ordering
@@ -150,8 +167,21 @@ class Command(BaseCommand):
         hypothetical. Rotating the start point means every bucket leads once per
         cycle. Defaults to the day of year, so consecutive daily runs rotate with no
         stored state.
+
+        ``buckets`` selects a family. ``json`` is the two buckets whose predicate
+        compares ``battles_json`` itself and therefore detoasts the column for every
+        row the scan touches (~420s each, measured); ``drift`` is the other five,
+        which test ``battles_json IS NULL`` off the null bitmap and cost ~76-128s for
+        all five together. Splitting them lets the daily incremental pass run only
+        the cheap family and always finish. Rotation applies within the selection.
         """
         plan = self._plan_in_documented_order(base)
+        if buckets == 'json':
+            plan = [b for b in plan if b[0] in self.JSON_BUCKETS]
+        elif buckets == 'drift':
+            plan = [b for b in plan if b[0] not in self.JSON_BUCKETS]
+        elif buckets != 'all':
+            raise ValueError(f"unknown bucket family: {buckets!r}")
         if rotation is None:
             rotation = timezone.now().timetuple().tm_yday
         offset = rotation % len(plan)
@@ -175,7 +205,11 @@ class Command(BaseCommand):
             f"MIN_WR={MIN_WR} MAX_INACTIVE_DAYS={MAX_INACTIVE_DAYS} scope={scope}"
         )
 
-        plan = self.build_plan(base, rotation=opts.get('rotation'))
+        plan = self.build_plan(
+            base,
+            rotation=opts.get('rotation'),
+            buckets=opts.get('buckets', 'all'),
+        )
 
 
         # Each bucket commits on its own. Previously all seven shared a single

@@ -730,3 +730,121 @@ def test_f4_gate_skipped_player_classifies_as_non_pvp_active_not_unclassifiable(
         f'not dumped into no_snapshot_pair; got {gap}')
     assert gap['no_snapshot_pair'] >= 1, (
         'a player never checked today is still genuinely unclassifiable')
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-07 follow-up: the battles_json bucket family split.
+#
+# EXPLAIN on prod showed all seven buckets share one plan (BitmapAnd on
+# realm + last_fetch, then a heap scan over ~110k rows). The only difference is
+# the Filter: the five cheap buckets test `battles_json IS NULL` off the null
+# bitmap; `enriched`/`empty` compare the jsonb value and so must DETOAST the
+# column for every row. Measured ~420s each against a 420s statement timeout,
+# writing 0 rows on every run that completed.
+# ---------------------------------------------------------------------------
+
+JSON_BUCKETS = ('enriched', 'empty')
+DRIFT_BUCKETS = ('skipped_hidden', 'skipped_low_battles', 'skipped_inactive',
+                 'skipped_low_wr', 'pending')
+
+
+def _plan_names(buckets, rotation=0):
+    import warships.management.commands.reclassify_enrichment_status as r
+    base = Player.objects.all()
+    return [n for n, _ in r.Command().build_plan(
+        base, rotation=rotation, buckets=buckets)]
+
+
+@pytest.mark.django_db
+def test_json_family_is_exactly_the_two_detoasting_buckets():
+    assert set(_plan_names('json')) == set(JSON_BUCKETS)
+
+
+@pytest.mark.django_db
+def test_drift_family_is_exactly_the_five_cheap_buckets():
+    assert set(_plan_names('drift')) == set(DRIFT_BUCKETS)
+
+
+@pytest.mark.django_db
+def test_the_two_families_partition_the_full_plan():
+    """No bucket may be dropped or double-run by the split."""
+    everything = _plan_names('all')
+    assert sorted(_plan_names('json') + _plan_names('drift')) == sorted(everything)
+    assert not set(_plan_names('json')) & set(_plan_names('drift'))
+
+
+@pytest.mark.django_db
+def test_default_bucket_family_is_all_so_the_supervised_pass_is_unchanged():
+    """The full-catalog reclassify is a supervised manual op; it must still
+    reclassify everything when run with no --buckets flag."""
+    assert _plan_names('all') == EXPECTED_BUCKET_ORDER
+
+
+@pytest.mark.django_db
+def test_rotation_still_applies_within_a_family():
+    """Rotation is what stops a truncated pass starving the same tail. It must
+    survive the split, or the weekly json pass would always sacrifice `empty`."""
+    first = _plan_names('json', rotation=0)[0]
+    second = _plan_names('json', rotation=1)[0]
+    assert first != second, "json family must alternate which bucket leads"
+
+
+@pytest.mark.django_db
+def test_unknown_bucket_family_is_rejected_loudly():
+    import warships.management.commands.reclassify_enrichment_status as r
+    with pytest.raises(ValueError):
+        r.Command().build_plan(Player.objects.all(), rotation=0, buckets='nope')
+
+
+@pytest.mark.django_db
+def test_command_accepts_buckets_flag_and_runs_only_that_family():
+    """End-to-end through call_command: a drift-only pass must not report the
+    json buckets at all."""
+    from django.core.management import call_command
+    out = StringIO()
+    call_command('reclassify_enrichment_status', '--realm', 'na',
+                 '--buckets', 'drift', '--rotation', '0', stdout=out)
+    text = out.getvalue()
+    for name in DRIFT_BUCKETS:
+        assert f'-> {name}' in text
+    for name in JSON_BUCKETS:
+        assert f'-> {name}' not in text
+
+
+def test_each_family_budget_leaves_room_for_one_in_flight_statement():
+    """The invariant that made the original fix safe must hold for BOTH families:
+
+        budget + statement_timeout <= soft_time_limit < time_limit <= lock TTL
+
+    The json family runs 900s statements, so a budget derived from the drift
+    family's 420s would let a json bucket start too late and be killed mid-flight.
+    """
+    from warships import tasks
+    for family in ('drift', 'json'):
+        stmt = tasks._reclassify_statement_timeout(family)
+        budget = tasks._reclassify_budget_seconds(stmt)
+        assert budget > 0
+        assert budget + stmt <= tasks.ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT, family
+        assert (tasks.ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT
+                < tasks.ENRICHMENT_RECLASSIFY_TIME_LIMIT), family
+        assert (tasks.ENRICHMENT_RECLASSIFY_TIME_LIMIT
+                <= tasks.ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT), family
+
+
+def test_json_family_can_fit_both_of_its_buckets_in_one_pass():
+    """The whole point of the weekly split: two 900s statements must both fit,
+    or we have merely moved the starvation to a slower cadence."""
+    from warships import tasks
+    stmt = tasks._reclassify_statement_timeout('json')
+    budget = tasks._reclassify_budget_seconds(stmt)
+    # Second bucket is dispatched only if elapsed < budget; worst case it starts
+    # just under the wire at `budget` and then needs a full statement timeout.
+    assert stmt < budget, "second json bucket could never be dispatched"
+    assert budget + stmt <= tasks.ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT
+
+
+def test_json_statement_timeout_exceeds_the_measured_bucket_cost():
+    """~420s measured per json bucket on 2026-08-06/07 against a 420s cap."""
+    from warships import tasks
+    assert tasks._reclassify_statement_timeout('json') > 420
+    assert tasks._reclassify_statement_timeout('drift') == 420

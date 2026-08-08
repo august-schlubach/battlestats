@@ -2840,13 +2840,31 @@ def startup_warm_caches_task():
 
 # Lock must outlive the per-realm reclassify hard time_limit so a slow run can't
 # lose its lock mid-pass and let a second invocation start on top of it.
-ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT = 25 * 60
+ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT = 45 * 60
 # Named so _reclassify_budget_seconds() and the task decorator cannot drift apart.
-ENRICHMENT_RECLASSIFY_TIME_LIMIT = 1200       # 20 min hard
-ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT = 1080  # 18 min soft
+# Sized for the *json* family (2 buckets x 900s statements), which is the worst case;
+# the daily drift family finishes in ~130s and never approaches these.
+ENRICHMENT_RECLASSIFY_TIME_LIMIT = 2400       # 40 min hard
+ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT = 2280  # 38 min soft
+
+#: Per-statement cap by bucket family. The two ``battles_json`` buckets must detoast
+#: the JSON column for every row the scan touches and measured ~420s each against a
+#: 420s timeout — i.e. they could never finish. They now run weekly with room to.
+ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUTS = {"drift": 420, "json": 900, "all": 900}
 
 
-def _reclassify_budget_seconds() -> int:
+def _reclassify_statement_timeout(buckets: str = "drift") -> int:
+    """Statement timeout for one bucket family, env-overridable per family."""
+    override = os.getenv(f"ENRICHMENT_RECLASSIFY_{buckets.upper()}_STATEMENT_TIMEOUT")
+    if override:
+        return int(override)
+    legacy = os.getenv("ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT")
+    if legacy and buckets == "drift":
+        return int(legacy)
+    return ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUTS.get(buckets, 420)
+
+
+def _reclassify_budget_seconds(statement_timeout: int | None = None) -> int:
     """Wall-clock budget for one reclassify pass.
 
     Buckets commit individually now, which removed the accidental fail-fast bound:
@@ -2867,8 +2885,8 @@ def _reclassify_budget_seconds() -> int:
     if override:
         return int(override)
 
-    statement_timeout = int(
-        os.getenv("ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT", "420"))
+    if statement_timeout is None:
+        statement_timeout = _reclassify_statement_timeout("drift")
     soft_limit = ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT
     slack = 60
     return max(60, soft_limit - statement_timeout - slack)
@@ -2934,7 +2952,7 @@ def enrichment_pool_maintenance_task():
     soft_time_limit=ENRICHMENT_RECLASSIFY_SOFT_TIME_LIMIT,  # 18 min soft (eu ~11 min under load)
     ignore_result=True,
 )
-def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
+def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM, buckets="drift"):
     """Incremental ``skipped_*`` drift rescue for one realm — recompute
     ``enrichment_status`` for rows fetched within the recency window.
 
@@ -2956,22 +2974,25 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
     if os.getenv("ENRICHMENT_POOL_MAINTENANCE_ENABLED", "1") != "1":
         return {"status": "skipped", "reason": "disabled"}
 
-    lock_key = _task_lock_key("enrichment_reclassify_drift", realm)
+    # Lock is per (realm, family): the daily drift pass and the weekly json pass are
+    # disjoint bucket sets, so one must not block the other.
+    lock_key = _task_lock_key("enrichment_reclassify_drift", f"{realm}:{buckets}")
     if not cache.add(lock_key, self.request.id or "1",
                      timeout=ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT):
         logger.info(
-            "Skipping enrichment_reclassify_drift_task[%s] — another run is active",
-            realm)
-        return {"status": "skipped", "reason": "already-running", "realm": realm}
+            "Skipping enrichment_reclassify_drift_task[%s/%s] — another run is active",
+            realm, buckets)
+        return {"status": "skipped", "reason": "already-running",
+                "realm": realm, "buckets": buckets}
 
     recent_hours = int(os.getenv("ENRICHMENT_RECLASSIFY_RECENT_HOURS", "25"))
-    budget_seconds = _reclassify_budget_seconds()
+    timeout_s = _reclassify_statement_timeout(buckets)
+    budget_seconds = _reclassify_budget_seconds(timeout_s)
     # Per-statement blast-radius cap. Sized well above a single bucket UPDATE's real
     # cost (~2-3 min under load) so it caps a runaway without aborting normal work —
     # 120s was too tight and silently rolled back the whole pass. statement_timeout
     # is a session GUC (call_command opens its own txns), so set up front + RESET in
     # finally so it can't leak to the next task. Postgres-only.
-    timeout_s = int(os.getenv("ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT", "420"))
     is_postgres = connection.vendor == "postgresql"
     if is_postgres:
         with connection.cursor() as cur:
@@ -2981,11 +3002,12 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
         call_command(
             "reclassify_enrichment_status", "--realm", realm,
             "--recent-hours", str(recent_hours),
+            "--buckets", buckets,
             "--budget-seconds", str(budget_seconds), stdout=buf)
         output = buf.getvalue()
         logger.info(
-            "enrichment_reclassify_drift[%s]: %s",
-            realm, output.replace("\n", " | ").strip())
+            "enrichment_reclassify_drift[%s/%s]: %s",
+            realm, buckets, output.replace("\n", " | ").strip())
 
         # Buckets now commit individually, so a bad pass is partial rather than
         # total. Surface that: reporting "ok" for a pass that lost buckets is how
@@ -2999,19 +3021,20 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
         ]
         if failed_buckets or skipped_buckets:
             logger.error(
-                "enrichment_reclassify_drift[%s] INCOMPLETE — failed=%s skipped=%s",
-                realm, failed_buckets, skipped_buckets)
+                "enrichment_reclassify_drift[%s/%s] INCOMPLETE — failed=%s skipped=%s",
+                realm, buckets, failed_buckets, skipped_buckets)
             return {
                 "status": "partial",
                 "realm": realm,
+                "buckets": buckets,
                 "recent_hours": recent_hours,
                 "failed_buckets": failed_buckets,
                 "skipped_buckets": skipped_buckets,
             }
     except Exception:
         logger.exception(
-            "enrichment_reclassify_drift_task failed for %s", realm)
-        return {"status": "error", "realm": realm}
+            "enrichment_reclassify_drift_task failed for %s (%s)", realm, buckets)
+        return {"status": "error", "realm": realm, "buckets": buckets}
     finally:
         if is_postgres:
             try:
@@ -3022,7 +3045,8 @@ def enrichment_reclassify_drift_task(self, realm=DEFAULT_REALM):
                     "enrichment_reclassify_drift failed to reset statement_timeout")
         cache.delete(lock_key)
 
-    return {"status": "ok", "realm": realm, "recent_hours": recent_hours}
+    return {"status": "ok", "realm": realm, "buckets": buckets,
+            "recent_hours": recent_hours}
 
 
 @app.task(

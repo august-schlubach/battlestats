@@ -254,22 +254,73 @@ ssh root@battlestats.online 'journalctl --disk-usage
   journalctl -u battlestats-celery-background --no-pager -o short-iso | head -1'
 ```
 
+## Resolution — the bucket-family split (shipped 2026-08-07)
+
+`EXPLAIN` on prod (plain, never `ANALYZE` — that would have run the 420s statement)
+settled the design. **All seven buckets share one plan:**
+
+```
+Gather -> Parallel Bitmap Heap Scan on warships_player  (width=2008)
+   Recheck Cond: realm = 'na' AND last_fetch >= <cutoff>
+   Filter:  <the bucket predicate>
+   BitmapAnd -> player_realm_battles_surv_idx (realm)
+             -> player_last_fetch_idx (last_fetch)     ~110,690 rows
+```
+
+The scan is identical; only the `Filter` differs, and that is the whole cost story:
+
+- **drift five** — `battles_json IS NULL` reads the **null bitmap**. No column access.
+- **json two** — `battles_json = '[]'::jsonb` must **detoast** the JSON column for
+  every row the scan touches.
+
+`enrichment_status <> '<target>'` is true for ~99% of rows, so it short-circuits
+nothing, and there is no non-detoasting emptiness test for `jsonb` in plain SQL. A
+partial or expression index would move the cost to write time on `warships_player` —
+a hot path the observation floor writes to constantly — on a 15 GB table on a shared
+2-vCPU PG. Rejected.
+
+**What shipped instead:** a `--buckets {all,drift,json}` family selector.
+
+| | daily `drift` | weekly `json` | manual `all` |
+|---|---|---|---|
+| buckets | the five `skipped_*`/`pending` | `enriched`, `empty` | all seven |
+| statement timeout | 420s | **900s** | 900s |
+| schedule | `enrichment-reclassify-drift-{realm}`, 08:20/08:40/09:00 UTC daily | `enrichment-reclassify-json-{realm}`, 09:40 UTC — **na Mon, eu Wed, asia Fri** | supervised |
+| expected cost | ~76–128s, always completes | ~1800s, both buckets fit | ~36 min |
+
+The json pair is a **crawler-bug backstop** (the crawler writes `battles_json` and
+`enrichment_status` together), not drift rescue — it has written **0 rows on every run
+that completed**. Daily was the wrong cadence for it; weekly with room to finish is
+strictly more useful than daily and never finishing.
+
+Timeouts are now per-family (`_reclassify_statement_timeout`), and the task's Celery
+limits are sized for the json worst case: soft **2280s**, hard **2400s**, lock
+**2700s**. The original invariant holds for both families and is now asserted by test:
+`budget + statement_timeout <= soft < hard <= lock`. One realm's json pass runs per
+day, so the shared PG never sees two long detoast scans at once.
+
+**Net DB load:** ~2520s/day of detoast scanning (3 realms × 2 buckets × 420s) becomes
+~771s/day equivalent (3 realms × 2 × 900s ÷ 7) — a **~70% reduction** — while the
+daily drift rescue, which is the task's actual purpose, completes on every realm for
+the first time since the pool outgrew the old budget.
+
+Ten tests were added (`test_runbook_qa_2026_08_06.py`, now 63): the two families
+**partition** the plan with no bucket dropped or double-run; `all` is unchanged so the
+supervised pass still reclassifies everything; rotation still alternates the leader
+*within* a family (or the weekly pass would sacrifice the same bucket forever); an
+unknown family raises; and both families satisfy the ordering invariant, with the json
+family specifically asserted to fit **both** of its buckets in one pass — otherwise the
+split would merely have moved the starvation to a slower cadence. Full backend suite:
+**986 passed, 2 skipped**.
+
 ## Follow-ups
 
-1. **Make `enriched` and `empty` fit inside 420s — that is the whole defect.** Two buckets
-   that each need ~420s cannot both fit, so rotation is only choosing which one to sacrifice.
-   Raising the statement timeout is **not available**: runs already reach 968s of a 1080s
-   soft limit. The real levers, in order of preference:
-   (a) `EXPLAIN (ANALYZE, BUFFERS)` both predicates under the `--recent-hours 25` scope.
-   `enriched` is `battles_json IS NOT NULL AND NOT (battles_json = '[]')` and `empty` is
-   `battles_json = '[]'` — both scan a large JSON column with no index on it, while the
-   cheap buckets ride `player_last_fetch_idx` plus scalar columns. An expression or partial
-   index on the `battles_json` emptiness test is the obvious candidate.
-   (b) Chunk the two heavy UPDATEs by id range so neither is one long statement.
-   **Free natural experiment first:** 08-08 puts `enriched` at position 5 and `empty` at 6.
-   If both still fail there, position is confirmed irrelevant and the query is the whole
-   story. A `--rotation 0 --dry-run` run reproduces the pre-fix position-1 case on demand
-   without writing.
+1. ~~Make `enriched` and `empty` fit inside 420s~~ — **DONE**, see "Resolution" above.
+   **Verify on the schedule:** the daily drift pass should now return `{'status': 'ok'}`
+   with no `failed_buckets` on all three realms from 2026-08-08 (08:20/08:40/09:00 UTC),
+   and the first weekly json pass is **na, Monday 2026-08-10 09:40 UTC** — check that both
+   `enriched` and `empty` complete inside the 900s timeout there. If either still fails at
+   900s, the next lever is chunking the UPDATE by id range, not a longer timeout.
 2. **Watch the EU deadlock.** Confirmed a **single occurrence** across the 3 days the journal
    holds (`-g "deadlock detected"` returns exactly the 08-07 09:04 EU event). Pool maintenance
    is excluded as counterparty. One occurrence is not a pattern; re-check daily and only
