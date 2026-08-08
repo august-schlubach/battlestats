@@ -530,6 +530,16 @@ instrument only recomputes at the 04:30 UTC benchmark, so **2026-08-07's snapsho
 first with a trustworthy `non_pvp_active`** — and per the note in
 `.claude/skills/observation/SKILL.md`, do not trend that bucket across the fix.
 
+> **Resolved 2026-08-07 — see `runbook-post-deploy-verification-2026-08-07.md`.**
+> **F4 is CONFIRMED**: `non_pvp_active` 58 → 19,229 and `no_snapshot_pair` 19,976 → 312
+> while the gap total held at ~21k. The 08-06 snapshot (04:30 UTC) predates the 04:59 UTC
+> deploy by 29 minutes, so the before/after is exact.
+> **F2 is PARTIALLY confirmed**: the rollback defect is fixed — eu/asia now commit their
+> drift rescue instead of returning `{'status': 'error'}` with zero rows — but the
+> `enriched` bucket now times out on every realm every run, having completed on NA
+> pre-fix. That is a **regression**, tracked in the verification runbook, and it blocks
+> `archive_on: all-six-findings-closed`.
+
 The journal is still 3.9 GB because that is accumulated history; **retention should lengthen
 over the coming days** as the pre-fix volume ages out. Re-check with
 `journalctl --disk-usage` and the oldest-entry timestamp in about a week — that is F1's

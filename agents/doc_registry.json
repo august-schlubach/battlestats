@@ -3659,6 +3659,33 @@
                 "all-six-findings-closed"
             ]
         },
+        "agents/runbooks/runbook-post-deploy-verification-2026-08-07.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "post deploy verification",
+                "v5.1.5 verification",
+                "v5.1.6 verification",
+                "drift reclassify enriched regression",
+                "gap_1d classifier confirmed"
+            ],
+            "tags": [
+                "verification",
+                "observation-floor",
+                "enrichment",
+                "recapture",
+                "compaction",
+                "gap-1d",
+                "deadlock",
+                "regression"
+            ],
+            "archive_on": [
+                "enriched-bucket-regression-closed"
+            ]
+        },
         "agents/runbooks/runbook-db-disk-remediation-2026-08-05.md": {
             "kind": "runbook",
             "status": "active",

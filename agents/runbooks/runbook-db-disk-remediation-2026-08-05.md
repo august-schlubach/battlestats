@@ -297,7 +297,8 @@ BATTLE_OBSERVATION_COMPACT_KEEP=1  BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT=
 
 **Resume here, in this order:**
 
-1. **Check the first timer fire** (after 12:32 UTC 2026-08-06). This is the whole point of Step 1 — it has never once completed.
+1. ~~**Check the first timer fire** (after 12:32 UTC 2026-08-06).~~ **CLOSED 2026-08-07 — the timer works.** Two consecutive clean fires, both exit 0: 08-06 12:34→12:41 compacted **87,665** payloads in 44 batches; 08-07 12:30→12:41 compacted **56,955** in 29 batches. The declining count is the backlog draining. Full readout: `runbook-post-deploy-verification-2026-08-07.md`. Original instructions retained below for re-measurement.
+   This was the whole point of Step 1 — it had never once completed.
    ```bash
    ssh root@battlestats.online 'systemctl status battlestats-compact-observations.service --no-pager | head -20;
      journalctl -u battlestats-compact-observations --since "-1 day" --no-pager | tail -30'

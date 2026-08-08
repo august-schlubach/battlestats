@@ -82,6 +82,21 @@ See `ops-env-reference.md` for the full list. Summary: `RECAPTURE_LAPSED_ENABLED
 
 **Deliberately not done.** An index on the candidate ordering (44s is not the binding cost; ~360s of WG calls is) and `RECAPTURE_LAPSED_DELAY=0` (worth ~60s/run, but a prod env lever kept separate from this deploy). Both remain available if truncation returns.
 
+### Verified 2026-08-07 — fix confirmed on all three realms
+
+First clean day after the v5.1.6 deploy. Every realm reported `partial: false` with
+`scanned == candidates == limit == 30,000` and `cursor_stamped` 30,000; `chunk_errors` 0.
+**ASIA completed a full pass — its first since ~2026-07-20.** Yield: na 603 advanced
+(2.01%), eu 1,575 (5.25%), asia 1,070 (3.57%); 3,246 promoted back into floor scope, of
+which **432 clanless** — the marginal value nothing else recovers.
+
+**Follow-up: re-derive the LRU rotation period.** `scanned == limit` on every realm means
+the 30k limit is binding and the dormant pool is *not* exhausted, so the "walks the whole
+pool over ~a week" figure in [LRU rotation](#lru-rotation-the-production-knob) above is an
+assumption from an older pool size, not a measurement. Divide the live in-band pool by
+30,000/realm/day before quoting it again. Full readout:
+`runbook-post-deploy-verification-2026-08-07.md`.
+
 ## Test-harness gotcha (for whoever runs the suite next)
 
 Run backend tests on sqlite: `DJANGO_SECRET_KEY=x DB_ENGINE=sqlite3 python -m pytest warships/tests/ --nomigrations -q`. Two traps:
