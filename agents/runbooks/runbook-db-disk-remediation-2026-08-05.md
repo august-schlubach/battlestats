@@ -137,6 +137,51 @@ Note this also corrects the 07-19 audit's F6, which asserted the prune was "visi
 
 **Validation.** `--dry-run` candidate count ≈ the ~178 MB estimate before arming. After the first run: no spike in cold-profile latency or WG call volume.
 
+### ⚠ Blocker found 2026-08-08 — arming the flag alone would ship a silent weekly no-op
+
+The gating `--dry-run` **exceeds the command's 180s default statement timeout**, twice on a
+busy DB and again on a quiet one. It is not contention and it is **not** detoast — the
+docstrings are right that `battles_json IS NOT NULL` reads the null bitmap. The cost is
+random heap I/O:
+
+```
+Parallel Index Scan using player_realm_lbd_active_idx on warships_player  (cost=0.42..207411.46 rows=88561)
+  Index Cond: (last_battle_date < '2026-02-09'::date)
+  Filter: ((battles_json IS NOT NULL) AND ((enrichment_status)::text <> 'pending'::text))
+```
+
+`warships_player` is now **1,091,997 rows / 1643 MB heap / 10 GB total**. The index is
+ordered `(realm, last_battle_date DESC)` and the query supplies no realm, so it walks a large
+slice of the index and then **heap-fetches every candidate** to evaluate the two filter
+columns — no locality, on a shared 2-vCPU PG.
+
+**Why this blocks arming.** The live path is not cheaper than the dry-run: it runs the *same*
+`SELECT id FROM (candidate_sql)` to materialise ids before batching its UPDATEs. The systemd
+unit passes **no** `--statement-timeout`:
+
+```
+ExecStart=... manage.py prune_inactive_player_battles_json --batch-size 5000 --sleep 0.5
+```
+
+So flipping `PRUNE_BATTLES_JSON_ENABLED=1` today would produce a weekly job that dies on
+statement timeout **before writing anything** — a task that appears scheduled and healthy
+while doing nothing. That is precisely the failure class fixed twice this week
+(`recapture_lapsed_players_task`, `enrichment_reclassify_drift_task`): **an end-of-scan write
+that never arrives, reported as silence rather than failure.**
+
+**Do this first, then arm:**
+
+1. Add `--statement-timeout 900` to the unit's `ExecStart` in `deploy_to_droplet.sh` (matches
+   what the query measurably needs; the batched UPDATEs themselves are small).
+2. *Or* add a partial index matching the candidate predicate so the scan stops heap-fetching
+   — better asymptotically, but it is a new index on the hottest, widest table, so weigh it
+   against item 6/9's write-amplification findings.
+3. Re-run the dry-run to completion, confirm the candidate count against the ~178 MB estimate,
+   **then** flip the flag.
+
+Until then Step 2 is **not** a one-line env change, and the runbook's "one line, no code"
+framing under **Why now** is no longer accurate.
+
 ---
 
 ## Step 3 — Age-bound the observation JSON ★ largest structural win
@@ -306,7 +351,7 @@ BATTLE_OBSERVATION_COMPACT_KEEP=1  BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT=
    Expect exit 0 and a non-zero `cleared` count. **If it times out again**, the scan is structurally too big and the durable fix is restructuring `_compact_candidate_sql`, not a larger timeout (Step 1's "why 180s is not merely tight").
    Then re-measure the table: `warships_battleobservation` was 15.84 GB with ~149K uncompacted rows ≈ 2.1 GB residue + a ~116 MB/day leak.
 
-2. **Backfill Phase-7** (Step 4b). Scope measured 2026-08-05: **37 days, 2026-06-13 → 2026-08-02** — the whole live window, wider than the 15-day sample first suggested. Deployed code now carries the columns, so the existing repair command is sufficient:
+2. **Backfill Phase-7** (Step 4b). **IN PROGRESS 2026-08-08 — 11 of 37 days done and verified; 26 remain. Resumable, see "Backfill progress" below.** Scope measured 2026-08-05: **37 days, 2026-06-13 → 2026-08-02** — the whole live window, wider than the 15-day sample first suggested. Deployed code now carries the columns, so the existing repair command is sufficient:
    ```bash
    # on the droplet, in current/server, with the env sourced
    manage.py rebuild_player_daily_ship_stats --since 2026-06-13 --until 2026-08-02 --dry-run
@@ -318,6 +363,87 @@ BATTLE_OBSERVATION_COMPACT_KEEP=1  BATTLE_OBSERVATION_COMPACT_STATEMENT_TIMEOUT=
 **Deploy note.** The v5.1.3 backend deploy aborted on a false FATAL from the celery env canary — `systemctl restart` returns before MainPID finishes exec'ing, so an immediate `/proc/<pid>/environ` read can catch a stale pid. Everything had already applied; only the drift check and the old-release cleanup were skipped (cleanup was run by hand, 6→5 releases). Fixed in `5385961`: the canary now retries for a bounded 30s, re-reading MainPID each pass. **The fix is committed but has not yet run a deploy** — the next backend deploy exercises it.
 
 **Not started:** Step 0 (DO console alerts) and Step 4 (soft-limit triage — 22 `SoftTimeLimitExceeded` on 2026-08-05 before 19:00 UTC, incl. `roll_up_player_daily_ship_stats_task`, which is worth checking for *correctness* and not just freshness).
+
+## Backfill progress (Step 4b) — 2026-08-08
+
+**Scope re-measured live, and it matched: exactly 37 zeroed days.** Two findings the
+2026-08-05 measurement could not yet see:
+
+- **2026-08-03 → 08-07 are all clean.** The v5.1.3 fix plus the rollup's 3-day lookback
+  has been self-healing recent days on its own. Every one of the 37 damaged days sits
+  *outside* that lookback, so nothing would ever have reached them unaided.
+- The zeroed days are **non-contiguous** — 14 already-correct days are interleaved. Rebuild
+  only the 37; passing the whole `--since 2026-06-13 --until 2026-08-02` range would redo
+  ~2.8M rows of identical work on the shared 2-vCPU PG for nothing.
+
+**Done and verified (11):** `2026-06-13, 06-14, 06-15, 06-16, 06-17, 06-18, 06-19, 06-22,
+06-23, 06-24, 06-25`.
+
+**Remaining (26):** `2026-06-26, 06-29, 06-30, 07-01, 07-02, 07-04, 07-06, 07-07, 07-08,
+07-09, 07-10, 07-11, 07-13, 07-14, 07-15, 07-17, 07-20, 07-21, 07-22, 07-23, 07-27, 07-28,
+07-29, 07-30, 07-31, 08-02`.
+
+### Validate with SUMS, not maxima
+
+The instruction above to check "maxima matching" is **not a sound criterion** and produced a
+false alarm on 2026-06-23 (PDSS 156,921 vs BattleEvent 156,711). A PDSS row **sums** deltas
+per `(player, ship, day)`; `max(BattleEvent.main_shots_delta)` is a **single event**. So
+`PDSS_max >= BE_max` is the correct relationship, and exact equality happens only when the
+top player-ship had one event that day — common, but not guaranteed, and not a rule.
+
+The sound invariant is that the **sums are exactly equal**:
+
+```sql
+SELECT d.date, d.s_main, b.s_main, d.s_hits, b.s_hits
+FROM (SELECT date, sum(main_shots) s_main, sum(main_hits) s_hits
+      FROM warships_playerdailyshipstats WHERE date = ANY(:days) GROUP BY date) d
+JOIN (SELECT detected_at::date dt, sum(main_shots_delta) s_main,
+             sum(main_hits_delta) s_hits
+      FROM warships_battleevent
+      WHERE detected_at >= :lo AND detected_at < :hi GROUP BY 1) b ON b.dt = d.date;
+```
+
+All 11 rebuilt days are **exact** on `main_shots`, `main_hits` and `ships_spotted`.
+
+### Interrupting is safe
+
+`rebuild_daily_ship_stats_for_date` wraps its delete + `bulk_create` in one
+`transaction.atomic()`, so killing mid-day **rolls back cleanly**. Verified: the in-flight
+day (2026-06-26) still holds all 191,855 rows, still zeroed — no partial state, no loss.
+Kill the `manage.py shell` PID directly; `pkill -f "manage.py shell"` also matches its own
+SSH wrapper and kills the connection instead of reporting.
+
+### Cost is superlinear — do not run this through a busy window
+
+Per-row cost rose **1.43 ms/row → 4.86 ms/row** over ten days (2026-06-17: 79k rows/113s;
+2026-06-25: 165k rows/801s), i.e. ~3.4×. Events-per-day does not explain it linearly
+(06-19 processed 253k events in 407s while 06-24 took 886s for 182k), so the likely driver
+is PDSS bloat from repeated whole-day delete+insert with autovacuum lagging, plus general
+contention. The code carries a matching `TODO` at `incremental_battles.py:1471` warning that
+the day-at-a-time Python aggregation was sized for ~40K events/day; live days are 180-250K.
+
+At the observed rate the remaining 26 days are **~5.8 h**. That is why the run was stopped at
+11/37 on 2026-08-08 rather than pushed through: it would have blanketed the 08:20/08:40/09:00
+UTC drift-reclassify slots — the one-shot first verification of the v5.1.9 bucket-family split
+— and a starved statement timeout there would have looked exactly like that fix failing.
+**The backfill is not urgent** (first archive prune with candidates is 2026-10-01); the
+verification happened once. Resume it in a genuinely quiet window, ideally a few days at a
+time, and consider `VACUUM (ANALYZE) warships_playerdailyshipstats` between batches.
+
+### Resume recipe
+
+```bash
+# /tmp/p7backfill.py on the droplet holds the day list and a 5s inter-day pause.
+# Trim DATES to the remaining set, then:
+ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && \
+  setsid bash -c "set -a; . /etc/battlestats-server.env; . /etc/battlestats-server.secrets.env; set +a; \
+  exec /opt/battlestats-server/venv/bin/python manage.py shell < /tmp/p7backfill.py \
+  > /tmp/p7backfill.log 2>&1" </dev/null >/dev/null 2>&1 &'
+```
+
+`rebuild_daily_ship_stats_for_date` needs a **`date` object**, not a string — passing a
+string fails with `AttributeError: 'str' object has no attribute 'year'` at `_utc_day_bounds`,
+*before* any write, so a mistake there is loud and harmless.
 
 ## Related
 
