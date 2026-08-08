@@ -535,9 +535,11 @@ first with a trustworthy `non_pvp_active`** — and per the note in
 > while the gap total held at ~21k. The 08-06 snapshot (04:30 UTC) predates the 04:59 UTC
 > deploy by 29 minutes, so the before/after is exact.
 > **F2 is PARTIALLY confirmed**: the rollback defect is fixed — eu/asia now commit their
-> drift rescue instead of returning `{'status': 'error'}` with zero rows — but the
-> `enriched` bucket now times out on every realm every run, having completed on NA
-> pre-fix. That is a **regression**, tracked in the verification runbook, and it blocks
+> drift rescue instead of returning `{'status': 'error'}` with zero rows. What remains is
+> narrower than "the fix broke it": **`enriched` and `empty` each need ~420s against a 420s
+> statement timeout**, so only one can complete per pass and rotation picks the survivor.
+> EU/ASIA were already failing `enriched` pre-fix (their 420.0s `error` was position-1
+> `enriched` timing out), so the regression is **NA-only**. Blocks
 > `archive_on: all-six-findings-closed`.
 
 The journal is still 3.9 GB because that is accumulated history; **retention should lengthen

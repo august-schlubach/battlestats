@@ -12,8 +12,10 @@ findings F1–F4, F6; see `runbook-health-sweep-remediation-2026-08-06.md`) and 
 timer from `runbook-db-disk-remediation-2026-08-05.md`.
 
 Three of the four pending items are confirmed and need no further work. The fourth, **F2**,
-fixed the defect it targeted but introduced a regression that is still open. Read the F2
-section before touching `reclassify_enrichment_status`.
+fixed the defect it targeted, but its two heaviest buckets (`enriched`, `empty`) each need
+~420s against a 420s statement timeout, so only one of them can complete per pass. Read §4a
+before touching `reclassify_enrichment_status` — in particular, the "pairwise disjoint"
+premise is **proven by test**, so bucket order changes cost, not scope.
 
 Both releases are live: backend release `20260806164538`, client `20260806164757`, prod
 `VERSION` = 5.1.6.
@@ -103,31 +105,74 @@ Full outcome history (the journal now reaches 2026-08-03):
 Rows committed post-fix are small but real: 08-06 na 11 / eu 41 / asia 157; 08-07 na 2 /
 eu 12 / asia 3.
 
-#### 4a. `enriched` is a post-fix REGRESSION on NA, not a chronic failure the fix exposed
+#### 4a. Two heavy buckets, one slot — and the NA-only regression
 
-Pre-fix `'ok'` meant the *whole* shared transaction committed, so NA's `enriched` bucket
-completed inside its 420s statement timeout on **two consecutive days**. It has failed on
-both days since. Two days either side is a signal, not a proof — but it inverts the
-follow-up: **find what changed before rewriting the query.**
+**`enriched` and `empty` each cost ~420s of pure scan, writing 0 rows.** Everything else is
+cheap: the five `skipped_*` / `pending` buckets together account for only ~76–128s per run.
+Both heavy buckets sit at or over the 420s statement timeout, so **at most one of them can
+complete in a pass**, and which one survives is decided by the rotation.
 
-Three observations constrain the cause:
+**Bucket order is deterministic and checkable.** `_plan_in_documented_order` is
+`[enriched, empty, skipped_hidden, skipped_low_battles, skipped_inactive, skipped_low_wr,
+pending]`; `build_plan` rotates it by `timezone.now().timetuple().tm_yday % 7`. Computed
+positions, which match the observed log ordering on every run:
+
+| date | offset | `enriched` position | `empty` position |
+|---|---|---|---|
+| 08-04 (pre-fix, **no rotation**) | — | **1** | 2 |
+| 08-05 (pre-fix, **no rotation**) | — | **1** | 2 |
+| 08-06 | 1 | **7** | 1 |
+| 08-07 | 2 | **6** | 7 |
+| 08-08 | 3 | **5** | 6 |
+
+Pre-fix (`ed27912`) there was no rotation: a single `transaction.atomic()` over the
+documented order, so `enriched` always ran **first**.
+
+**That reframes the pre-fix `ok`/`error` split.** EU and ASIA returned `{'status': 'error'}`
+at **420.02s** and **420.03s** — that is the *first* bucket hitting the statement timeout and
+aborting the shared transaction, and the first bucket was `enriched`. So **`enriched` was
+already exceeding 420s on EU and ASIA before the fix**; it is not a regression there, and the
+fix converted a total loss into a partial, which is strictly better. (Inference from duration
+plus position — the pre-fix code logged no bucket name. ASIA 08-04 at 408.9s is *under* the
+timeout and is a genuine anomaly this runbook does not explain.)
+
+**NA is the only realm with a real regression.** It completed all seven buckets on 08-04
+(832s) and 08-05 (748s) and has not since. Since the cheap buckets take ~76–128s, `enriched`
++ `empty` together took ~620–670s on 08-05 — averaging **~310–335s each, i.e. ~75–80% of the
+420s timeout**. They were marginal, and they have since crossed the line.
+
+**What is NOT the cause:**
 
 - **Not budget starvation.** `skipped_buckets` is empty on every run. The `--budget-seconds`
-  deadline appends to `skipped_for_budget`, a separate list; the buckets are genuinely
+  deadline appends to `skipped_for_budget`, a separate list, so the buckets are genuinely
   running and genuinely hitting the statement timeout.
-- **The cost is scan, not write.** Buckets write 0–157 rows yet burn the full 420s.
-  `enriched`'s predicate is the expensive one, independent of how much it changes.
-- **The disjointness premise deserves a direct test.** The fix introduced bucket-order
-  rotation by day-of-year. The code comment justifies per-bucket commit on the buckets being
-  "pairwise disjoint" — and if that holds, order cannot change any bucket's row set, since
-  `changing = qs.exclude(enrichment_status=status)` would select the same rows regardless of
-  position. Order visibly *does* affect outcomes (NA's `empty` failed 08-06 and cleared
-  08-07). Either the premise is wrong or the effect has another cause; both are worth knowing
-  before trusting rotation as the fairness mechanism.
+- **Not a disjointness violation.** The premise is **proven by a passing test** —
+  `test_f2_buckets_are_pairwise_disjoint` in
+  `server/warships/tests/test_runbook_qa_2026_08_06.py` (module: 53 passed). No row is claimed
+  by two buckets, so `changing = qs.exclude(enrichment_status=status)` selects the same rows
+  regardless of position. **Position changes cost, not scope.**
 
-Runs land at 916–968s against a 1080s soft limit, so there is little headroom to buy with
-timeouts. Ordering constraint from the original fix still applies:
-`budget + statement_timeout <= soft(1080) < hard(1200) <= lock(1500)`.
+**Durations reconcile exactly** under "each heavy bucket burns its full 420s" — the strongest
+evidence that both are genuinely over the timeout rather than merely slow:
+
+| run | total | decomposition |
+|---|---|---|
+| 08-06 na | 916.8s | `empty` 420 + cheap ~77 + `enriched` 420 |
+| 08-06 asia | 968.5s | `empty` 420 + cheap ~128 + `enriched` 420 |
+| 08-07 na | 927.5s | cheap ~100 + `enriched` 420 (fail) + `empty` ~407 (**succeeded**, 0 rows) |
+| 08-07 asia | 962.2s | cheap ~122 + `enriched` 420 + `empty` 420 |
+| 08-07 eu | 724.2s | cheap + `enriched` deadlock (aborts early) + `empty` 420 |
+
+Note 08-07 NA: `empty` completed in ~407s, **just under** the timeout. That is the margin
+being fought over.
+
+**Verified constants** (`tasks.py`; **no `ENRICHMENT_RECLASSIFY_*` overrides on the droplet**
+— confirmed against `/etc/battlestats-server.env`, which sets only `ENRICH_MIN_PVP_BATTLES=500`,
+`ENRICH_MIN_WR=0.0`, `ENRICH_MAX_INACTIVE_DAYS=7`): statement timeout **420s**; budget
+`max(60, 1080 − 420 − 60)` = **600s**; soft **1080s**; hard **1200s**; lock **1500s**. The
+invariant `budget + statement_timeout <= soft < hard <= lock` holds. Runs land at 916–968s
+against the 1080s soft limit, so **raising the statement timeout has nowhere to go** — a
+two-heavy-bucket pass would breach the soft limit.
 
 #### 4b. NEW — a deadlock, not a timeout, on `enriched`
 
@@ -142,8 +187,9 @@ DETAIL:  Process 622779 waits for ShareLock on transaction 223211181;
 CONTEXT: while updating tuple (55621,6) in relation "warships_player"
 ```
 
-Two concurrent writers on `warships_player` in a genuine cycle. This did not appear on 08-06
-and is a distinct failure mode from the statement timeout. Per-bucket commit shortens each
+Two concurrent writers on `warships_player` in a genuine cycle. It is a **single occurrence**
+across the full 3-day journal window: `-g "deadlock detected"` returns exactly this one event.
+It did not appear on 08-06 and is a distinct failure mode from the statement timeout. Per-bucket commit shortens each
 transaction but *widens* the window in which the task holds locks alongside another writer,
 so this may be a second-order effect of the F2 fix itself.
 
@@ -210,17 +256,24 @@ ssh root@battlestats.online 'journalctl --disk-usage
 
 ## Follow-ups
 
-1. **F2's `enriched` bucket — the one real open defect, and it is a regression.** NA
-   completed it pre-fix and no longer does. Diagnose before optimizing:
-   (a) test whether the seven buckets are genuinely pairwise disjoint, since rotation's
-   safety argument rests on that and order visibly affects outcomes;
-   (b) `EXPLAIN` the `enriched` predicate under the `--recent-hours 25` scope, given it
-   burns 420s to write 0 rows.
-   Raising `ENRICHMENT_RECLASSIFY_STATEMENT_TIMEOUT` remains the riskier lever on the shared
-   2-vCPU PG, has a hard ceiling at the 1500s lock timeout, and cannot help while runs
-   already reach 968s of a 1080s soft limit.
-2. **Identify the EU deadlock counterparty.** Pool maintenance is excluded. One occurrence is
-   not a pattern; a second makes it one — check `-g "deadlock detected"` daily for a few days.
+1. **Make `enriched` and `empty` fit inside 420s — that is the whole defect.** Two buckets
+   that each need ~420s cannot both fit, so rotation is only choosing which one to sacrifice.
+   Raising the statement timeout is **not available**: runs already reach 968s of a 1080s
+   soft limit. The real levers, in order of preference:
+   (a) `EXPLAIN (ANALYZE, BUFFERS)` both predicates under the `--recent-hours 25` scope.
+   `enriched` is `battles_json IS NOT NULL AND NOT (battles_json = '[]')` and `empty` is
+   `battles_json = '[]'` — both scan a large JSON column with no index on it, while the
+   cheap buckets ride `player_last_fetch_idx` plus scalar columns. An expression or partial
+   index on the `battles_json` emptiness test is the obvious candidate.
+   (b) Chunk the two heavy UPDATEs by id range so neither is one long statement.
+   **Free natural experiment first:** 08-08 puts `enriched` at position 5 and `empty` at 6.
+   If both still fail there, position is confirmed irrelevant and the query is the whole
+   story. A `--rotation 0 --dry-run` run reproduces the pre-fix position-1 case on demand
+   without writing.
+2. **Watch the EU deadlock.** Confirmed a **single occurrence** across the 3 days the journal
+   holds (`-g "deadlock detected"` returns exactly the 08-07 09:04 EU event). Pool maintenance
+   is excluded as counterparty. One occurrence is not a pattern; re-check daily and only
+   invest if a second appears.
 3. **Re-derive the recapture LRU rotation period** against the live dormant-pool size, now
    that a full-limit pass is confirmed to complete and the 30k limit is binding.
 4. **F1 second-order retention** — re-check ~2026-08-13.
