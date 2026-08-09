@@ -1,23 +1,50 @@
 #!/usr/bin/env python3
-"""Daily battlestats ops-digest email.
+"""Battlestats ops ALERT email (exception-only).
 
-Runs unattended on the production droplet via cron (11:30 UTC). Reads the three
-durable benchmark snapshot families the /observation, /crawl-yield and
-/recapture skills read, selects the correct comparison points in Python (so the
-LLM never miscomputes a delta), asks the Anthropic API to synthesize a morning
-digest under the skills' own verdict-discipline rules, and emails it.
+Runs unattended on the production droplet from a systemd timer
+(`battlestats-ops-digest.timer`, 11:31 UTC). Reads the three durable benchmark
+snapshot families the /observation, /crawl-yield and /recapture skills read,
+selects the correct comparison points in Python (so the LLM never miscomputes a
+delta), applies a DETERMINISTIC verdict in Python (`evaluate()`), and then:
+
+  * all clear -> prints a one-line summary to stdout for the timer journal and
+    exits 0 WITHOUT sending anything;
+  * tripped   -> asks the Anthropic API to write up ONLY the tripped conditions
+    and mails it, with the condition codes named in the subject.
+
+The verdict is never delegated to the LLM. An LLM gate would be
+non-deterministically silent on the day it matters; the model is invoked only to
+write up an alert Python has already decided to send.
+
+Silence stays distinguishable from breakage three ways:
+  1. the fail-loud path is untouched -- any exception still mails
+     "[battlestats] daily ops email FAILED" with a traceback, unconditionally.
+     Exception-only applies to the DIGEST, not to this script's own errors;
+  2. missing / stale / unreadable snapshots are themselves alert conditions, and
+     snapshot SHAPE is checked BEFORE any count is trusted -- a recapture pass
+     truncated by the soft time limit carries `partial: true` and is otherwise
+     numerically identical to a healthy "cursor exhausted the pool" pass;
+  3. a weekly heartbeat (`OPS_EMAIL_HEARTBEAT_DOW`, default Monday) mails the
+     deterministic table regardless of verdict, so the timer, the SMTP path and
+     the snapshot files all still prove themselves end to end. A script cannot
+     detect its own non-execution; only a periodic unconditional send can.
 
 Self-contained: stdlib only (urllib + smtplib), no venv, no pip installs. Config
 and secrets come from an env file (default /etc/battlestats-ops-email.env, chmod
 600), NEVER from this script -- it lives in a public repo.
 
-Fail-loud: any error still sends an email (subject tagged FAILED) carrying the
-traceback and whatever raw data was read, then exits non-zero for the cron log.
+Thresholds are named constants (`DEFAULT_THRESHOLDS`), each overridable by an
+`OPS_ALERT_<NAME>` env var, and every one is derived from the observed historical
+distribution of these snapshots. Derivation + backtest:
+`agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md`.
 
 Flags:
-  --dry-run   Build the digest and print the rendered email to stdout; do not send.
-  --no-llm    Skip the Anthropic call; email a plain deterministic table (also the
-              automatic fallback if the API errors under normal runs).
+  --dry-run   Build the email and print it to stdout; do not send. Prints the
+              verdict too, so this doubles as "what would fire today".
+  --no-llm    Skip the Anthropic call; use the plain deterministic table (also
+              the automatic fallback if the API errors under normal runs).
+  --force     Send even when the verdict is all-clear (per-invocation twin of
+              OPS_EMAIL_ALWAYS_SEND=1).
 """
 
 from __future__ import annotations
@@ -56,19 +83,47 @@ def _parse_ts(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
-def _load_dir(bench_dir: str, sub: str) -> list[dict]:
+def _load_dir(bench_dir: str, sub: str) -> tuple[list[dict], list[str]]:
+    """Parse every snapshot in a family directory.
+
+    Returns (parsed, unreadable). Parse failures are RETURNED, not swallowed: a
+    corrupt newest file used to vanish silently and an older one took its place,
+    which then read either as "stale" or, worse, as "fine". An unreadable file is
+    an alert condition in its own right, so the verdict has to be able to see it.
+    """
     d = Path(bench_dir) / sub
-    out = []
-    for f in sorted(d.glob("*.json")):
+    out: list[dict] = []
+    bad: list[str] = []
+    try:
+        files = sorted(d.glob("*.json"))
+    except OSError:
+        return out, bad
+    for f in files:
         try:
             obj = json.loads(f.read_text())
             obj["_file"] = f.name
             obj["_ts"] = _parse_ts(obj["captured_at"])
             out.append(obj)
-        except Exception:
+        except Exception as e:
+            bad.append(f"{f.name}: {type(e).__name__}: {e}")
             continue
     out.sort(key=lambda o: o["_ts"])
-    return out
+    return out, bad
+
+
+def utcnow() -> datetime:
+    """Naive UTC now, matching the naive `captured_at` the snapshots write.
+
+    Spelled out rather than datetime.utcnow() because that is deprecated from
+    3.12 and removed later; this script has to keep running under a bare system
+    python for years.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _age_hours(ts: datetime, now: datetime) -> float:
+    """Hours between a naive-UTC `captured_at` and `now` (also naive UTC)."""
+    return (now - ts).total_seconds() / 3600.0
 
 
 def _closest(snaps: list[dict], target: datetime, lo_h: float, hi_h: float):
@@ -103,10 +158,11 @@ def _delta(cur: dict, prev: dict | None) -> dict:
     return out
 
 
-def gather_observation(bench_dir: str) -> dict:
-    snaps = _load_dir(bench_dir, "observation-floor")
+def gather_observation(bench_dir: str, now: datetime | None = None) -> dict:
+    now = now or utcnow()
+    snaps, bad = _load_dir(bench_dir, "observation-floor")
     if not snaps:
-        return {"available": 0}
+        return {"available": 0, "unreadable": bad}
     L = snaps[-1]
     d1 = _closest(snaps[:-1], L["_ts"] - timedelta(hours=24), 20, 28)
     d7 = _closest(snaps[:-1], L["_ts"] - timedelta(days=7), 24 * 6, 24 * 8)
@@ -120,8 +176,13 @@ def gather_observation(bench_dir: str) -> dict:
 
     result = {
         "available": len(snaps),
+        "unreadable": bad,
         "config": L.get("config", {}),
         "latest": block(L),
+        "latest_age_hours": round(_age_hours(L["_ts"], now), 2),
+        "latest_status": L.get("status"),
+        "latest_partial": L.get("partial"),
+        "latest_failed_buckets": L.get("failed_buckets"),
         "d1": block(d1) if d1 else None,
         "d7": block(d7) if d7 else None,
     }
@@ -136,10 +197,11 @@ def gather_observation(bench_dir: str) -> dict:
     return result
 
 
-def gather_crawl_yield(bench_dir: str) -> dict:
-    snaps = _load_dir(bench_dir, "crawl-yield")
+def gather_crawl_yield(bench_dir: str, now: datetime | None = None) -> dict:
+    now = now or utcnow()
+    snaps, bad = _load_dir(bench_dir, "crawl-yield")
     if not snaps:
-        return {"available": 0}
+        return {"available": 0, "unreadable": bad}
     by_realm: dict[str, list[dict]] = {r: [] for r in REALMS}
     for s in snaps:
         r = s.get("realm")
@@ -156,9 +218,13 @@ def gather_crawl_yield(bench_dir: str) -> dict:
             "overlap_total": s.get("overlap_total"),
             "yield_frac": s.get("yield_frac"),
             "overlap_frac": s.get("overlap_frac"),
+            "status": s.get("status"),
+            "partial": s.get("partial"),
+            "failed_buckets": s.get("failed_buckets"),
+            "age_hours": round(_age_hours(s["_ts"], now), 2),
         }
 
-    out = {"available": len(snaps), "realms": {}}
+    out = {"available": len(snaps), "unreadable": bad, "realms": {}}
     for r in REALMS:
         lst = by_realm[r]
         if not lst:
@@ -172,17 +238,18 @@ def gather_crawl_yield(bench_dir: str) -> dict:
 
 
 RECAP_FIELDS = (
-    "mode", "band_days", "limit", "scanned", "wg_calls", "no_data", "hidden",
-    "chunk_errors", "still_dormant", "advanced", "yield_frac", "into7d",
+    "mode", "band_days", "limit", "candidates", "scanned", "wg_calls", "no_data",
+    "hidden", "chunk_errors", "still_dormant", "advanced", "yield_frac", "into7d",
     "into7d_clanned", "into7d_clanless", "still_lapsed", "still_lapsed_clanless",
     "cursor_stamped",
 )
 
 
-def gather_recapture(bench_dir: str) -> dict:
-    snaps = _load_dir(bench_dir, "recapture-lapsed")
+def gather_recapture(bench_dir: str, now: datetime | None = None) -> dict:
+    now = now or utcnow()
+    snaps, bad = _load_dir(bench_dir, "recapture-lapsed")
     if not snaps:
-        return {"available": 0}
+        return {"available": 0, "unreadable": bad}
     by_realm: dict[str, list[dict]] = {r: [] for r in REALMS}
     for s in snaps:
         r = s.get("realm")
@@ -192,13 +259,380 @@ def gather_recapture(bench_dir: str) -> dict:
     def scope(s: dict):
         d = {k: s.get(k) for k in RECAP_FIELDS}
         d["captured_at"] = s.get("captured_at")
+        d["age_hours"] = round(_age_hours(s["_ts"], now), 2)
+        # Shape fields, read BEFORE any count is trusted. `partial` is carried
+        # explicitly (not via .get default) so a snapshot that LACKS the key is
+        # distinguishable from one that carries False -- see evaluate().
+        d["partial"] = s.get("partial")
+        d["partial_present"] = "partial" in s
+        d["status"] = s.get("status")
+        d["failed_buckets"] = s.get("failed_buckets")
         return d
 
-    out = {"available": len(snaps), "realms": {}}
+    out = {"available": len(snaps), "unreadable": bad, "realms": {}}
     for r in REALMS:
         lst = by_realm[r]
         out["realms"][r] = scope(lst[-1]) if lst else None
     return out
+
+
+# --------------------------------------------------------------------------- #
+# deterministic verdict
+# --------------------------------------------------------------------------- #
+# Every number below is derived from the observed historical distribution of
+# these snapshots (observation-floor n=47 daily files 2026-06-23..2026-08-08 --
+# the current regime, which begins when the bulk floor came online on 06-20/21;
+# crawl-yield n=39 passes; recapture-lapsed n=113 runs), NOT invented. The
+# derivation, the observed min/max behind each number, and a day-by-day backtest
+# of the staleness rules live in
+# agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md.
+#
+# Two families of check, and the distinction matters when reading an alert:
+#   * SHAPE + STALENESS -- tuned detectors with real incident backing. The 24h
+#     recapture rule would have caught ASIA's 418h silent outage on 2026-07-22
+#     instead of 2026-08-06.
+#   * NUMERIC FLOORS/CEILINGS -- correlated catastrophe backstops, set well
+#     OUTSIDE the observed envelope. None has ever fired on the historical
+#     record; that is the point. Day-over-day deltas are deliberately NOT used:
+#     the worst clean-day move in the current regime is asia distinct_productive
+#     -43%, so any delta rule tight enough to detect anything would cry
+#     regression constantly -- exactly what the /observation skill forbids.
+DEFAULT_THRESHOLDS: dict[str, float] = {
+    # --- staleness (hours), measured at run time against `captured_at` ---
+    # observation-floor: cron 04:30 UTC daily, email 11:31 -> healthy age is
+    # 7.0h on all 44 backtested days. 24h fires only on a genuinely missed run.
+    "obs_max_age_hours": 24.0,
+    # crawl-yield: a pass takes DAYS. Observed age-at-11:31 max per realm:
+    # na 94.5h, eu 126.1h, asia 131.6h. 168h (7d) never fires historically and
+    # still catches a stalled crawl within a week.
+    "crawl_max_age_hours": 168.0,
+    # recapture: daily Beat at 10:10/10:30/10:50 UTC -> healthy age 0.7-1.4h.
+    # A single missed run lands at 24.7-25.4h, so the threshold must sit below
+    # 24.7 to catch it. NOTE the healthy margin is only ~40-80 minutes; a run
+    # that starts after ~11:15 will false-fire. Raise via env if that shows up.
+    "recapture_max_age_hours": 24.0,
+
+    # --- observation floor, TOTAL scope (regime min .. max) ---
+    "obs_coverage_min": 0.18,             # observed 0.2441 .. 0.3577
+    "obs_distinct_productive_min": 38000,  # observed 51,889 .. 74,632
+    "obs_active_7d_min": 150000,          # observed 200,615 .. 221,054
+    "obs_active_7d_max": 300000,
+    "obs_active_1d_min": 40000,           # observed 75,304 .. 99,632
+    "obs_productive_rate_min": 0.60,      # observed 0.8522 .. 0.9510
+    "obs_fresh_frac_min": 0.15,           # observed 0.2617 .. 0.3710
+    "obs_never_observed_max": 10000,      # observed 14 .. 1,728
+    "obs_bulk_floor_min": 30000,          # observed 68,713 .. 107,907
+    "obs_poll_max": 60000,                # observed 6,551 .. 15,835
+    # stale_over_24h is MOSTLY the change-gate non-mover wall -- by design, not
+    # a backlog -- so it gets no standalone rule. It only counts as a signal
+    # when capture is ALSO down, per the /observation skill. Observed worst
+    # pairing: 156,721 stale with 51,889 productive (2026-07-09), inside both.
+    "obs_stale_over_24h_max": 175000,
+    "obs_stale_pair_productive_min": 45000,
+
+    # --- observation floor, PER-REALM scope (regime min across realms) ---
+    "obs_realm_coverage_min": 0.12,             # lowest observed 0.1918 (asia)
+    "obs_realm_distinct_productive_min": 8000,  # lowest observed 13,142 (asia)
+
+    # --- crawl yield, per realm ---
+    "crawl_classified_min": 150000,  # lowest observed 256,800 (asia)
+    "crawl_yield_total_min": 200,    # lowest observed 2,089 (na); 10x below
+
+    # --- recapture, per realm ---
+    "recapture_no_data_max": 500,      # observed 2 .. 23 of 30,000 scanned
+    "recapture_chunk_errors_max": 0,   # observed 0 on all 113 runs
+    "recapture_advanced_min": 10,      # lowest observed 33 (an off-cycle NA run)
+}
+
+# Family cadence labels used in alert text.
+FAMILY_CADENCE = {
+    "observation-floor": "daily 04:30 UTC",
+    "crawl-yield": "per-realm, one completed clan-walk pass every few days",
+    "recapture-lapsed": "daily 10:10/10:30/10:50 UTC per realm",
+}
+
+
+def thr(name: str) -> float:
+    """Threshold value, env-overridable as OPS_ALERT_<NAME>."""
+    raw = cfg("OPS_ALERT_" + name.upper(), "")
+    if raw.strip():
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return float(DEFAULT_THRESHOLDS[name])
+
+
+def _cond(code: str, detail: str) -> dict:
+    return {"code": code, "detail": detail}
+
+
+def _check_generic_shape(out: list[dict], prefix: str, node: dict) -> None:
+    """Any status/partial/failed_buckets style field, checked before the counts.
+
+    Generalized from the recapture lesson: a truncated pass is numerically
+    indistinguishable from a healthy one, so the shape field is the ONLY signal.
+    Applied uniformly so a future snapshot family that grows one is covered
+    without another edit here.
+    """
+    status = node.get("status")
+    if status is not None and str(status).lower() not in ("ok", "complete", "completed", "success"):
+        out.append(_cond(f"snapshot_status:{prefix}", f"status={status!r} (expected ok/complete)"))
+    failed = node.get("failed_buckets")
+    if failed:
+        out.append(_cond(f"snapshot_failed_buckets:{prefix}", f"failed_buckets={failed!r}"))
+
+
+def evaluate(data: dict) -> list[dict]:
+    """The verdict. Pure Python, pure thresholds, no LLM anywhere near it.
+
+    Returns a list of tripped conditions (empty == all clear). Order is
+    shape/liveness first, then numbers: a stale or truncated snapshot makes its
+    own counts untrustworthy, so it is reported as the cause rather than being
+    laundered into a numeric alert about numbers that were never valid.
+    """
+    out: list[dict] = []
+
+    obs = data.get("observation") or {}
+    crawl = data.get("crawl_yield") or {}
+    recap = data.get("recapture") or {}
+
+    # ---- 1. unreadable snapshot files (any family) --------------------------
+    for fam, node in (("observation-floor", obs), ("crawl-yield", crawl), ("recapture-lapsed", recap)):
+        for bad in node.get("unreadable") or []:
+            out.append(_cond(f"snapshot_unreadable:{fam}", bad))
+
+    # ---- 2. observation floor: liveness, shape, then numbers ---------------
+    if not obs.get("available"):
+        out.append(_cond(
+            "snapshots_missing:observation-floor",
+            f"no observation-floor snapshots found ({FAMILY_CADENCE['observation-floor']})",
+        ))
+    else:
+        age = obs.get("latest_age_hours")
+        limit = thr("obs_max_age_hours")
+        if isinstance(age, (int, float)) and age > limit:
+            out.append(_cond(
+                "snapshot_stale:observation-floor",
+                f"newest snapshot is {age:.1f}h old (limit {limit:.0f}h; "
+                f"{FAMILY_CADENCE['observation-floor']}, healthy age at run time is ~7h)",
+            ))
+        _check_generic_shape(out, "observation-floor", {
+            "status": obs.get("latest_status"),
+            "failed_buckets": obs.get("latest_failed_buckets"),
+        })
+        if obs.get("latest_partial"):
+            out.append(_cond("snapshot_partial:observation-floor", "latest snapshot reports partial=true"))
+        out.extend(_evaluate_observation_numbers(obs))
+
+    # ---- 3. crawl yield ----------------------------------------------------
+    if not crawl.get("available"):
+        out.append(_cond(
+            "snapshots_missing:crawl-yield",
+            f"no crawl-yield snapshots found ({FAMILY_CADENCE['crawl-yield']})",
+        ))
+    else:
+        out.extend(_evaluate_crawl(crawl))
+
+    # ---- 4. recapture ------------------------------------------------------
+    if not recap.get("available"):
+        out.append(_cond(
+            "snapshots_missing:recapture-lapsed",
+            f"no recapture-lapsed snapshots found ({FAMILY_CADENCE['recapture-lapsed']})",
+        ))
+    else:
+        out.extend(_evaluate_recapture(recap))
+
+    return out
+
+
+def _evaluate_observation_numbers(obs: dict) -> list[dict]:
+    out: list[dict] = []
+    latest = obs.get("latest") or {}
+    t = latest.get("totals") or {}
+
+    def num(node, key):
+        v = node.get(key)
+        return v if isinstance(v, (int, float)) else None
+
+    checks = (
+        ("coverage_ratio_vs_7d", "obs_coverage_min", "lt", "obs_low_coverage"),
+        ("distinct_productive", "obs_distinct_productive_min", "lt", "obs_low_distinct_productive"),
+        ("active_7d", "obs_active_7d_min", "lt", "obs_low_active_7d"),
+        ("active_7d", "obs_active_7d_max", "gt", "obs_high_active_7d"),
+        ("active_1d", "obs_active_1d_min", "lt", "obs_low_active_1d"),
+        ("productive_rate", "obs_productive_rate_min", "lt", "obs_low_productive_rate"),
+        ("fresh_frac", "obs_fresh_frac_min", "lt", "obs_low_fresh_frac"),
+        ("never_observed", "obs_never_observed_max", "gt", "obs_high_never_observed"),
+        ("obs_bulk_floor", "obs_bulk_floor_min", "lt", "obs_low_bulk_floor"),
+        ("obs_poll", "obs_poll_max", "gt", "obs_high_poll"),
+    )
+    for field, tname, op, code in checks:
+        v = num(t, field)
+        if v is None:
+            continue
+        limit = thr(tname)
+        if (op == "lt" and v < limit) or (op == "gt" and v > limit):
+            arrow = "<" if op == "lt" else ">"
+            out.append(_cond(code, f"totals.{field}={v} {arrow} {limit:g}"))
+
+    # The one COMBINED rule. stale_over_24h alone is the by-design non-mover
+    # wall; it is only a cadence signal when distinct_productive is down too.
+    stale = num(t, "stale_over_24h")
+    prod = num(t, "distinct_productive")
+    if stale is not None and prod is not None:
+        if stale > thr("obs_stale_over_24h_max") and prod < thr("obs_stale_pair_productive_min"):
+            out.append(_cond(
+                "obs_stale_wall_with_capture_drop",
+                f"totals.stale_over_24h={stale} > {thr('obs_stale_over_24h_max'):g} WHILE "
+                f"distinct_productive={prod} < {thr('obs_stale_pair_productive_min'):g}",
+            ))
+
+    for r in REALMS:
+        rr = (latest.get("realms") or {}).get(r) or {}
+        cov = num(rr, "coverage_ratio_vs_7d")
+        if cov is not None and cov < thr("obs_realm_coverage_min"):
+            out.append(_cond(f"obs_low_coverage:{r}",
+                             f"{r}.coverage_ratio_vs_7d={cov} < {thr('obs_realm_coverage_min'):g}"))
+        dp = num(rr, "distinct_productive")
+        if dp is not None and dp < thr("obs_realm_distinct_productive_min"):
+            out.append(_cond(f"obs_low_distinct_productive:{r}",
+                             f"{r}.distinct_productive={dp} < {thr('obs_realm_distinct_productive_min'):g}"))
+    return out
+
+
+def _evaluate_crawl(crawl: dict) -> list[dict]:
+    out: list[dict] = []
+    limit_age = thr("crawl_max_age_hours")
+    for r in REALMS:
+        node = (crawl.get("realms") or {}).get(r)
+        if not node or not node.get("latest"):
+            out.append(_cond(f"realm_snapshot_missing:crawl-yield:{r}",
+                             f"no completed clan-walk pass recorded for realm {r}"))
+            continue
+        L = node["latest"]
+        _check_generic_shape(out, f"crawl-yield:{r}", L)
+        if L.get("partial"):
+            out.append(_cond(f"snapshot_partial:crawl-yield:{r}", f"{r} pass reports partial=true"))
+        age = L.get("age_hours")
+        if isinstance(age, (int, float)) and age > limit_age:
+            out.append(_cond(f"snapshot_stale:crawl-yield:{r}",
+                             f"{r}: newest completed pass is {age:.1f}h old (limit {limit_age:.0f}h; "
+                             f"worst healthy age observed was 131.6h)"))
+        # Shape before numbers: the five buckets partition every classified
+        # player, exactly, on all 39 historical passes. A mismatch means the
+        # snapshot is not describing what it claims to.
+        buckets = L.get("buckets") or {}
+        classified = L.get("players_classified")
+        bsum = sum(v for v in buckets.values() if isinstance(v, (int, float)))
+        if isinstance(classified, (int, float)) and buckets and bsum != classified:
+            out.append(_cond(f"crawl_bucket_mismatch:{r}",
+                             f"{r}: buckets sum to {bsum} but players_classified={classified}"))
+        if isinstance(classified, (int, float)) and classified < thr("crawl_classified_min"):
+            out.append(_cond(f"crawl_low_classified:{r}",
+                             f"{r}.players_classified={classified} < {thr('crawl_classified_min'):g}"))
+        yt = L.get("yield_total")
+        if isinstance(yt, (int, float)) and yt < thr("crawl_yield_total_min"):
+            out.append(_cond(f"crawl_no_yield:{r}",
+                             f"{r}.yield_total={yt} < {thr('crawl_yield_total_min'):g} "
+                             f"(discovered_active + reactivated, the floor-impossible value)"))
+    return out
+
+
+def _evaluate_recapture(recap: dict) -> list[dict]:
+    out: list[dict] = []
+    limit_age = thr("recapture_max_age_hours")
+    for r in REALMS:
+        node = (recap.get("realms") or {}).get(r)
+        if not node:
+            out.append(_cond(f"realm_snapshot_missing:recapture-lapsed:{r}",
+                             f"no recapture sweep snapshot for realm {r} (task runs daily)"))
+            continue
+
+        # ---- shape FIRST. A pass truncated by the soft time limit carries
+        # partial=true and is otherwise numerically identical to a healthy
+        # "cursor exhausted the pool" pass; that is how EU/ASIA lost every pass
+        # unnoticed for two weeks before the 2026-08-06 fix.
+        # `is not False`, not `is True`: post-fix snapshots all carry an explicit
+        # partial=False, so a LATEST snapshot missing the field means the writer
+        # changed or an old code path resurfaced -- silent shape drift, which is
+        # exactly what this check exists to catch.
+        if node.get("partial") is not False:
+            if node.get("partial"):
+                out.append(_cond(f"recapture_partial:{r}",
+                                 f"{r}: pass was TRUNCATED by the soft time limit (partial=true); it "
+                                 f"covered only scanned={node.get('scanned')} of "
+                                 f"candidates={node.get('candidates')} and looks numerically identical "
+                                 f"to a healthy full pass"))
+            else:
+                out.append(_cond(f"recapture_partial_field_absent:{r}",
+                                 f"{r}: snapshot carries no `partial` field; truncation is undetectable "
+                                 f"from this file, so its counts cannot be trusted"))
+        _check_generic_shape(out, f"recapture-lapsed:{r}", node)
+
+        age = node.get("age_hours")
+        if isinstance(age, (int, float)) and age > limit_age:
+            out.append(_cond(f"snapshot_stale:recapture-lapsed:{r}",
+                             f"{r}: newest sweep is {age:.1f}h old (limit {limit_age:.0f}h; the sweep is "
+                             f"daily, healthy age at run time is ~1h)"))
+
+        mode = node.get("mode")
+        if mode is not None and mode != "apply":
+            out.append(_cond(f"recapture_mode:{r}",
+                             f"{r}: mode={mode!r} -- writes are OFF, returners are being measured, not "
+                             f"recaptured (RECAPTURE_LAPSED_APPLY)"))
+
+        def num(key):
+            v = node.get(key)
+            return v if isinstance(v, (int, float)) else None
+
+        errs = num("chunk_errors")
+        if errs is not None and errs > thr("recapture_chunk_errors_max"):
+            out.append(_cond(f"recapture_chunk_errors:{r}",
+                             f"{r}.chunk_errors={errs} > {thr('recapture_chunk_errors_max'):g} (WG trouble)"))
+        nd = num("no_data")
+        if nd is not None and nd > thr("recapture_no_data_max"):
+            out.append(_cond(f"recapture_high_no_data:{r}",
+                             f"{r}.no_data={nd} > {thr('recapture_no_data_max'):g} (WG trouble)"))
+
+        scanned = num("scanned")
+        if scanned is not None and scanned <= 0:
+            out.append(_cond(f"recapture_scanned_zero:{r}", f"{r}.scanned={scanned}: the sweep did nothing"))
+        elif scanned:
+            wg = num("wg_calls")
+            if wg is not None and wg <= 0:
+                out.append(_cond(f"recapture_shape:{r}",
+                                 f"{r}: scanned={scanned} but wg_calls={wg}; inconsistent snapshot"))
+            if mode == "apply":
+                stamped = num("cursor_stamped")
+                if stamped is not None and stamped <= 0:
+                    out.append(_cond(f"recapture_cursor_stalled:{r}",
+                                     f"{r}: cursor_stamped={stamped} in apply mode; the LRU rotation "
+                                     f"cursor is not advancing, so the pool will never be walked"))
+            parts = [num("still_dormant"), num("advanced"), num("hidden"), num("no_data")]
+            if all(p is not None for p in parts) and sum(parts) != scanned:
+                out.append(_cond(f"recapture_component_mismatch:{r}",
+                                 f"{r}: still_dormant+advanced+hidden+no_data={sum(parts)} != "
+                                 f"scanned={scanned}"))
+            adv = num("advanced")
+            if adv is not None and adv < thr("recapture_advanced_min"):
+                out.append(_cond(f"recapture_no_returners:{r}",
+                                 f"{r}.advanced={adv} < {thr('recapture_advanced_min'):g} returners found"))
+    return out
+
+
+def summarize_conditions(conditions: list[dict], limit: int = 4) -> str:
+    codes = [c["code"] for c in conditions]
+    shown = ", ".join(codes[:limit])
+    if len(codes) > limit:
+        shown += f", +{len(codes) - limit} more"
+    return shown
+
+
+def alert_subject(conditions: list[dict]) -> str:
+    n = len(conditions)
+    subj = f"[battlestats] ops ALERT ({n}): {summarize_conditions(conditions)}"
+    return subj[:78]
 
 
 # --------------------------------------------------------------------------- #
@@ -257,7 +691,52 @@ Output STRICT JSON only, no prose outside it, no markdown fences: \
 styles, readable on mobile, no external images."""
 
 
-def call_anthropic(model: str, api_key: str, data_package: dict) -> dict:
+ALERT_SYSTEM_PROMPT = """You are the analyst writing a battlestats.online operations \
+ALERT email. battlestats is a World of Warships player/clan stats platform.
+
+A DETERMINISTIC Python check has ALREADY decided this alert is being sent and has \
+ALREADY selected exactly which conditions tripped. You are not the gate and you are \
+not being asked for a verdict. Your only job is to write up the tripped conditions \
+clearly so the operator knows what to look at first.
+
+RULES, in order of importance:
+1. Write up ONLY the conditions listed under `tripped_conditions`. Do not comment on, \
+summarize, grade, or reassure about anything else in the data, however interesting. \
+No "everything else looks healthy" paragraph.
+2. Never contradict, soften, re-litigate or second-guess a tripped condition. If a \
+condition says a snapshot is stale or truncated, it is stale or truncated.
+3. Do NOT compute your own deltas or ratios. Every number you need is in the payload. \
+Quote observed values verbatim.
+4. Lead with the single most actionable condition. Order: unreadable/missing snapshots, \
+then stale snapshots, then shape problems (partial/status/failed_buckets/count \
+mismatches), then numeric threshold breaches.
+5. For each condition give: the condition code, what the instrument measures, the \
+observed value vs the threshold, and the most likely place to look (named service, \
+task or file). Be concrete and short.
+
+DOMAIN NOTES you may use for the "where to look" line:
+- observation-floor: the battle-observation sweep over active-7d players. Snapshot is \
+written by a droplet cron at 04:30 UTC (snapshot_observation_floor.sh). The floor task \
+itself runs on the `floor` queue / battlestats-celery-floor worker.
+- crawl-yield: the multi-day clan crawl, `crawls` queue / battlestats-celery-crawls. A \
+snapshot is emitted only when a full pass COMPLETES, so passes are days apart by design.
+- recapture-lapsed: recapture_lapsed_players_task, daily per realm on the `background` \
+queue. `partial: true` means the soft time limit truncated the pass; the writes that \
+did happen are real and durable, but the pass covered only `scanned` of `candidates`, \
+and it is numerically indistinguishable from a healthy pass that exhausted the pool. \
+This is the failure that hid for two weeks before 2026-08-06.
+
+Voice: Data from Star Trek -- analytical, precise, warm, no hype, no emdashes; use \
+colons and semicolons. Short. This is an alert, not a digest.
+
+Output STRICT JSON only, no prose outside it, no markdown fences: \
+{"subject": "...", "html_body": "..."}. Subject <=78 chars, start it with \
+"[battlestats] ops ALERT" and name the tripped condition(s). html_body is a complete \
+<html>...</html> fragment using inline styles, readable on mobile, no external images."""
+
+
+def call_anthropic(model: str, api_key: str, data_package: dict,
+                   system: str | None = None, instruction: str | None = None) -> dict:
     body = {
         "model": model,
         "max_tokens": 6000,
@@ -265,14 +744,17 @@ def call_anthropic(model: str, api_key: str, data_package: dict) -> dict:
         # is default-on for these models and will burn the whole token budget on a
         # thinking block, returning no text (stop_reason=max_tokens). Disable it.
         "thinking": {"type": "disabled"},
-        "system": SYSTEM_PROMPT,
+        "system": system or SYSTEM_PROMPT,
         "messages": [
             {
                 "role": "user",
                 "content": (
-                    "Here is today's machine-selected snapshot data. Deltas are "
-                    "pre-computed (delta_vs_d1 = latest minus the ~24h-prior "
-                    "snapshot). Write the digest.\n\n"
+                    (instruction or (
+                        "Here is today's machine-selected snapshot data. Deltas are "
+                        "pre-computed (delta_vs_d1 = latest minus the ~24h-prior "
+                        "snapshot). Write the digest."
+                    ))
+                    + "\n\n"
                     + json.dumps(data_package, indent=2, default=str)
                 ),
             }
@@ -303,8 +785,24 @@ def call_anthropic(model: str, api_key: str, data_package: dict) -> dict:
 # --------------------------------------------------------------------------- #
 # deterministic fallback rendering (no LLM)
 # --------------------------------------------------------------------------- #
-def render_plain(data: dict) -> dict:
-    lines = ["battlestats ops digest (deterministic fallback -- no LLM synthesis)\n"]
+def render_plain(data: dict, conditions: list[dict] | None = None, reason: str = "") -> dict:
+    """Deterministic table. Used for --no-llm, the LLM-failure fallback, and the
+    weekly heartbeat.
+
+    When conditions are present the tripped list is printed FIRST and the subject
+    names them: on the fire path an LLM failure must not downgrade the mail to
+    something whose subject reads "digest".
+    """
+    conditions = conditions or []
+    head = "battlestats ops ALERT" if conditions else "battlestats ops digest"
+    lines = [f"{head} (deterministic table -- no LLM synthesis)\n"]
+    if reason:
+        lines.append(f"({reason})\n")
+    if conditions:
+        lines.append("== TRIPPED CONDITIONS ==")
+        for c in conditions:
+            lines.append(f"  [{c['code']}] {c['detail']}")
+        lines.append("")
 
     obs = data["observation"]
     lines.append("== Observation floor ==")
@@ -363,7 +861,10 @@ def render_plain(data: dict) -> dict:
 
     text = "\n".join(lines)
     html = "<html><body><pre style='font:13px/1.4 monospace'>" + _esc(text) + "</pre></body></html>"
-    return {"subject": "[battlestats] daily ops digest (fallback)", "html_body": html, "text": text}
+    # A no-condition table is only ever a heartbeat or a forced send; main()
+    # stamps the heartbeat subject, so keep this one neutral.
+    subject = alert_subject(conditions) if conditions else "[battlestats] ops digest"
+    return {"subject": subject, "html_body": html, "text": text}
 
 
 def _esc(s: str) -> str:
@@ -376,22 +877,70 @@ def _esc(s: str) -> str:
 # --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
+DOW_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def heartbeat_due(now: datetime) -> bool:
+    """True on the configured weekly heartbeat day.
+
+    The heartbeat is what keeps SILENCE distinguishable from BREAKAGE. Exception-only
+    mail means the timer dying, the SMTP path breaking, or the whole unit being
+    disabled all look exactly like a healthy quiet day. A script cannot detect its
+    own non-execution; a periodic unconditional send is the only mechanism that
+    proves timer + SMTP + snapshot reads end to end. Set OPS_EMAIL_HEARTBEAT_DOW to
+    an empty string to disable (not recommended).
+    """
+    want = cfg("OPS_EMAIL_HEARTBEAT_DOW", "mon").strip().lower()
+    if not want:
+        return False
+    return DOW_NAMES[now.weekday()] == want
+
+
 def main() -> int:
     args = set(sys.argv[1:])
     dry_run = "--dry-run" in args
     no_llm = "--no-llm" in args
+    forced = "--force" in args
 
     load_env_file(cfg("OPS_EMAIL_ENV_FILE", DEFAULT_ENV_FILE))
     bench_dir = cfg("BENCH_DIR", DEFAULT_BENCH_DIR)
 
+    now = utcnow()  # snapshots write naive UTC captured_at
     data = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "observation": gather_observation(bench_dir),
-        "crawl_yield": gather_crawl_yield(bench_dir),
-        "recapture": gather_recapture(bench_dir),
+        "observation": gather_observation(bench_dir, now),
+        "crawl_yield": gather_crawl_yield(bench_dir, now),
+        "recapture": gather_recapture(bench_dir, now),
     }
 
-    # Choose rendering path.
+    # ---- the verdict: deterministic Python, never the LLM ------------------
+    conditions = evaluate(data)
+    data["tripped_conditions"] = conditions
+
+    always = cfg("OPS_EMAIL_ALWAYS_SEND", "0").strip() in ("1", "true", "yes", "on")
+    beat = heartbeat_due(now)
+
+    if not conditions and not always and not forced and not beat and not dry_run:
+        # All clear: one line for the timer journal, no mail. This is the
+        # exception-only contract. Errors still mail via the fail-loud path, and
+        # the weekly heartbeat still proves the transport.
+        print(f"[ok] all clear at {now.isoformat()}Z: no conditions tripped; no email sent "
+              f"(obs={data['observation'].get('available', 0)} snaps, "
+              f"crawl={data['crawl_yield'].get('available', 0)}, "
+              f"recapture={data['recapture'].get('available', 0)})")
+        return 0
+
+    alerting = bool(conditions)
+    if alerting:
+        reason = "alert"
+    elif always or forced:
+        reason = "forced send (OPS_EMAIL_ALWAYS_SEND / --force)"
+    elif beat:
+        reason = "weekly heartbeat: proves the timer, the SMTP path and the snapshot reads"
+    else:
+        # Only reachable under --dry-run, which deliberately skips the early return.
+        reason = "all clear (dry run; nothing would have been sent)"
+
     email = None
     llm_error = None
     if not no_llm:
@@ -401,7 +950,18 @@ def main() -> int:
             llm_error = "ANTHROPIC_API_KEY not set"
         else:
             try:
-                out = call_anthropic(model, api_key, data)
+                if alerting:
+                    out = call_anthropic(
+                        model, api_key, data,
+                        system=ALERT_SYSTEM_PROMPT,
+                        instruction=(
+                            "A deterministic Python check has already decided to send this "
+                            "alert. `tripped_conditions` lists exactly what tripped. Write up "
+                            "ONLY those conditions; ignore every other metric in the payload."
+                        ),
+                    )
+                else:
+                    out = call_anthropic(model, api_key, data)
                 email = {"subject": out["subject"], "html_body": out["html_body"], "text": ""}
             except Exception as e:
                 detail = e
@@ -413,14 +973,29 @@ def main() -> int:
                 llm_error = f"{type(e).__name__}: {detail}"
 
     if email is None:
-        # deterministic fallback (either --no-llm, no key, or API failed)
-        email = render_plain(data)
+        # Deterministic fallback (--no-llm, no key, or the API failed). On the
+        # fire path render_plain names the conditions in the subject, so an LLM
+        # outage cannot downgrade an alert into something reading "digest".
+        email = render_plain(data, conditions, reason)
         if llm_error:
-            note = f"<p style='color:#b00'>LLM synthesis failed, sent deterministic fallback: {_esc(llm_error)}</p>"
+            note = ("<p style='color:#b00'>LLM synthesis failed, sent deterministic fallback: "
+                    + _esc(llm_error) + "</p>")
             email["html_body"] = email["html_body"].replace("<body>", "<body>" + note)
-            email["subject"] = "[battlestats] daily ops digest (fallback: LLM error)"
+
+    # Belt and braces: whatever the model returned, the subject must announce
+    # what this mail actually is. An alert must never arrive reading "digest",
+    # and the heartbeat must be filterable on a stable string so the operator
+    # notices when the weekly proof-of-life stops arriving.
+    if alerting:
+        if not email["subject"].startswith("[battlestats] ops ALERT"):
+            email["subject"] = alert_subject(conditions)
+    elif beat and not (always or forced):
+        email["subject"] = "[battlestats] ops heartbeat: all clear"
 
     if dry_run:
+        print(f"VERDICT: {len(conditions)} condition(s) tripped; send={'yes' if (alerting or always or forced or beat) else 'no'} ({reason})")
+        for c in conditions:
+            print(f"  [{c['code']}] {c['detail']}")
         print("SUBJECT:", email["subject"])
         print("---- HTML ----")
         print(email["html_body"])
@@ -429,7 +1004,7 @@ def main() -> int:
         return 0
 
     send_email(email["subject"], email["html_body"], email.get("text", ""))
-    print(f"[ok] sent: {email['subject']}")
+    print(f"[ok] sent ({reason}): {email['subject']}")
     return 0
 
 

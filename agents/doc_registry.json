@@ -2962,6 +2962,33 @@
                 "recapture-lapsed-players-removed"
             ]
         },
+        "agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "ops email exception only",
+                "ops alert email",
+                "daily ops digest thresholds",
+                "ops email alert thresholds"
+            ],
+            "tags": [
+                "ops-email",
+                "alerting",
+                "exception-only",
+                "thresholds",
+                "benchmark-snapshots",
+                "observation-floor",
+                "crawl-yield",
+                "recapture",
+                "heartbeat"
+            ],
+            "archive_on": [
+                "ops-alert-email-removed"
+            ]
+        },
         "agents/runbooks/runbook-floor-battles-json-refresh-2026-06-14.md": {
             "kind": "runbook",
             "status": "active",
