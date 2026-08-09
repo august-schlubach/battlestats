@@ -738,12 +738,14 @@ Output STRICT JSON only, no prose outside it, no markdown fences: \
 def call_anthropic(model: str, api_key: str, data_package: dict,
                    system: str | None = None, instruction: str | None = None) -> dict:
     body = {
+        # max_tokens caps thinking AND response text together, which is what
+        # produced the earlier empty-text/stop_reason=max_tokens failure. The fix
+        # is headroom plus low effort, NOT thinking={"type": "disabled"}: with
+        # thinking off, Opus 5 can leak <thinking> tags into the visible response,
+        # and this response is parsed as JSON, so a leaked tag breaks the parse.
         "model": model,
-        "max_tokens": 6000,
-        # This is deterministic formatting, not a reasoning task. Extended thinking
-        # is default-on for these models and will burn the whole token budget on a
-        # thinking block, returning no text (stop_reason=max_tokens). Disable it.
-        "thinking": {"type": "disabled"},
+        "max_tokens": 8000,
+        "output_config": {"effort": "low"},
         "system": system or SYSTEM_PROMPT,
         "messages": [
             {
@@ -772,6 +774,14 @@ def call_anthropic(model: str, api_key: str, data_package: dict,
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
+    # A safety-classifier decline is HTTP 200 with stop_reason=refusal and no
+    # content, so it must be checked before reading content -- otherwise it
+    # surfaces as an opaque JSON parse error instead of a named cause.
+    if payload.get("stop_reason") == "refusal":
+        raise RuntimeError(
+            f"model declined the request (category="
+            f"{(payload.get('stop_details') or {}).get('category')})"
+        )
     text = "".join(
         blk.get("text", "") for blk in payload.get("content", []) if blk.get("type") == "text"
     ).strip()
@@ -945,7 +955,7 @@ def main() -> int:
     llm_error = None
     if not no_llm:
         api_key = cfg("ANTHROPIC_API_KEY")
-        model = cfg("ANTHROPIC_MODEL", "claude-sonnet-5")
+        model = cfg("ANTHROPIC_MODEL", "claude-opus-5")
         if not api_key:
             llm_error = "ANTHROPIC_API_KEY not set"
         else:

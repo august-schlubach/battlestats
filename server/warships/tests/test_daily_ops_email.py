@@ -570,3 +570,26 @@ class FailLoudTests(SimpleTestCase):
         self.assertIn("send_email(", tail)
         self.assertNotIn("OPS_EMAIL_ALWAYS_SEND", tail)
         self.assertNotIn("evaluate(", tail)
+
+
+class AnthropicCallShapeTests(SimpleTestCase):
+    """The alert write-up call is configured for a short deterministic render."""
+
+    def test_thinking_is_bounded_by_low_effort_not_disabled(self):
+        """The budget problem is solved with effort + headroom, not thinking-off.
+
+        max_tokens caps thinking AND response text together, which is what
+        produced the original empty-text/stop_reason=max_tokens failure.
+        Disabling thinking fixes that but buys a worse bug: with thinking off,
+        Opus 5 can leak <thinking> tags into the visible response, and this
+        response is parsed as JSON, so a leaked tag breaks the parse outright.
+        """
+        source = _SCRIPT.read_text().replace("'", '"')
+        self.assertIn('"output_config": {"effort": "low"}', source)
+        self.assertNotIn('"thinking": {"type": "disabled"}', source)
+
+    def test_a_refusal_is_named_rather_than_surfacing_as_a_parse_error(self):
+        """A classifier decline is HTTP 200 with no content, not an exception."""
+        source = _SCRIPT.read_text()
+        self.assertIn('payload.get("stop_reason") == "refusal"', source)
+        self.assertIn("model declined the request", source)
