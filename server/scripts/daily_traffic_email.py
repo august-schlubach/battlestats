@@ -820,11 +820,14 @@ def llm_payload(data: dict) -> dict:
 
 def call_anthropic(model: str, api_key: str, data: dict) -> str:
     body = {
+        # max_tokens caps thinking AND response text together, which is what
+        # produced the earlier empty-response failure. The fix is headroom plus
+        # low effort, NOT thinking={"type": "disabled"}: with thinking off,
+        # Opus 5 can leak <thinking> tags into the visible response, and this
+        # response is parsed as JSON, so a leaked tag breaks the parse.
         "model": model,
-        "max_tokens": 1000,
-        # Deterministic prose, not a reasoning task. Extended thinking is default-on
-        # for these models and would consume the whole budget, returning no text.
-        "thinking": {"type": "disabled"},
+        "max_tokens": 4000,
+        "output_config": {"effort": "low"},
         "system": SYSTEM_PROMPT,
         "messages": [
             {
@@ -846,6 +849,13 @@ def call_anthropic(model: str, api_key: str, data: dict) -> str:
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
+    # A safety-classifier decline is HTTP 200 with stop_reason=refusal and no
+    # content, so name it before the generic empty-response case below.
+    if payload.get("stop_reason") == "refusal":
+        raise RuntimeError(
+            f"model declined the request (category="
+            f"{(payload.get('stop_details') or {}).get('category')})"
+        )
     text = "".join(
         blk.get("text", "") for blk in payload.get("content", []) if blk.get("type") == "text"
     ).strip()
@@ -909,7 +919,7 @@ def main() -> int:
         else:
             try:
                 lead = call_anthropic(
-                    cfg("ANTHROPIC_MODEL", "claude-sonnet-5"), api_key, llm_payload(data)
+                    cfg("ANTHROPIC_MODEL", "claude-opus-5"), api_key, llm_payload(data)
                 )
             except Exception as exc:
                 detail = exc

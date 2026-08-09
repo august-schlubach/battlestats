@@ -521,9 +521,24 @@ class ContractTests(SimpleTestCase):
         self.assertEqual(imported - allowed, set())
         self.assertNotIn("django", imported)
 
-    def test_extended_thinking_is_disabled_on_the_anthropic_call(self):
-        """Default-on thinking burns the whole budget and returns no text."""
-        self.assertIn('"thinking": {"type": "disabled"}', SCRIPT.read_text().replace("'", '"'))
+    def test_thinking_is_bounded_by_low_effort_not_disabled(self):
+        """The budget problem is solved with effort + headroom, not thinking-off.
+
+        max_tokens caps thinking AND response text together, which is what
+        produced the original empty-response failure. Disabling thinking fixes
+        that but buys a worse bug: with thinking off, Opus 5 can leak <thinking>
+        tags into the visible response, and this response is parsed as JSON, so
+        a leaked tag breaks the parse outright.
+        """
+        source = SCRIPT.read_text().replace("'", '"')
+        self.assertIn('"output_config": {"effort": "low"}', source)
+        self.assertNotIn('"thinking": {"type": "disabled"}', source)
+
+    def test_a_refusal_is_named_rather_than_surfacing_as_a_parse_error(self):
+        """A classifier decline is HTTP 200 with no content, not an exception."""
+        source = SCRIPT.read_text()
+        self.assertIn('payload.get("stop_reason") == "refusal"', source)
+        self.assertIn("model declined the request", source)
 
     def test_the_model_is_told_never_to_compute_a_number(self):
         self.assertIn("NEVER compute a number", mod.SYSTEM_PROMPT)
