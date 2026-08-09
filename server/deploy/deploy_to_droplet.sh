@@ -1313,7 +1313,7 @@ EOF
 
 cat > /etc/systemd/system/battlestats-ops-digest.service <<EOF
 [Unit]
-Description=Battlestats daily ops digest email
+Description=Battlestats daily ops alert email (exception-only)
 After=network-online.target
 Wants=network-online.target
 
