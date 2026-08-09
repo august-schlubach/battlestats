@@ -30,12 +30,19 @@
 #
 # Exit codes: 0 = no actionable drift; 1 = drift found; 2 = could not run.
 #
-# By default only checks 1 and 3 fail the gate — a pin that production is
-# ignoring, and a doc that contradicts production. Check 2 (behaviour keys the
-# deploy script never pins) reports but does not fail: pinning that backlog is a
-# separate reviewable change, and a permanently-red gate gets ignored, which is
-# the failure mode this script exists to prevent. Run --strict once the backlog
-# is pinned so it cannot regrow.
+# By default checks 1, 3 and 4 fail the gate — a pin that production is
+# ignoring, a doc that contradicts production, and an ops-email config key whose
+# authorities disagree. Check 2 (behaviour keys the deploy script never pins)
+# reports but does not fail: pinning that backlog is a separate reviewable
+# change, and a permanently-red gate gets ignored, which is the failure mode
+# this script exists to prevent. Run --strict once the backlog is pinned so it
+# cannot regrow.
+#
+# Check 4 covers a SECOND env file that checks 1-3 structurally cannot see:
+# /etc/battlestats-ops-email.env, which the deploy script does not manage. Its
+# keys are reconciled three ways — live /etc, Pass, and the code default — by
+# an explicit allowlist, because that file is secret-dense and checks 1-2 print
+# values. See OPS_KEYS below before adding to it.
 
 set -uo pipefail
 
@@ -55,6 +62,30 @@ SSH_USER="${BATTLESTATS_SSH_USER:-root}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPLOY_SCRIPT="${REPO_ROOT}/server/deploy/deploy_to_droplet.sh"
 REMOTE_ENV="/etc/battlestats-server.env"
+
+# ── The second env file (check 4) ────────────────────────────────────────────
+# /etc/battlestats-ops-email.env is NOT managed by the deploy script, so checks
+# 1-3 cannot see it at all. It is also the most secret-dense file on the box:
+# SMTP_PASS, ANTHROPIC_API_KEY, PURELYMAIL_API_TOKEN. Checks 1-2 print
+# `live=<value>` freely, which would dump those to stdout.
+#
+# So this file is reconciled by ALLOWLIST, never by enumeration: only the keys
+# named below are fetched, and the remote grep is built from that same list, so
+# a secret never crosses the wire in the first place. Adding a key here means
+# asserting it is safe to print. Do not add a credential.
+#
+# Each allowlisted key has three potential authorities, and drift means any two
+# disagree: the live /etc file (what actually runs), Pass (canonical -- the
+# on-disk file is generated from it, so a Pass/live split means the next
+# regeneration silently reverts production), and the code default in the
+# consuming script (what runs if the env file omits the key entirely).
+OPS_ENV="/etc/battlestats-ops-email.env"
+OPS_KEYS=(ANTHROPIC_MODEL)
+declare -A OPS_PASS_ENTRY=( [ANTHROPIC_MODEL]="battlestats/anthropic-model" )
+OPS_CONSUMERS=(
+  "${REPO_ROOT}/server/scripts/daily_ops_email.py"
+  "${REPO_ROOT}/server/scripts/daily_traffic_email.py"
+)
 
 # Docs that are allowed to state live values, and are therefore checked.
 DOC_PATHS=(
@@ -207,6 +238,70 @@ else
   echo "  documenting several keys no longer cross-flags. Residual false positives"
   echo "  are possible; confirm by hand. Fix by naming the authority rather than"
   echo "  restating the number — e.g. \"prod=105, pinned in deploy_to_droplet.sh\".${OFF}"
+  drift=1
+fi
+echo
+
+# ── 4. The ops-email env file: /etc vs Pass vs the code default.
+#       Allowlisted keys only — see OPS_KEYS above for why.
+echo "${DIM}── 4. ${OPS_ENV}: /etc vs Pass vs code default ──${OFF}"
+
+# Build the remote grep from the allowlist so only those lines are ever read.
+ops_pattern="^($(IFS='|'; echo "${OPS_KEYS[*]}"))="
+if ! ssh -o ConnectTimeout=15 -o BatchMode=yes "${SSH_USER}@${HOST}" \
+      "grep -E '${ops_pattern}' ${OPS_ENV} 2>/dev/null" > "${TMP}/ops.raw" 2>"${TMP}/ops.err"; then
+  : # empty or unreadable; handled per key below
+fi
+sed 's/=/\t/' "${TMP}/ops.raw" | sed 's/\t"/\t/; s/"$//' | sort -u > "${TMP}/ops.kv"
+
+# Pass needs a decrypted key. ~/.bashrc returns early for non-interactive
+# shells, so __gpg_unlock is not even DEFINED here -- force a full load. A
+# locked key must degrade to "unreadable", never to a false drift claim.
+read_pass() {
+  local entry="$1" out
+  out="$(pass show "$entry" 2>/dev/null | head -1)"
+  [[ -n "$out" ]] || out="$(bash -i -c "__gpg_unlock >/dev/null 2>&1; pass show '${entry}' 2>/dev/null | head -1" 2>/dev/null)"
+  printf '%s' "$out"
+}
+
+ops_drift=0
+for key in "${OPS_KEYS[@]}"; do
+  live="$(awk -F'\t' -v k="$key" '$1==k{print $2; exit}' "${TMP}/ops.kv")"
+  vault="$(read_pass "${OPS_PASS_ENTRY[$key]}")"
+  # Code default: cfg("KEY", "default") in the consuming scripts. Several
+  # consumers must agree with each other as well as with /etc.
+  mapfile -t defaults < <(
+    grep -hoP "cfg\(\"${key}\",\s*\"\K[^\"]+" "${OPS_CONSUMERS[@]}" 2>/dev/null | sort -u
+  )
+  code="$(IFS='/'; echo "${defaults[*]:-}")"
+
+  if [[ -z "$live" ]]; then
+    printf '  %s%-24s%s not set in /etc — the code default (%s) is what runs\n' \
+      "$YEL" "$key" "$OFF" "${code:-unknown}"
+    ops_drift=$((ops_drift+1))
+    continue
+  fi
+  if [[ -z "$vault" ]]; then
+    printf '  %s%-24s%s live=%-16s pass=%sunreadable%s code=%s\n' \
+      "$YEL" "$key" "$OFF" "$live" "$DIM" "$OFF" "${code:-unknown}"
+    echo "    ${DIM}Locked key or missing entry — these look identical from here. Try"
+    echo "    __gpg_unlock (~/.bashrc:172); if it still reads empty the entry is absent."
+    echo "    Not counted as drift either way: a silent gate beats a false accusation.${OFF}"
+    continue
+  fi
+  if [[ "$live" != "$vault" ]]; then
+    printf '  %s%-24s%s live=%-16s pass=%-16s %s← next regeneration reverts production%s\n' \
+      "$RED" "$key" "$OFF" "$live" "$vault" "$RED" "$OFF"
+    ops_drift=$((ops_drift+1))
+  elif [[ -n "$code" && "$code" != "$live" ]]; then
+    printf '  %s%-24s%s live=%-16s code=%-16s %s← agrees with Pass; code default would differ if /etc lost the key%s\n' \
+      "$YEL" "$key" "$OFF" "$live" "$code" "$YEL" "$OFF"
+    ops_drift=$((ops_drift+1))
+  else
+    printf '  %s%-24s%s %slive = pass = code = %s%s\n' "$GRN" "$key" "$OFF" "$DIM" "$live" "$OFF"
+  fi
+done
+if [[ $ops_drift -gt 0 ]]; then
   drift=1
 fi
 echo
