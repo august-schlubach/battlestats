@@ -26,6 +26,32 @@ describe('dictionaries', () => {
         }
     });
 
+    // The untranslated residue is a DECISION, not a backlog: ko.ts's
+    // NEEDS-NATIVE-CHECK block omits each of these on the record (unattested
+    // connectives, our own coinages, or out-of-scope by the locale spec), and
+    // the research doc argues them individually. Pinning the set means a future
+    // pass cannot quietly guess a rendering, and cannot quietly drop one either
+    // — both directions fail here and send the reader to the reasoning first.
+    const NEEDS_NATIVE_CHECK: StringKey[] = [
+        'insights.tabsAriaLabel',
+        'landing.treemap.infoLabel',
+        'player.section.battlesPlayedDistribution',
+        'player.section.clanBattlesVsWinRate',
+        'player.section.clanSeasonTimeline',
+        'player.section.efficiencyBadges',
+        'player.section.rankedGamesVsWinRate',
+        'player.section.rankedSeasonTimeline',
+        'player.section.winRateVsSurvival',
+    ];
+
+    it('the untranslated residue is exactly the documented NEEDS-NATIVE-CHECK set', () => {
+        const enKeys = Object.keys(en) as StringKey[];
+        for (const [name, dict] of [['ko', ko], ['ja', ja]] as const) {
+            const missing = enKeys.filter((k) => !(k in dict)).sort();
+            expect({ [name]: missing }).toEqual({ [name]: [...NEEDS_NATIVE_CHECK].sort() });
+        }
+    });
+
     it('every locale resolves to a dictionary', () => {
         for (const locale of LOCALES) {
             expect(resolveDictionary(locale)).toBeDefined();

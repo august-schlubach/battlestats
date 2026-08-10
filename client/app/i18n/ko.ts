@@ -16,6 +16,12 @@ export const ko: Partial<Record<StringKey, string>> = {
     'nav.themeLight': '라이트',
     'nav.themeDark': '다크',
     'nav.themeCurrent': '테마: {label}',
+    // Generic UI chrome, not a NEEDS-NATIVE-CHECK omission: this key arrived
+    // with the landing recent-players list (v4.9.0), after the pass that sorted
+    // every other key below, so it was never triaged. 최근 is corpus-attested
+    // (research doc, Verified terms) and 조회 is ordinary interface vocabulary
+    // with no WoWS register to get wrong. It labels a row of player links.
+    'footer.lastViewed': '최근 조회:',
     'footer.leaveFeedback': '피드백 남기기',
 
     'insights.tabs.activity': '활동',

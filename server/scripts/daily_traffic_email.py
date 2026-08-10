@@ -287,6 +287,33 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
             WHERE {scope} AND {in_day}
             GROUP BY 1 ORDER BY visitors DESC
         """,
+        # --- UI locale actually in effect, from the locale-active beacon ------
+        # Supply side. Only page loads on a build carrying the beacon report at
+        # all (shipped v5.2.1, 2026-08-10), so this partitions beacon-reporting
+        # visitors, NOT the day's visitors. No LIMIT: three values exist, and a
+        # truncated set would give the share below a wrong denominator.
+        "locale_active": f"""
+            SELECT ed.string_value AS locale,
+                   count(DISTINCT we.session_id) AS visitors,
+                   count(DISTINCT we.visit_id) AS load_visits
+            FROM website_event we
+            JOIN event_data ed
+              ON ed.website_event_id = we.event_id AND ed.data_key = 'locale'
+            WHERE {scope} AND {in_day}
+              AND we.event_type = 2 AND we.event_name = 'locale-active'
+            GROUP BY 1 ORDER BY visitors DESC, locale
+        """,
+        # --- browser language: the demand side, captured since long before the
+        # locale feature existed. One language per session, so these rows do
+        # partition the day's visitors. Folded to the primary subtag (ko-KR and
+        # ko are one language). No LIMIT, same denominator reason as above.
+        "browser_language": f"""
+            SELECT lower(split_part(coalesce(nullif(s.language, ''), '??'), '-', 1)) AS lang,
+                   count(DISTINCT we.session_id) AS visitors
+            FROM website_event we JOIN session s USING (session_id)
+            WHERE {scope} AND {in_day}
+            GROUP BY 1 ORDER BY visitors DESC, lang
+        """,
         # --- custom events. Ranked by visitors; prior-window mean for context.
         "events": f"""
             WITH day_ev AS (
@@ -408,6 +435,7 @@ def compute(raw: dict, day: date) -> dict:
     }
 
     pages = [dict(r, label=_pretty_path(r["url_path"])) for r in (raw.get("pages") or [])]
+    locale = _locale_summary(raw)
 
     return {
         "day": day_key,
@@ -422,6 +450,50 @@ def compute(raw: dict, day: date) -> dict:
         "countries": raw.get("countries") or [],
         "devices": raw.get("devices") or [],
         "events": event_summary,
+        "locale": locale,
+    }
+
+
+# The two halves answer different questions and must never share a denominator:
+# `ui` is which language the interface actually ran in (supply, beacon-reporting
+# visitors only), `browser` is which language the visitor's browser asks for
+# (demand, every visitor). The gap between them is the discoverability signal
+# the locale runbook is about, so both shares are computed HERE rather than left
+# for a reader — or for the model — to divide.
+LOCALE_TOP_N = 6
+
+
+def _locale_summary(raw: dict) -> dict:
+    ui_rows = raw.get("locale_active") or []
+    ui_total = sum((_num(r.get("visitors")) or 0) for r in ui_rows)
+    ui_non_en = sum(
+        (_num(r.get("visitors")) or 0) for r in ui_rows if (r.get("locale") or "") != "en"
+    )
+
+    browser_rows = raw.get("browser_language") or []
+    browser_total = sum((_num(r.get("visitors")) or 0) for r in browser_rows)
+    browser_non_en = sum(
+        (_num(r.get("visitors")) or 0)
+        for r in browser_rows
+        if (r.get("lang") or "") not in ("en", "??")
+    )
+    # Korean and Japanese specifically: the only two the UI can currently serve,
+    # so this is the reachable ceiling for the share above it.
+    browser_cjk = sum(
+        (_num(r.get("visitors")) or 0) for r in browser_rows if (r.get("lang") or "") in ("ko", "ja")
+    )
+
+    return {
+        "ui_rows": ui_rows,
+        "ui_visitors": ui_total,
+        "ui_non_english": ui_non_en,
+        "ui_non_english_pct": _pct(ui_non_en, ui_total),
+        "browser_rows": browser_rows[:LOCALE_TOP_N],
+        "browser_visitors": browser_total,
+        "browser_non_english": browser_non_en,
+        "browser_non_english_pct": _pct(browser_non_en, browser_total),
+        "browser_ko_ja": browser_cjk,
+        "browser_ko_ja_pct": _pct(browser_cjk, browser_total),
     }
 
 
@@ -663,6 +735,45 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
         )
     )
 
+    loc = data["locale"]
+    parts.append(_h2("Language"))
+    parts.append(
+        _table(
+            ["UI locale in effect", "Visitors (sort)", "Page loads"],
+            [[r["locale"], r["visitors"], r["load_visits"]] for r in loc["ui_rows"]]
+            or [["(no locale-active events)", "", ""]],
+            "From the locale-active beacon, which reports the locale a page load actually ran "
+            "in. Its denominator is beacon-reporting visitors, not the day's visitors: a visitor "
+            "on a cached pre-v5.2.1 bundle reports nothing.",
+        )
+    )
+    parts.append(
+        _table(
+            ["Browser language", "Visitors (sort)"],
+            [[r["lang"], r["visitors"]] for r in loc["browser_rows"]] or [["(none)", ""]],
+            "What the visitor's browser asks for, folded to the primary subtag and captured "
+            "since long before the locale feature. One language per visitor, so these do "
+            "partition the day.",
+        )
+    )
+    parts.append(
+        "<div style='font-size:12px;color:#555;margin:-8px 0 14px'><b>Supply vs demand:</b> "
+        + (
+            f"the interface ran non-English for {loc['ui_non_english']} of "
+            f"{loc['ui_visitors']} beacon-reporting visitors "
+            f"({loc['ui_non_english_pct']}%)"
+            if loc["ui_non_english_pct"] is not None
+            else "no visitor reported a UI locale on this day, so the interface side is "
+            "unmeasured rather than zero (the beacon shipped 2026-08-10)"
+        )
+        + f"; {loc['browser_ko_ja']} of {loc['browser_visitors']} visitors arrived with a Korean "
+        "or Japanese browser"
+        + (f" ({loc['browser_ko_ja_pct']}%)" if loc["browser_ko_ja_pct"] is not None else "")
+        + ", which is the reachable ceiling while ko and ja are the only translations. English "
+        "remains the default for every new arrival; the gap between the two figures is a "
+        "discoverability measure, not a demand measure.</div>"
+    )
+
     ev = data["events"]
     parts.append(_h2("Events triggered"))
     parts.append(
@@ -739,6 +850,23 @@ def render_text(data: dict, lead: str = "") -> str:
         "TOP PAGES (ranked by visitors)",
     ]
     out += [f"  {r['visitors']:>3}  {r['label']}" for r in data["pages"]] or ["  (none)"]
+    loc = data["locale"]
+    out += [
+        "",
+        "LANGUAGE",
+        (
+            f"  UI non-English {loc['ui_non_english']}/{loc['ui_visitors']} beacon-reporting "
+            f"visitors ({loc['ui_non_english_pct']}%)"
+            if loc["ui_non_english_pct"] is not None
+            else "  UI locale unmeasured on this day: no beacon events "
+            "(the beacon shipped 2026-08-10)"
+        ),
+        f"  Browser ko/ja {loc['browser_ko_ja']}/{loc['browser_visitors']} visitors "
+        f"({loc['browser_ko_ja_pct']}%) -- the reachable ceiling; English is still the default",
+    ]
+    out += [f"  {r['visitors']:>3}  browser {r['lang']}" for r in loc["browser_rows"]] or [
+        "  (none)"
+    ]
     out += ["", "EVENTS TRIGGERED (ranked by visitors)"]
     out += [
         f"  {r['visitors']:>3}  {r['event_name']} ({r['events']} events)"
@@ -770,6 +898,14 @@ by" or "mostly", never a quantity.
 where the traffic came from, and which feature the events show people using. \
 Traffic here is tens of visitors per day; a single-day swing is normally noise. \
 Say "within the usual range" when it is, rather than inventing a trend.
+- The two `language` percentages have DIFFERENT denominators and are not \
+comparable as parts of one whole. `ui_non_english_pct` is the share of \
+beacon-reporting visitors whose interface ran in Korean or Japanese; \
+`browser_ko_ja_pct` is the share of all visitors whose BROWSER asks for Korean \
+or Japanese, which is a ceiling, not usage. English is the default for every \
+new arrival, so a low first figure beside a high second one is the expected \
+state and not a fault. Mention them only when one has moved; never subtract \
+them, and never call the second one usage.
 - Do not recommend actions. Do not speculate about causes you cannot see.
 
 Output STRICT JSON only, no markdown fences: {"lead": "..."}"""
@@ -811,7 +947,15 @@ def llm_payload(data: dict) -> dict:
             for r in data["events"]["rows"][:3]
         ],
         "total_custom_events": data["events"]["total_events"],
+        # Percentages only, both pre-computed, each against its own denominator.
+        # The counts behind them are withheld for the reason in this docstring:
+        # given both operands the model writes a share across the two.
+        "language": {
+            "ui_non_english_pct": data["locale"]["ui_non_english_pct"],
+            "browser_ko_ja_pct": data["locale"]["browser_ko_ja_pct"],
+        },
         # Labels only, in rank order. No counts.
+        "top_browser_language_labels": [r.get("lang") for r in data["locale"]["browser_rows"][:3]],
         "top_referrer_labels": [r.get("source") for r in data["referrers"][:3]],
         "top_country_labels": [r.get("country") for r in data["countries"][:3]],
         "top_route_labels": [r.get("route") for r in data["routes"][:3]],
