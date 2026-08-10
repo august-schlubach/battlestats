@@ -190,6 +190,13 @@ in the email body, because 13% beside 45% reads as a 32-point shortfall unless t
 they are different populations. A day before the beacon shipped renders as **unmeasured**, never as
 0%. Neither query takes a `LIMIT`: a truncated row set would silently shrink a denominator.
 
+They can also differ in **span**, not just population. When the beacon saw under
+`UI_COVERAGE_CAVEAT_PCT` (90%) of the day's visitors, the section says so outright. The motivating
+case is 2026-08-10 itself: the beacon deployed at 15:49 UTC, so the first live send (2026-08-11)
+reports a UI figure covering roughly eight hours against a browser figure covering twenty-four.
+The check is generic rather than date-pinned, so it also catches stale-bundle drift later and goes
+quiet on its own from 2026-08-11 onward.
+
 The model that writes the lead paragraph gets **only the two pre-computed percentages**, never the
 counts behind them — the same withholding rule the rest of that script already follows, since
 handed both operands it divides one by the other and calls the browser ceiling usage. The payload
@@ -209,4 +216,4 @@ Verified against the working tree at `worktree-locale-beacon` and prod Umami on 
 | the other 9 are documented omissions, not a backlog | `ko.ts` NEEDS-NATIVE-CHECK block; research doc |
 | beacon behaviour (7 cases) | `app/components/__tests__/LocaleBeacon.test.tsx` |
 | email Language section, both denominators | `test_daily_traffic_email.py` `LocaleTests` + `RenderTests` |
-| the email section against real prod data | dry run on the droplet, 2026-08-10, day 2026-08-09 |
+| the email section against real prod data | dry run on the droplet, 2026-08-10, day 2026-08-09 — exercised the **unmeasured** branch only, since that day predates the beacon; the populated branch is fixture-tested and first runs live on 2026-08-11 |

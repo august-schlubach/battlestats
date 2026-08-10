@@ -494,6 +494,14 @@ def _locale_summary(raw: dict) -> dict:
         "browser_non_english_pct": _pct(browser_non_en, browser_total),
         "browser_ko_ja": browser_cjk,
         "browser_ko_ja_pct": _pct(browser_cjk, browser_total),
+        # What fraction of the day's visitors the beacon saw at all. Below 100
+        # means the UI share above is drawn from a subset of the day, for any of
+        # three reasons: a cached bundle predating the beacon, a visitor who
+        # never triggered a full page load, or the deploy day itself, where the
+        # beacon existed for only part of the day while the browser-language
+        # half covered all 24 hours. Without this the two shares look like one
+        # population measured two ways.
+        "ui_coverage_pct": _pct(ui_total, browser_total),
     }
 
 
@@ -561,6 +569,23 @@ def _table(headers: list[str], rows: list[list], note: str = "") -> str:
     return (
         "<table style='border-collapse:collapse;font-size:13px;width:100%;margin:4px 0 14px'>"
         f"<tr>{head}</tr>{body}</table>{tail}"
+    )
+
+
+# Below this, the UI share is drawn from too small a slice of the day to be read
+# beside the browser figure without saying so. 90 rather than 100 because a few
+# visitors on stale bundles are normal and unremarkable.
+UI_COVERAGE_CAVEAT_PCT = 90
+
+
+def _ui_coverage_caveat(loc: dict) -> str:
+    pct = loc.get("ui_coverage_pct")
+    if pct is None or pct >= UI_COVERAGE_CAVEAT_PCT:
+        return ""
+    return (
+        f" Note that the beacon reported for {loc['ui_visitors']} of the day's "
+        f"{loc['browser_visitors']} visitors ({pct}%), so the interface figure is drawn from a "
+        "subset of this day and is not comparable to the browser figure at face value."
     )
 
 
@@ -771,7 +796,9 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
         + (f" ({loc['browser_ko_ja_pct']}%)" if loc["browser_ko_ja_pct"] is not None else "")
         + ", which is the reachable ceiling while ko and ja are the only translations. English "
         "remains the default for every new arrival; the gap between the two figures is a "
-        "discoverability measure, not a demand measure.</div>"
+        "discoverability measure, not a demand measure."
+        + _ui_coverage_caveat(loc)
+        + "</div>"
     )
 
     ev = data["events"]
@@ -864,6 +891,11 @@ def render_text(data: dict, lead: str = "") -> str:
         f"  Browser ko/ja {loc['browser_ko_ja']}/{loc['browser_visitors']} visitors "
         f"({loc['browser_ko_ja_pct']}%) -- the reachable ceiling; English is still the default",
     ]
+    if _ui_coverage_caveat(loc):
+        out.append(
+            f"  Beacon coverage {loc['ui_visitors']}/{loc['browser_visitors']} of the day's "
+            f"visitors ({loc['ui_coverage_pct']}%): the UI figure is a subset of this day"
+        )
     out += [f"  {r['visitors']:>3}  browser {r['lang']}" for r in loc["browser_rows"]] or [
         "  (none)"
     ]

@@ -257,6 +257,29 @@ class LocaleTests(SimpleTestCase):
         self.assertEqual(len(loc["browser_rows"]), mod.LOCALE_TOP_N)
         self.assertEqual(loc["browser_visitors"], mod.LOCALE_TOP_N + 4)
 
+    def test_full_beacon_coverage_adds_no_caveat(self):
+        """29 beacon-reporting visitors against 29 for the day: nothing to warn about."""
+        loc = _computed()["locale"]
+        self.assertEqual(loc["ui_coverage_pct"], 100.0)
+        self.assertEqual(mod._ui_coverage_caveat(loc), "")
+
+    def test_partial_beacon_coverage_is_declared_rather_than_left_to_the_reader(self):
+        """The deploy day is the motivating case: the beacon covered its last few
+        hours while browser language covered all 24, so the two shares are not
+        only different populations but different spans."""
+        raw = dict(
+            RAW,
+            locale_active=[
+                {"locale": "en", "visitors": 8, "load_visits": 9},
+                {"locale": "ko", "visitors": 2, "load_visits": 2},
+            ],
+        )
+        email = mod.render(_computed(raw))
+        loc = _computed(raw)["locale"]
+        self.assertEqual(loc["ui_coverage_pct"], 34.5)
+        self.assertIn("drawn from a subset of this day", email["html_body"])
+        self.assertIn("Beacon coverage 10/29", email["text"])
+
     def test_the_locale_queries_read_the_beacon_and_the_session_language(self):
         from datetime import datetime, timedelta, timezone
 
