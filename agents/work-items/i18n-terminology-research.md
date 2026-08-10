@@ -134,6 +134,7 @@ Keys admitted under the generic-chrome tier, with their values:
 | `insights.tabs.activity` | 활동 | アクティビティ |
 | `insights.tabs.profile` | 프로필 | プロフィール |
 | `insights.tabs.efficiency` | 효율 | 効率 |
+| `footer.lastViewed` (added 2026-08-10 — see the note below) | 최근 조회: | 最近見た: |
 | `notFound.title` | 페이지를 찾을 수 없습니다 | ページが見つかりません |
 | `notFound.body` | 요청하신 페이지를 찾을 수 없습니다. | お探しのページは見つかりませんでした。 |
 | `common.award` (EfficiencyBadgeTable's filter-bar label) | 등급 ‡ | 等級 ‡ |
@@ -305,6 +306,22 @@ one of those six is an admittedly-vague coinage. A consistent language beats a
 precise-but-alternating one. `player.section.efficiencyBadges` — the section heading,
 not the tab label — is a different case (a compound noun phrase, not a bare generic
 word) and stays unadmitted.
+
+**Added 2026-08-10 (`footer.lastViewed`), and the reason it was missed matters.**
+This key arrived with the landing recent-players list (v4.9.0), *after* the pass
+that triaged every other key into either a translation or a documented
+NEEDS-NATIVE-CHECK omission, so it was never triaged at all: it sat in the
+untranslated residue looking exactly like a deliberate omission while being an
+ordinary gap. It qualifies for this tier plainly — `최근` is corpus-attested
+(Verified terms, row 61), `조회` and `最近見た` are everyday interface vocabulary,
+and the string labels a row of player links with no WoWS register to get wrong.
+`最近` is deliberately not `直近`, which the same row leaves unattested.
+
+The residue is now pinned by a test (`app/i18n/__tests__/dictionaries.test.ts`,
+`the untranslated residue is exactly the documented NEEDS-NATIVE-CHECK set`), so
+a later key cannot go untriaged the same way: adding one to `en.ts` without
+either translating it or listing it there fails the suite. Coverage after this
+change is 67 of 76 keys (88%) in both locales.
 
 `notFound.title`/`notFound.body` are the client's 404 copy ("Page Not Found" / "The
 requested page could not be found.") — generic application chrome with no game

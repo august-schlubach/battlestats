@@ -14,6 +14,11 @@ export const ja: Partial<Record<StringKey, string>> = {
     'nav.themeLight': 'ライト',
     'nav.themeDark': 'ダーク',
     'nav.themeCurrent': 'テーマ: {label}',
+    // Generic UI chrome, not a NEEDS-NATIVE-CHECK omission — see the matching
+    // comment in ko.ts. 最近 is the everyday word (distinct from 直近, which the
+    // research doc leaves unattested) and 見た carries no WoWS register risk.
+    // It labels a row of player links.
+    'footer.lastViewed': '最近見た:',
     'footer.leaveFeedback': 'フィードバックを送る',
 
     'insights.tabs.activity': 'アクティビティ',

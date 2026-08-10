@@ -150,18 +150,52 @@ into a before/after: the `locale-active` ko/ja share should move from near zero 
 browser-language share. Flipping detection at the same time as the measurement would leave no
 baseline to compare against.
 
-**Precondition, not a cost to weigh: close the dictionary gap first.** `ko.ts` and `ja.ts` carry 66
-of `en.ts`'s 76 keys (87%); a missing key degrades to English by design. Today only the six who
-opted in see a partly-English Korean UI. Detection would hand that mixed state to arrivals who
-never asked, and it would over-reach: most Korean Chrome installs report
-`['ko-KR', 'en-US']` regardless of whether the user reads English comfortably, so ordering
-`navigator.languages` correctly still flips a real fraction of English-preferring visitors into an
-87%-complete Korean UI. Ship the missing 10 keys before the flag, not after.
+**The residue is a decision, not a backlog — corrected 2026-08-10.** An earlier draft of this
+section called the untranslated keys a gap to close before flipping detection. That was wrong.
+`ko.ts`'s `NEEDS-NATIVE-CHECK` block omits each of them on the record: unattested connectives
+(`vs`, `timeline`), our own coinages (`efficiencyBadges`, `tabsAriaLabel`), `winRateVsSurvival`
+(생존율 has no corpus hit), and `landing.treemap.infoLabel` (the panel it opens is out of
+localization scope, so a translated trigger would announce an English panel). The project's
+standard is to omit rather than guess, and a missing key degrades to English by design.
+
+One key was a genuine gap: `footer.lastViewed` arrived with v4.9.0, after the triage pass, and was
+never sorted either way. Shipped 2026-08-10 under the generic-chrome tier. Coverage is now 67/76
+(88%), and `dictionaries.test.ts` pins the remaining nine so nothing goes untriaged again.
+
+**What this means for detection.** The nine stay English until a native speaker clears them, so
+auto-defaulting ships a UI that is Korean or Japanese except for seven chart section headings on
+the player page. Decision of 2026-08-10: **flip anyway** after the baseline. A mostly-translated
+interface the visitor did not have to find beats a fully English one they never chose. Note the
+over-reach honestly: most Korean Chrome installs report `['ko-KR', 'en-US']` regardless of whether
+the user reads English comfortably, so even correct ordering of `navigator.languages` will flip
+some English-preferring visitors; the selector plus the explicit-choice persistence in point 2 is
+what makes that recoverable in one click.
 
 **Not a cloaking risk.** The SSG shell stays English and translation happens client-side after
 mount, so crawler-visible output does not change.
 
-## 6. Assertion ledger
+## 6. The daily traffic email carries this readout
+
+`server/scripts/daily_traffic_email.py` (timer `battlestats-traffic-digest`, 10:30 UTC) grew a
+**Language** section on 2026-08-10, so the numbers above arrive daily without anyone running SQL.
+It prints two tables that must never be read as one:
+
+- **UI locale in effect**, from `locale-active`. Denominator: beacon-reporting visitors, *not* the
+  day's visitors, since a visitor on a cached pre-v5.2.1 bundle reports nothing.
+- **Browser language**, folded to the primary subtag. Denominator: every visitor, since one
+  language per session partitions the day exactly.
+
+Both shares are computed in Python (`_locale_summary`) and printed with their denominators stated
+in the email body, because 13% beside 45% reads as a 32-point shortfall unless the reader is told
+they are different populations. A day before the beacon shipped renders as **unmeasured**, never as
+0%. Neither query takes a `LIMIT`: a truncated row set would silently shrink a denominator.
+
+The model that writes the lead paragraph gets **only the two pre-computed percentages**, never the
+counts behind them — the same withholding rule the rest of that script already follows, since
+handed both operands it divides one by the other and calls the browser ceiling usage. The payload
+key set is pinned by `test_payload_keys_are_an_explicit_allowlist`.
+
+## 7. Assertion ledger
 
 Verified against the working tree at `worktree-locale-beacon` and prod Umami on 2026-08-10:
 
@@ -171,5 +205,8 @@ Verified against the working tree at `worktree-locale-beacon` and prod Umami on 
 | `?lang=` is not persisted | `LocaleContext.tsx resolveInitialLocale` (no `setItem` on the URL branch) |
 | head script reads only `localStorage` for the locale | `layout.tsx` inline script |
 | 7 switch events, 6 non-English, 0 `?lang=` arrivals | prod Umami, section 2 queries |
-| ko/ja dictionaries at 66/76 keys | key count over `app/i18n/{en,ko,ja}.ts` |
+| ko/ja dictionaries at 67/76 keys after `footer.lastViewed` | `dictionaries.test.ts` coverage line |
+| the other 9 are documented omissions, not a backlog | `ko.ts` NEEDS-NATIVE-CHECK block; research doc |
 | beacon behaviour (7 cases) | `app/components/__tests__/LocaleBeacon.test.tsx` |
+| email Language section, both denominators | `test_daily_traffic_email.py` `LocaleTests` + `RenderTests` |
+| the email section against real prod data | dry run on the droplet, 2026-08-10, day 2026-08-09 |

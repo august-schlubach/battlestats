@@ -92,6 +92,20 @@ RAW = {
     ],
     "countries": [{"country": "US", "visitors": 8}],
     "devices": [{"device": "desktop", "visitors": 20}],
+    # 29 beacon-reporting visitors, 4 of them non-English.
+    "locale_active": [
+        {"locale": "en", "visitors": 25, "load_visits": 40},
+        {"locale": "ko", "visitors": 3, "load_visits": 4},
+        {"locale": "ja", "visitors": 1, "load_visits": 1},
+    ],
+    # 29 visitors partitioned by browser language: 13 ko/ja, 15 non-English.
+    "browser_language": [
+        {"lang": "en", "visitors": 13},
+        {"lang": "ko", "visitors": 8},
+        {"lang": "ja", "visitors": 5},
+        {"lang": "de", "visitors": 2},
+        {"lang": "??", "visitors": 1},
+    ],
     "events": [
         {
             "event_name": "ship-leaderboard-filter",
@@ -204,6 +218,59 @@ class EventSummaryTests(SimpleTestCase):
         self.assertEqual(mod._event_family("player-insights-profile"), "player-insights")
 
 
+class LocaleTests(SimpleTestCase):
+    """The locale block's two halves answer different questions. Nothing here may
+    let them share a denominator: `ui_*` counts only beacon-reporting visitors,
+    `browser_*` counts every visitor."""
+
+    def test_ui_share_is_taken_against_beacon_reporting_visitors(self):
+        loc = _computed()["locale"]
+        self.assertEqual(loc["ui_visitors"], 29)
+        self.assertEqual(loc["ui_non_english"], 4)
+        self.assertEqual(loc["ui_non_english_pct"], 13.8)
+
+    def test_browser_share_counts_every_visitor_and_folds_unknowns_out_of_non_english(self):
+        loc = _computed()["locale"]
+        self.assertEqual(loc["browser_visitors"], 29)
+        # ko 8 + ja 5; the reachable ceiling while those are the only two locales.
+        self.assertEqual(loc["browser_ko_ja"], 13)
+        self.assertEqual(loc["browser_ko_ja_pct"], 44.8)
+        # de counts as non-English, '??' (unset language) does not.
+        self.assertEqual(loc["browser_non_english"], 15)
+
+    def test_a_day_before_the_beacon_shipped_yields_no_share_rather_than_zero(self):
+        """Absent instrumentation is not 0% adoption, and the email must not
+        print it as such."""
+        raw = dict(RAW, locale_active=[])
+        loc = _computed(raw)["locale"]
+        self.assertEqual(loc["ui_visitors"], 0)
+        self.assertIsNone(loc["ui_non_english_pct"])
+        # The demand half still reports; it predates the beacon entirely.
+        self.assertEqual(loc["browser_ko_ja"], 13)
+
+    def test_browser_rows_are_truncated_for_display_only_never_for_the_denominator(self):
+        raw = dict(
+            RAW,
+            browser_language=[{"lang": f"l{i}", "visitors": 1} for i in range(mod.LOCALE_TOP_N + 4)],
+        )
+        loc = _computed(raw)["locale"]
+        self.assertEqual(len(loc["browser_rows"]), mod.LOCALE_TOP_N)
+        self.assertEqual(loc["browser_visitors"], mod.LOCALE_TOP_N + 4)
+
+    def test_the_locale_queries_read_the_beacon_and_the_session_language(self):
+        from datetime import datetime, timedelta, timezone
+
+        lo = datetime(2026, 8, 8, tzinfo=timezone.utc)
+        sqls = mod.build_sqls("w-id", lo, lo + timedelta(days=1), lo - timedelta(days=7))
+        self.assertIn("we.event_name = 'locale-active'", sqls["locale_active"])
+        self.assertIn("ed.data_key = 'locale'", sqls["locale_active"])
+        # No LIMIT on either: a truncated set would give the shares above a
+        # denominator that silently excludes the tail.
+        self.assertNotIn("LIMIT", sqls["locale_active"])
+        self.assertNotIn("LIMIT", sqls["browser_language"])
+        self.assertIn("split_part", sqls["browser_language"])
+
+
 class PathTests(SimpleTestCase):
     def test_percent_encoded_player_names_are_decoded_for_display(self):
         self.assertEqual(mod._pretty_path("/player/%5BDJMAX%5D"), "/player/[DJMAX]")
@@ -270,6 +337,32 @@ class RenderTests(SimpleTestCase):
         text = self.email["text"]
         self.assertIn("Visitors             29", text)
         self.assertIn("new 13 (44.8%); returning 16 (55.2%)", text)
+
+    def test_language_section_states_both_denominators_in_the_email_itself(self):
+        """A reader seeing 13.8% beside 44.8% must be told they are not the same
+        population, or the pair reads as a 31-point shortfall in adoption."""
+        self.assertIn("Language", self.html)
+        self.assertIn("UI locale in effect", self.html)
+        self.assertIn("Browser language", self.html)
+        self.assertIn("denominator is beacon-reporting visitors, not the day", self.html)
+        self.assertIn("reachable ceiling", self.html)
+        self.assertIn("English remains the default", self.html)
+
+    def test_a_day_with_no_beacon_events_reads_as_unmeasured_not_as_zero(self):
+        """Every day before 2026-08-10 has no beacon data. Printing "0 (None%)"
+        would read as nobody using a non-English UI, which is a different claim."""
+        email = mod.render(_computed(dict(RAW, locale_active=[])))
+        self.assertIn("(no locale-active events)", email["html_body"])
+        self.assertIn("unmeasured rather than zero", email["html_body"])
+        self.assertIn("Browser language", email["html_body"])
+        self.assertIn("UI locale unmeasured on this day", email["text"])
+        self.assertNotIn("None%", email["html_body"])
+        self.assertNotIn("None%", email["text"])
+
+    def test_text_alternative_carries_the_language_split(self):
+        text = self.email["text"]
+        self.assertIn("UI non-English 4/29 beacon-reporting visitors (13.8%)", text)
+        self.assertIn("Browser ko/ja 13/29 visitors (44.8%)", text)
 
     def test_duration_is_rendered_as_minutes_and_seconds(self):
         self.assertEqual(mod._duration(248), "4m 08s")
@@ -567,9 +660,24 @@ class LlmPayloadTests(SimpleTestCase):
             {
                 "day", "headline", "identity", "engagement", "top_event_names",
                 "total_custom_events", "top_referrer_labels", "top_country_labels",
-                "top_route_labels",
+                "top_route_labels", "language", "top_browser_language_labels",
             },
         )
+
+    def test_language_is_two_precomputed_percentages_with_no_operands(self):
+        """The two shares have different denominators. Handed the counts, the
+        model would divide one by the other and call the browser ceiling usage."""
+        self.assertEqual(
+            set(self.payload["language"]), {"ui_non_english_pct", "browser_ko_ja_pct"}
+        )
+        self.assertEqual(self.payload["language"]["ui_non_english_pct"], 13.8)
+        self.assertEqual(self.payload["language"]["browser_ko_ja_pct"], 44.8)
+        # The exact key set above already excludes the count fields; these check
+        # they did not reach the model by some other route. Only names that are
+        # not substrings of the two surviving keys can be asserted this way.
+        for withheld in ("ui_visitors", "browser_visitors", "browser_rows", "ui_rows"):
+            self.assertNotIn(withheld, self.blob)
+        self.assertTrue(all(isinstance(v, float) for v in self.payload["language"].values()))
 
     def test_referrer_and_country_counts_are_withheld(self):
         self.assertNotIn("referrers", self.payload)
@@ -578,7 +686,12 @@ class LlmPayloadTests(SimpleTestCase):
         self.assertEqual(self.payload["top_country_labels"], ["US"])
 
     def test_label_lists_carry_no_numbers_at_all(self):
-        for key in ("top_referrer_labels", "top_country_labels", "top_route_labels"):
+        for key in (
+            "top_referrer_labels",
+            "top_country_labels",
+            "top_route_labels",
+            "top_browser_language_labels",
+        ):
             for item in self.payload[key]:
                 self.assertIsInstance(item, str)
 
