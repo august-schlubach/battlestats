@@ -3593,6 +3593,32 @@
                 "growth-instrumentation-retired"
             ]
         },
+        "agents/runbooks/runbook-locale-adoption-measurement-2026-08-10.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "frontend",
+            "aliases": [
+                "locale adoption",
+                "locale-active beacon",
+                "non-english usage",
+                "browser language defaulting",
+                "locale measurement 2026-08-10"
+            ],
+            "tags": [
+                "analytics",
+                "umami",
+                "i18n",
+                "locale",
+                "measurement",
+                "frontend"
+            ],
+            "archive_on": [
+                "locale-autodetect-shipped",
+                "locale-feature-retired"
+            ]
+        },
         "agents/runbooks/runbook-django-6-upgrade-2026-07-30.md": {
             "kind": "runbook",
             "status": "active",

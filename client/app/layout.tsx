@@ -15,6 +15,7 @@ import { RealmProvider } from "./context/RealmContext";
 import { DegradationProvider } from "./context/DegradationContext";
 import ConnectionHint from "./components/ConnectionHint";
 import VisitorIdentity from "./components/VisitorIdentity";
+import LocaleBeacon from "./components/LocaleBeacon";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -92,6 +93,7 @@ export default function RootLayout({
                   {/* Gated identically to the tracker tag above: without the
                       script there is nothing to identify. */}
                   {enableUmami ? <VisitorIdentity /> : null}
+                  {enableUmami ? <LocaleBeacon /> : null}
                   <ConnectionHint />
                   {children}
                 </main>
