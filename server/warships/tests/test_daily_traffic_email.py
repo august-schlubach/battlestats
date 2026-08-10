@@ -381,6 +381,9 @@ class RenderTests(SimpleTestCase):
         self.assertIn("UI locale unmeasured on this day", email["text"])
         self.assertNotIn("None%", email["html_body"])
         self.assertNotIn("None%", email["text"])
+        # No coverage caveat on top: it would qualify a figure never printed.
+        self.assertNotIn("Beacon coverage", email["text"])
+        self.assertNotIn("drawn from a subset of this day", email["html_body"])
 
     def test_text_alternative_carries_the_language_split(self):
         text = self.email["text"]

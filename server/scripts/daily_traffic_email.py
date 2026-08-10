@@ -582,6 +582,11 @@ def _ui_coverage_caveat(loc: dict) -> str:
     pct = loc.get("ui_coverage_pct")
     if pct is None or pct >= UI_COVERAGE_CAVEAT_PCT:
         return ""
+    # Zero coverage is the unmeasured case, which both renderers already state
+    # plainly. Adding "the UI figure is a subset" on top of it would qualify a
+    # figure that was never printed.
+    if not loc.get("ui_visitors"):
+        return ""
     return (
         f" Note that the beacon reported for {loc['ui_visitors']} of the day's "
         f"{loc['browser_visitors']} visitors ({pct}%), so the interface figure is drawn from a "
