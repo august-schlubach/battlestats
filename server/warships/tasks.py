@@ -1817,22 +1817,44 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
             realm,
             core_only,
         )
-        summary = run_clan_crawl(
-            resume=resume,
-            dry_run=dry_run,
-            limit=limit,
-            heartbeat_callback=lambda ts=None: touch_clan_crawl_heartbeat(
-                timestamp=ts, realm=realm),
-            realm=realm,
-            core_only=core_only,
-            fresh_after=fresh_after,
-        )
+        from warships.clan_crawl import CrawlUpstreamFailure
+        try:
+            summary = run_clan_crawl(
+                resume=resume,
+                dry_run=dry_run,
+                limit=limit,
+                heartbeat_callback=lambda ts=None: touch_clan_crawl_heartbeat(
+                    timestamp=ts, realm=realm),
+                realm=realm,
+                core_only=core_only,
+                fresh_after=fresh_after,
+            )
+        except CrawlUpstreamFailure as exc:
+            # The upstream went down mid-pass. Deliberately skip BOTH the yield
+            # snapshot (it would describe a partial walk as a full pass and
+            # poison the benchmark series) and the marker clear (the marker is
+            # what lets the next dispatch resume instead of restarting at clan
+            # 0). No re-dispatch here: the watchdog only revives crawls that died
+            # holding a lock, so the realm waits for its next daily Beat rather
+            # than retry-storming a still-broken upstream.
+            logger.error(
+                "crawl_all_clans_task aborted for realm=%s after %d consecutive "
+                "upstream failures; pass marker kept at %s for resume: %s",
+                realm, exc.consecutive_failures, fresh_after, exc.summary)
+            return {
+                "status": "aborted",
+                "reason": "upstream-failures",
+                "consecutive_failures": exc.consecutive_failures,
+                **exc.summary,
+            }
         # A normal return means the pass walked the entire clan list, so emit
         # the per-pass yield snapshot (then clear) and clear the marker; the
-        # next scheduled run starts a fresh full pass. An interrupting exception
-        # (SoftTimeLimit / SIGTERM) skips this, leaving the marker so the
-        # redelivered task resumes where this one stopped (and keeps the partial
-        # yield aggregate accumulating into the same pass).
+        # next scheduled run starts a fresh full pass. Everything that does NOT
+        # reach here keeps the marker so the pass can be resumed instead of
+        # restarted: an interrupting exception (SoftTimeLimit / SIGTERM), whose
+        # redelivered task continues where this one stopped, and the
+        # CrawlUpstreamFailure abort above. In every one of those cases the
+        # partial yield aggregate keeps accumulating into the same pass.
         if not dry_run:
             try:
                 from warships.clan_crawl import emit_crawl_yield_snapshot

@@ -87,6 +87,38 @@ CRAWL_YIELD_BUCKETS = (
 )
 
 
+class CrawlUpstreamFailure(RuntimeError):
+    """Raised when a run of consecutive per-clan fetch failures says the upstream
+    is down rather than that a few clans are dead, so the pass must abort instead
+    of walking the rest of the list and returning as if it had completed.
+
+    Carries the partial `summary` so the caller can log what the pass did manage,
+    and `consecutive_failures` so the abort reason is legible in the logs.
+    """
+
+    def __init__(self, summary: dict, consecutive_failures: int = 0):
+        self.summary = summary
+        self.consecutive_failures = consecutive_failures
+        super().__init__(
+            f"aborting crawl pass after {consecutive_failures} consecutive "
+            f"clan fetch failures (processed {summary.get('clans_processed')}, "
+            f"failed {summary.get('clans_failed')})")
+
+
+def _max_consecutive_clan_failures() -> int:
+    """Consecutive failed `clans/info/` fetches that abort the pass; 0 disables.
+
+    A healthy pass fails essentially nothing (0 in 9,625 NA clans, 1 in a full EU
+    pass observed 2026-08-11), so 25 sits far above the noise floor. Aborting
+    early is cheap: the pass marker survives, so the next dispatch resumes and
+    skips every clan already walked.
+    """
+    try:
+        return int(os.getenv("CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES", "25"))
+    except ValueError:
+        return 25
+
+
 def _crawl_yield_enabled() -> bool:
     return os.getenv("CRAWL_YIELD_INSTRUMENT_ENABLED", "1") == "1"
 
@@ -421,6 +453,19 @@ def crawl_clan_ids(limit: Optional[int] = None, heartbeat_callback: Optional[Cal
     return all_clans
 
 
+def _crawl_summary(clans_processed: int, clans_failed: int, players_saved: int,
+                   skipped: int, yield_counts: Dict[str, int]) -> dict:
+    """One shape for both the completed return and the aborted exception payload,
+    so a partial pass reports the same keys as a full one."""
+    return {
+        "clans_processed": clans_processed,
+        "clans_failed": clans_failed,
+        "players_saved": players_saved,
+        "skipped": skipped,
+        "yield": yield_counts,
+    }
+
+
 def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_callback: Optional[Callable[[], None]] = None, realm: str = DEFAULT_REALM, core_only: bool = False, request_delay: float = 0.25, fresh_after: Optional[datetime] = None) -> dict:
     from warships.data import refresh_clan_cached_aggregates, reconcile_clan_departures
 
@@ -428,6 +473,17 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
     clans_processed = 0
     players_saved = 0
     skipped = 0
+
+    # Upstream-failure guard. A dead clan fails its info fetch and is skipped,
+    # which is right for one clan and wrong for the whole list: on 2026-08-10 WG's
+    # NA clans/info went to 504 and then stopped resolving, and the pass walked
+    # 4,324 of 35,898 clans, failed the other 31,573, and still returned normally
+    # — so the caller emitted a yield snapshot describing 12% coverage as a full
+    # pass and cleared the resume marker. `clans_failed` makes that visible in the
+    # summary; a run of `max_consecutive_failures` aborts the pass instead.
+    clans_failed = 0
+    consecutive_failures = 0
+    max_consecutive_failures = _max_consecutive_clan_failures()
 
     # Yield-by-source instrumentation. `cutoff` (computed once) classifies each
     # saved player; `yield_counts` is this execution's running total returned in
@@ -461,9 +517,29 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
         info = fetch_clan_info(clan_id, realm=realm,
                                request_delay=request_delay)
         if not info:
-            log.warning("[%d/%d] Failed to fetch info for clan %d",
-                        i, total, clan_id)
+            clans_failed += 1
+            consecutive_failures += 1
+            log.warning("[%d/%d] Failed to fetch info for clan %d (%d in a row)",
+                        i, total, clan_id, consecutive_failures)
+            if (max_consecutive_failures
+                    and consecutive_failures >= max_consecutive_failures):
+                # Flush first: the aggregate is what the resumed pass continues
+                # accumulating into, so the counts earned before the outage must
+                # not die with this execution.
+                if yield_enabled:
+                    _flush_crawl_yield(realm, pass_id, yield_pending)
+                log.error(
+                    "Aborting crawl pass (realm=%s) at clan %d/%d after %d "
+                    "consecutive failed info fetches — treating this as an "
+                    "upstream outage, not %d dead clans. The pass marker is "
+                    "kept so the next dispatch resumes here.",
+                    realm, i, total, consecutive_failures, consecutive_failures)
+                raise CrawlUpstreamFailure(
+                    _crawl_summary(clans_processed, clans_failed,
+                                   players_saved, skipped, yield_counts),
+                    consecutive_failures=consecutive_failures)
             continue
+        consecutive_failures = 0
 
         clan = save_clan(info, realm=realm)
         members_count = info.get("members_count", 0)
@@ -514,14 +590,10 @@ def crawl_clan_members(clan_stubs: List[Dict], resume: bool = False, heartbeat_c
         _flush_crawl_yield(realm, pass_id, yield_pending)
         yield_pending = {}
 
-    log.info("Done. Clans processed: %d, skipped: %d, players saved: %d",
-             clans_processed, skipped, players_saved)
-    return {
-        "clans_processed": clans_processed,
-        "players_saved": players_saved,
-        "skipped": skipped,
-        "yield": yield_counts,
-    }
+    log.info("Done. Clans processed: %d, failed: %d, skipped: %d, players saved: %d",
+             clans_processed, clans_failed, skipped, players_saved)
+    return _crawl_summary(clans_processed, clans_failed, players_saved,
+                          skipped, yield_counts)
 
 
 def run_clan_crawl(

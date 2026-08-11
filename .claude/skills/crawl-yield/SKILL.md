@@ -83,6 +83,25 @@ keep accruing into Redis and emit nothing). Say so plainly, note the per-realm
 crawl schedule (eu ~03:00, na ~09:00, asia ~22:00 UTC start; a pass runs many
 hours), and stop. Do not invent a reading.
 
+**A missing pass may be an aborted pass.** Since 2026-08-11 a run of
+`CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES` (25) failed `clans/info/` fetches aborts the
+pass, which deliberately emits **no snapshot** and keeps its pass marker for
+resume. So a gap in a realm's series is ambiguous between "still in flight" and
+"aborted on an upstream outage"; resolve it from the worker log, never from the
+snapshot directory:
+
+```bash
+ssh root@battlestats.online 'journalctl -u battlestats-celery-crawls --since "3 days ago" --no-pager | grep -E "Aborting crawl pass|Starting fresh clan crawl|Resuming clan crawl|crawl-yield realm"'
+```
+
+Before the abort existed, a total upstream failure produced the *opposite* and
+worse artefact: a snapshot describing a fraction of the realm as a completed pass
+(2026-08-10 NA, 93,353 classified vs ~275,800 healthy). **Treat any historical
+snapshot far below its realm's band as suspect coverage, not a real yield
+collapse** — check `players_classified` against the realm's other passes before
+reading anything into `yield_frac`, which rises spuriously when the walked subset
+skews active. Runbook: `runbook-crawl-upstream-failure-abort-2026-08-11.md`.
+
 ### 2. Select comparison points BY realm, then by `captured_at`
 
 Snapshots are **per realm** — a file is one realm's one completed pass. Group by

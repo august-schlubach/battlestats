@@ -1,0 +1,91 @@
+# Runbook — Clan-crawl upstream-failure abort (2026-08-11)
+
+_Created: 2026-08-11_
+_Context: the `crawl_low_classified:na` ops-email condition of 2026-08-11 traced to a WG outage during the 2026-08-10 NA pass, which the crawl recorded as a completed pass._
+_QA: 1,122 backend tests pass; 7 new tests in `warships/tests/test_clan_crawl.py`; the yield-flush test was verified to fail with the flush removed._
+
+## Purpose
+
+Two things live here. First, the 2026-08-10 incident record: what a total upstream failure did to a clan-crawl pass and to the crawl-yield benchmark series. Second, the contract of the fix (`clans_failed` + the consecutive-failure abort), so a future reader knows what an `aborted` pass means, why no snapshot appears for it, and which knob to turn if the abort ever misfires.
+
+Read this when a crawl-yield snapshot looks impossibly small, when a pass reports `status: aborted`, or before changing `CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES`.
+
+## Timeline (all UTC, 2026-08-10 unless noted)
+
+| Time | Event |
+|---|---|
+| 09:30:05 | Fresh NA pass stamped (`Starting fresh clan crawl pass`); the 08-07 pass had completed 08-09 15:22 and cleared its own marker |
+| 09:31:50 | Clan list collected in full: **35,898 IDs across 359 pages**; no pagination truncation |
+| 12:24:24 | Last healthy progress line: 4,075 clans processed, 87,515 players saved |
+| 12:37:50 | WG `clans/info/` starts returning `{'code': 504, 'message': 'SOURCE_NOT_AVAILABLE'}`; **21,289 occurrences** through 13:49:08 |
+| 13:47:58 | Second failure mode overlaps and takes over: `NameResolutionError` on `api.worldofwarships.com` (`Errno -2`), **10,284 occurrences** in the crawls worker (+550 background, +141 hydration) through 14:08:48 |
+| 14:08:48 | Pass **returns normally** after failing clans 4326→35898 (**31,573 clans**) in ~91 min; emits the yield snapshot and clears the pass marker |
+| 08-11 09:00 | Next fresh NA pass starts and runs clean (0 failed fetches); recovery needed no intervention |
+| 08-11 11:32 | Ops email fires `crawl_low_classified:na` (93,353 < 150,000) |
+
+Rate check: failures ran at ~5.4/sec because a failed fetch skips all downstream work, which is why a third of the realm burned through in 91 minutes.
+
+## Root cause (upstream, not local)
+
+Two sequential Wargaming-side failures on the NA endpoint. **No `407 REQUEST_LIMIT_EXCEEDED` appears anywhere in the window**, so pacing and the fail-open Redis token bucket are not implicated; this was not self-inflicted quota exhaustion. (The pass logged `request_delay=0.100s` at start, observed live in the crawls journal 2026-08-10; that is `CLAN_CRAWL_CORE_ONLY_RATE_LIMIT_DELAY` acting, since prod runs `CLAN_CRAWL_CORE_ONLY=1` — confirmed live via `check_env_drift.sh` 2026-08-11. Do not treat 0.100 as a documented default.)
+
+The DNS half is also not the droplet: `Name or service not known` totals **10,975 across all units over seven days, every one inside the 13:00–14:00 hours of 08-10**. `systemd-resolved` was active and logged no unit events in the window, `/etc/resolv.conf` was unchanged (`nameserver 127.0.0.53`), and all three realm hosts resolved normally afterward. A WG hostname failing to resolve while that same host returns 504 reads as one WG-side incident escalating.
+
+Impact was bounded and self-healing: one NA catalog-refresh pass covered ~12% of clans; lost yield for the pass was 237 `discovered_active` + 1,449 `reactivated`. Any later fresh pass re-walks everything.
+
+## The defect the incident exposed
+
+A per-clan fetch failure did `continue` without incrementing any counter, and the summary had no failure key. So `run_clan_crawl` **returned normally** and `crawl_all_clans_task` did three wrong things in sequence:
+
+1. emitted a crawl-yield snapshot describing a 12% walk as a completed pass, permanently poisoning that point in the benchmark series;
+2. cleared the pass marker, discarding the resume for 31,573 unwalked clans;
+3. reported `status: completed`.
+
+Neither existing guard could catch it. `crawl_bucket_mismatch` is structurally blind: the five buckets partitioned 93,353 correctly because the walked subset was internally consistent. `crawl_classified_min = 150,000` caught this **only by magnitude** — a pass losing half its clans would land near 180,000 and be absorbed as healthy.
+
+## The fix
+
+`server/warships/clan_crawl.py`:
+
+- `clans_failed` is counted and returned in the summary, alongside a `consecutive_failures` run counter reset by every successful info fetch. `_crawl_summary()` builds one shape for both the completed return and the aborted payload, so a partial pass reports the same keys as a full one.
+- When the run reaches `CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES` (default **25**, `0` disables), the pass raises `CrawlUpstreamFailure(summary, consecutive_failures=…)` instead of walking the rest of the list.
+- The abort **flushes the pending yield counts first**. The Redis aggregate is what a resumed pass keeps accumulating into, so counts earned before the outage must not die with the aborted execution.
+
+`server/warships/tasks.py` — `crawl_all_clans_task` catches `CrawlUpstreamFailure` and deliberately skips **both** the snapshot emit and the marker clear, returning `{"status": "aborted", "reason": "upstream-failures", "consecutive_failures": N, …summary}`.
+
+### Why 25, and why aborting is cheap
+
+A healthy pass fails essentially nothing: **0 failed fetches in 9,625 NA clans** and **1 in a full EU pass**, both observed 2026-08-11. So 25 sits far above the noise floor while still tripping ~5 seconds into an outage.
+
+Aborting costs almost nothing because the marker survives: the next dispatch resumes and the run-scoped resume skip drops every clan already walked. A false abort therefore costs one clan-list re-fetch (~2 min), not a re-walk.
+
+### Why there is no retry and no backoff
+
+Deliberate. After a clean abort the task's `finally` clears the lock and heartbeat, so no lock and no pending flag remain — and `ensure_crawl_all_clans_running_task` only revives crawls that **died holding a lock** or lost a queued message. With neither present the watchdog returns `idle` and leaves it to the scheduler. The realm therefore waits for its next daily Beat rather than retry-storming a still-broken upstream. No extra backoff logic was needed; the dispatch topology already provides it.
+
+## Reading an aborted pass
+
+- **No crawl-yield snapshot is written.** A gap in a realm's snapshot series is now ambiguous between "pass still in flight" and "pass aborted"; resolve it from the worker log, not the snapshot directory.
+- Grep the abort: `journalctl -u battlestats-celery-crawls | grep "Aborting crawl pass"`. The line names the realm, the clan index reached, and the consecutive-failure count.
+- The per-failure warning now carries the run length (`Failed to fetch info for clan N (M in a row)`), so an outage is distinguishable from scattered dead clans at a glance.
+- Ops-email detection latency: an abort trips nothing immediately. Repeated aborts surface via `snapshot_stale:crawl-yield:<realm>` once the newest snapshot passes `crawl_max_age_hours = 168.0` (7 days). See Follow-ups.
+
+## Validation
+
+- 7 new tests in `server/warships/tests/test_clan_crawl.py`: `ClanCrawlUpstreamFailureAbortTests` (counter, abort, early stop, reset-on-success, threshold-0 escape hatch, yield flush) and `ClanCrawlAbortBookkeepingTests` (aborted pass keeps the marker and emits nothing; completed pass still emits and clears).
+- Each was watched failing first. The yield-flush test was additionally verified by removing the flush and confirming it fails `None != 1`, so it is known to catch the absence rather than merely pass.
+- Full backend suite: 1,122 passed, 2 skipped.
+- `clans_failed` is additive: no consumer outside the crawl reads the summary dict (`grep` for `clans_processed` finds only `clan_crawl.py` and the task), and the benchmark/skill readers parse snapshots, not summaries.
+
+## Follow-ups
+
+- **Ops-email condition for aborts.** No condition fires on an aborted pass today; the 7-day `snapshot_stale` window is the only backstop. A `crawl_pass_aborted:<realm>` condition would need a signal the ops email can read (it reads snapshots, not journals) — for example, having the abort write a small `status: aborted` marker file into the crawl-yield directory that `gather_crawl_yield` skips for trend purposes but `_evaluate_crawl` can see. Deliberately out of scope here.
+- **`fetch_member_ids` has the same shape.** A clan whose member fetch returns `[]` still increments `clans_processed`, so an outage confined to that call would again look healthy. Left alone because empty rosters are legitimate and the observed failure mode was `clans/info/`; revisit if it ever bites.
+- **Consider raising `crawl_classified_min`.** At 150,000 against a ~275,000 healthy NA pass, a pass can lose 45% of the realm and stay quiet. The abort makes this less load-bearing, but the threshold is still loose.
+
+## Related
+
+- `agents/runbooks/runbook-crawls-queue-depth-alarm-2026-06-12.md` — the pending-flag dedup and watchdog topology the no-retry decision rests on
+- `agents/runbooks/archive/runbook-na-crawl-restart-loop-starves-refresh-2026-06-05.md` (archived) — the run-scoped resume marker the abort preserves
+- `agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md` — where `crawl_low_classified` and `crawl_max_age_hours` are defined
+- `.claude/skills/crawl-yield/SKILL.md` — the per-pass yield readout

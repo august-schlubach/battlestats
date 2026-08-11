@@ -3861,6 +3861,36 @@
             "archive_on": [
                 "notifier-and-digest-shipped-and-verified"
             ]
+        },
+        "agents/runbooks/runbook-crawl-upstream-failure-abort-2026-08-11.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "incident",
+            "owner": "platform",
+            "aliases": [
+                "crawl upstream failure abort",
+                "crawl low classified",
+                "clan crawl aborted pass",
+                "crawl 504 source not available",
+                "crawl failure counter",
+                "why is the crawl-yield snapshot small"
+            ],
+            "tags": [
+                "clan-crawl",
+                "crawl-yield",
+                "wargaming-api",
+                "outage",
+                "incident",
+                "abort",
+                "pass-marker",
+                "benchmark-snapshots",
+                "ops-email"
+            ],
+            "archive_on": [
+                "clan-crawl-decommissioned",
+                "crawl-yield-instrument-removed"
+            ]
         }
     }
 }

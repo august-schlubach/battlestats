@@ -255,6 +255,157 @@ class ClanCrawlResumeWindowTests(TestCase):
         self.assertTrue(mock_info.called)
 
 
+class ClanCrawlUpstreamFailureAbortTests(TestCase):
+    """A total upstream failure must not be reported as a completed pass.
+
+    On 2026-08-10 WG's NA `clans/info/` went to 504 SOURCE_NOT_AVAILABLE and then
+    stopped resolving; the pass had walked 4,324 of 35,898 clans, failed the
+    remaining 31,573 in ~91 min, and returned normally — so the task emitted a
+    yield snapshot describing 12% coverage as a full pass and cleared the pass
+    marker, discarding the resume. A run of consecutive per-clan fetch failures
+    now aborts the pass instead. See runbook-crawl-upstream-failure-abort.
+    """
+
+    def _run(self, side_effect, threshold="25", **kwargs):
+        """Walk one clan per `side_effect` entry; None entries are fetch failures.
+
+        members_count=0 keeps the per-clan path to the info fetch alone, so the
+        only failure under test is fetch_clan_info returning None.
+        """
+        stubs = [{"clan_id": 7100 + i} for i in range(len(side_effect))]
+        effects = [
+            None if info is None
+            else {"clan_id": stub["clan_id"], "name": "C", "tag": "C",
+                  "members_count": 0}
+            for info, stub in zip(side_effect, stubs)
+        ]
+        env = {"CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES": threshold}
+        with patch.dict(os.environ, env):
+            with patch("warships.clan_crawl.fetch_clan_info") as mock_info:
+                mock_info.side_effect = effects
+                result = crawl_clan_members(
+                    stubs, resume=False, realm="na", core_only=True,
+                    request_delay=0, **kwargs)
+        return result, mock_info
+
+    def test_summary_counts_failed_clan_fetches(self):
+        # Below the threshold the pass completes, but the failure is now visible.
+        result, _ = self._run([True, None, True])
+        self.assertEqual(result["clans_failed"], 1)
+        self.assertEqual(result["clans_processed"], 2)
+
+    def test_consecutive_failures_abort_the_pass(self):
+        from warships.clan_crawl import CrawlUpstreamFailure
+        with self.assertRaises(CrawlUpstreamFailure):
+            self._run([None] * 6, threshold="3")
+
+    def test_abort_stops_walking_instead_of_burning_the_rest_of_the_list(self):
+        from warships.clan_crawl import CrawlUpstreamFailure
+        try:
+            self._run([None] * 20, threshold="3")
+        except CrawlUpstreamFailure as exc:
+            self.assertEqual(exc.summary["clans_failed"], 3)
+            self.assertEqual(exc.summary["clans_processed"], 0)
+            self.assertEqual(exc.consecutive_failures, 3)
+        else:
+            self.fail("expected CrawlUpstreamFailure")
+
+    def test_successful_fetch_resets_the_consecutive_run(self):
+        # Isolated failures around a healthy clan must not accumulate into an abort.
+        result, _ = self._run([None, None, True, None, None], threshold="3")
+        self.assertEqual(result["clans_failed"], 4)
+        self.assertEqual(result["clans_processed"], 1)
+
+    def test_threshold_zero_disables_the_abort(self):
+        # Escape hatch: the pre-fix behaviour, should the abort ever misfire.
+        result, _ = self._run([None] * 5, threshold="0")
+        self.assertEqual(result["clans_failed"], 5)
+        self.assertEqual(result["clans_processed"], 0)
+
+    def test_abort_flushes_yield_counts_earned_before_the_outage(self):
+        """The Redis aggregate is what the resumed pass keeps accumulating into,
+        so counts earned before the abort must be flushed on the way out.
+
+        Without the flush, everything since the last 25-clan checkpoint dies with
+        the aborted execution and the eventual snapshot under-reports the pass.
+        """
+        from warships.clan_crawl import CrawlUpstreamFailure
+        cache.clear()
+        fresh_after = timezone.now()
+        stubs = [{"clan_id": 7200 + i} for i in range(3)]
+        with patch.dict(os.environ, {
+                "CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES": "2",
+                "CRAWL_YIELD_INSTRUMENT_ENABLED": "1"}):
+            with patch("warships.clan_crawl.fetch_clan_info") as mock_info, \
+                    patch("warships.clan_crawl.fetch_member_ids") as mock_members, \
+                    patch("warships.clan_crawl.fetch_players_bulk") as mock_bulk:
+                # One healthy clan yielding one net-new active player, then the
+                # upstream dies for the rest of the list.
+                mock_info.side_effect = [
+                    {"clan_id": 7200, "name": "C", "tag": "C",
+                     "members_count": 1},
+                    None, None,
+                ]
+                mock_members.return_value = [9500]
+                mock_bulk.return_value = {"9500": {
+                    "account_id": 9500, "nickname": "p",
+                    "last_battle_time": int(timezone.now().timestamp()),
+                    "statistics": {"battles": 10, "pvp": {
+                        "battles": 10, "wins": 5, "losses": 5, "frags": 6,
+                        "survived_battles": 4}}}}
+                with self.assertRaises(CrawlUpstreamFailure):
+                    crawl_clan_members(
+                        stubs, resume=False, realm="na", core_only=True,
+                        request_delay=0, fresh_after=fresh_after)
+
+        from warships import clan_crawl
+        pass_id = clan_crawl._crawl_yield_pass_id(fresh_after)
+        agg = cache.get(clan_crawl._crawl_yield_key("na", pass_id))
+        self.assertEqual((agg or {}).get("discovered_active"), 1)
+
+
+class ClanCrawlAbortBookkeepingTests(TestCase):
+    """An aborted pass must keep the pass marker (so the next dispatch resumes
+    where it stopped) and must NOT emit a yield snapshot describing the partial
+    walk as a full pass."""
+
+    def setUp(self):
+        cache.clear()
+
+    def _marker(self, realm="na"):
+        from warships.tasks import _clan_crawl_pass_marker_key
+        return cache.get(_clan_crawl_pass_marker_key(realm))
+
+    @patch("warships.clan_crawl.emit_crawl_yield_snapshot")
+    @patch("warships.clan_crawl.run_clan_crawl")
+    def test_aborted_pass_keeps_marker_and_emits_no_snapshot(
+            self, mock_run, mock_emit):
+        from warships.clan_crawl import CrawlUpstreamFailure
+        from warships.tasks import crawl_all_clans_task
+        mock_run.side_effect = CrawlUpstreamFailure(
+            {"clans_processed": 4324, "clans_failed": 25, "players_saved": 93355,
+             "skipped": 0, "yield": {}},
+            consecutive_failures=25,
+        )
+        res = crawl_all_clans_task.apply(kwargs={"realm": "na"}).get()
+        self.assertEqual(res["status"], "aborted")
+        self.assertEqual(res["clans_failed"], 25)
+        mock_emit.assert_not_called()
+        self.assertIsNotNone(self._marker("na"))
+
+    @patch("warships.clan_crawl.emit_crawl_yield_snapshot")
+    @patch("warships.clan_crawl.run_clan_crawl")
+    def test_completed_pass_still_emits_and_clears_the_marker(
+            self, mock_run, mock_emit):
+        from warships.tasks import crawl_all_clans_task
+        mock_run.return_value = {"clans_processed": 1, "clans_failed": 0,
+                                 "players_saved": 0, "skipped": 0, "yield": {}}
+        res = crawl_all_clans_task.apply(kwargs={"realm": "na"}).get()
+        self.assertEqual(res["status"], "completed")
+        mock_emit.assert_called_once()
+        self.assertIsNone(self._marker("na"))
+
+
 class ClanCrawlEnqueueDedupTests(TestCase):
     """Option B (runbook-crawls-queue-depth-alarm-2026-06-12): the daily Beat
     cron + watchdog enqueue through a per-realm pending flag so at most one

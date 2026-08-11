@@ -124,7 +124,7 @@ Next.js rewrites `/api/*` to `BATTLESTATS_API_ORIGIN` (default `http://localhost
 
 ### Celery queues
 
-Five queues with dedicated workers: **default** (`-c 3`, light API refreshes), **hydration** (`-c 3`, request-driven upstream refreshes), **background** (`-c 3`, warmers/incrementals/snapshots/enrichment), **floor** (`-c 2`, the observation-floor capture cycles — recency-first, random-only, self-chaining), **crawls** (`-c 1`, the multi-day clan crawl + watchdog only).
+Five queues with dedicated workers: **default** (`-c 3`, light API refreshes), **hydration** (`-c 3`, request-driven upstream refreshes), **background** (`-c 3`, warmers/incrementals/snapshots/enrichment), **floor** (`-c 2`, the observation-floor capture cycles — recency-first, random-only, self-chaining), **crawls** (`-c 1`, the multi-day clan crawl + watchdog only). A clan-crawl pass now **aborts** (`status: aborted`, no yield snapshot, pass marker kept for resume) after `CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES` failed `clans/info/` fetches, so a WG outage stops looking like a completed pass; **a missing crawl-yield snapshot can mean aborted, not in-flight**, and the summary's `clans_failed` is the tell. Runbook: `agents/runbooks/runbook-crawl-upstream-failure-abort-2026-08-11.md`.
 
 Resilience: `CELERY_TASK_ACKS_LATE = True` (at-least-once delivery); RabbitMQ `consumer_timeout` disabled (long tasks); consumer watchdog systemd timer restarts zombie workers (alive process, 0 consumers); soft systemd deps (`Wants=`, not `Requires=`).
 
