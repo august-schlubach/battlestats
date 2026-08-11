@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import PlayerDetail from '../PlayerDetail';
-import { LocaleProvider } from '../../context/LocaleContext';
+import { LocaleProvider, useT } from '../../context/LocaleContext';
 
 // Player-header locale wiring (2026-08-11). Until this round PlayerDetail held
 // ZERO t() calls: a ko/ja visitor got a translated tab strip sitting above an
@@ -138,6 +138,43 @@ describe('PlayerDetail header — locale coverage', () => {
         renderPlayer({ is_hidden: true });
         expect(screen.getByText('このプレイヤーの戦績は非公開です。')).toBeInTheDocument();
         expect(screen.queryByText(/stats are hidden/)).toBeNull();
+    });
+
+    // The case that only exists once NEXT_PUBLIC_LOCALE_AUTODETECT flips: a
+    // ko-browser visitor with NO stored preference. resolveInitialLocale hands
+    // back 'ko' from navigator.languages, but the server prerendered the
+    // English shell, so useDisplayLocale/useT must still resolve English on the
+    // very FIRST render and only correct after mount. LocaleContext.test.tsx
+    // asserts that staging for the stored-locale path against a bare probe;
+    // this asserts it for a DETECTED locale through a real component tree,
+    // which is where a hydration mismatch would actually surface (as a console
+    // error on every ko arrival, in production, on the day of the flip).
+    it('detected locales still render English on the first pass, then Korean', () => {
+        process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+        Object.defineProperty(window.navigator, 'languages', { value: ['ko-KR', 'en-US'], configurable: true });
+        try {
+            let firstRender: string | undefined;
+            const Probe: React.FC = () => {
+                const label = useT()('player.stats.winRate');
+                if (firstRender === undefined) {
+                    // eslint-disable-next-line react-hooks/globals
+                    firstRender = label;
+                }
+                return <span data-testid="probe">{label}</span>;
+            };
+            render(<LocaleProvider><Probe /></LocaleProvider>);
+            expect(firstRender).toBe('Win Rate');
+            expect(screen.getByTestId('probe')).toHaveTextContent('승률');
+
+            // And the whole header follows, with nothing persisted: detection
+            // must never write bs-locale.
+            renderPlayer();
+            expect(screen.getAllByText('승률').length).toBeGreaterThan(0);
+            expect(localStorage.getItem('bs-locale')).toBeNull();
+        } finally {
+            delete process.env.NEXT_PUBLIC_LOCALE_AUTODETECT;
+            Object.defineProperty(window.navigator, 'languages', { value: ['en-US'], configurable: true });
+        }
     });
 
     it('translates the share button’s accessible name', () => {
