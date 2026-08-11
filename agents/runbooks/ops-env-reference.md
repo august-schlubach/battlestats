@@ -14,6 +14,11 @@ Pass and regenerate the file; do not hand-edit a file as the source of truth. (D
 rsyncs the working tree, so a stale local file silently ships wrong values — see the
 deploy runbooks.)
 
+**One documented exception: the droplet's `/etc/battlestats-client.env`** holds no
+secrets — only origins and `NEXT_PUBLIC_*` feature flags — and is not generated from
+Pass. Its template lives in `client/deploy/bootstrap_droplet.sh`. See the Client env
+section below before adding a key there.
+
 ## Server env files (`server/`, generated from Pass)
 
 - `.env` — non-secret connection values (DB_HOST, DB_ENGINE, DJANGO_ALLOWED_HOSTS)
@@ -175,12 +180,14 @@ Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no li
 
 ## Client env
 
-Sourced from `/etc/battlestats-client.env` on the droplet at frontend **build** time (its values come from Pass like the server env; the deploy script sources the file before `npm run build`). `NEXT_PUBLIC_*` vars are inlined into the bundle at build, so changing one requires a redeploy.
+Sourced from `/etc/battlestats-client.env` on the droplet at frontend **build** time (the deploy script sources the file before `npm run build`). `NEXT_PUBLIC_*` vars are inlined into the bundle at build, so changing one requires a redeploy.
+
+**These are not in Pass, and should not be.** Pass holds secrets; every key in this file is a non-secret origin or feature flag. Their durable home is `client/deploy/bootstrap_droplet.sh`, which writes the file **only when it is absent** — so a fresh droplet gets exactly that template and a flag missing from it is a feature that silently does not exist on the rebuilt host. Both locale flags were live for weeks before being added there (fixed 2026-08-11). **When you set a new client flag on the droplet, add it to that template in the same change.**
 
 - `BATTLESTATS_API_ORIGIN` (default `http://localhost:8888`)
 - `NEXT_PUBLIC_PLAYER_DEWATERFALL` (default off; **prod=1**) — fetch the clan-members rail in parallel with the chart warmup instead of gating it behind warmup. Removes both gates (`warmupSettled` in `PlayerDetail`, `chartFetchesInFlight` in `useClanMembers`). Instantly reversible: set `0` + redeploy frontend. See `runbook-player-fetch-orchestration-2026-06-21.md`.
-- `NEXT_PUBLIC_LOCALE_SELECTOR` (default off; **prod=1** — observed in `/etc/battlestats-client.env` 2026-08-11, set 2026-08-04) — reveals the header language selector. Written straight to the droplet file, so **mirror it into Pass** or a regeneration drops it and the control vanishes.
-- `NEXT_PUBLIC_LOCALE_AUTODETECT` (default off; **prod=0** — key absent from `/etc/battlestats-client.env`, observed 2026-08-11) — browser-language defaulting. On, a visitor who has never chosen a language gets the first locale we support out of `navigator.languages`; precedence becomes `?lang=` > `bs-locale` > `navigator.languages` > `en`. The detected value is never persisted, so one click of the selector overrides it permanently. Two consumers must agree and both read this var: `LocaleContext.resolveInitialLocale` and the pre-paint head script (`app/lib/bootScript.ts`, via `layout.tsx`). Reversible: set `0` + redeploy frontend. Over-reach tell: `locale-switch` → `en` events rising from ko/ja browsers. See `runbook-locale-adoption-measurement-2026-08-10.md` §5.
+- `NEXT_PUBLIC_LOCALE_SELECTOR` (default off; **prod=1** — observed in `/etc/battlestats-client.env` 2026-08-11, set 2026-08-04) — reveals the header language selector.
+- `NEXT_PUBLIC_LOCALE_AUTODETECT` (default off; **prod=1** since v5.3.0 — set in `/etc/battlestats-client.env`, observed 2026-08-11) — browser-language defaulting. On, a visitor who has never chosen a language gets the first locale we support out of `navigator.languages`; precedence becomes `?lang=` > `bs-locale` > `navigator.languages` > `en`. The detected value is never persisted, so one click of the selector overrides it permanently. Two consumers must agree and both read this var: `LocaleContext.resolveInitialLocale` and the pre-paint head script (`app/lib/bootScript.ts`, via `layout.tsx`). Reversible: set `0` + redeploy frontend. Over-reach tell: `locale-switch` → `en` events rising from ko/ja browsers. See `runbook-locale-adoption-measurement-2026-08-10.md` §5.
 - `NEXT_PUBLIC_APP_VERSION` — not in this file; captured at build from the repo-root `VERSION` via `next.config.mjs` (surfaced in the footer). Every version bump needs a client rebuild/deploy.
 
 ## Umami analytics

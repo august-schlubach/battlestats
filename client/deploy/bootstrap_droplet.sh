@@ -51,10 +51,22 @@ fi
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}"
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/releases"
 
+# Written only when absent, so an existing droplet's hand-set flags survive a
+# re-bootstrap. That guard is also why the NEXT_PUBLIC_* lines below matter: a
+# FRESH droplet gets exactly this file and nothing else, so anything omitted
+# here is a feature that silently does not exist on the rebuilt host. Both
+# locale flags were live in prod for weeks before they were added here.
+# Live values + authority: agents/runbooks/ops-env-reference.md (Client env).
 if [ ! -f /etc/battlestats-client.env ]; then
   cat > /etc/battlestats-client.env <<EOF
 BATTLESTATS_API_ORIGIN=${API_ORIGIN}
 BATTLESTATS_APP_ORIGIN=${APP_ORIGIN}
+# Header language selector (en/ko/ja), visible in prod since v5.0.0.
+NEXT_PUBLIC_LOCALE_SELECTOR=1
+# Browser-language defaulting: an unchosen visitor gets the first supported
+# locale in navigator.languages. Live since v5.3.0. Never persisted, so one
+# click of the selector overrides it permanently.
+NEXT_PUBLIC_LOCALE_AUTODETECT=1
 EOF
 fi
 
