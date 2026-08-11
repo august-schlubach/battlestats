@@ -147,14 +147,13 @@ detected case. Landing and player pages screenshotted at 1280px and 390px in bot
 wrap regression.
 
 **What that visual pass also showed, and section 5's earlier "seven chart section headings" did
-not: the player page is mostly English under any locale.** The tab strip translates; the header
-stat cards (Win Rate / PvP Battles / KDR / Survival), the window pills, the metric row, the treemap
-controls and the ships-table headers do not. Dictionary coverage (67/76) measures the *dictionary*,
-not *call-site wiring* — those labels have no `t()` call to resolve. This does not change the
-flip decision (a translated chrome and an English body still beats an all-English page the visitor
-never chose), but it is the honest description of what a detected ko visitor sees, and it makes
-wiring `PlayerDetail.tsx` the highest-value next translation round — which runs into the
-`common.winRate` sentence-vs-title-case trap recorded in section 2's related notes.
+not: the player page was mostly English under any locale.** The tab strip translated; the header
+stat cards, the window pills, the metric row, the treemap controls and the ships-table headers did
+not. Dictionary coverage measures the *dictionary*, not *call-site wiring* — those labels had no
+`t()` call to resolve at all (`PlayerDetail.tsx` held zero).
+
+**Fixed the same day — see section 5b.** The operator's call on being shown this was to wire the
+player page before flipping detection, so the flag lands on the product the decision assumed.
 
 The original analysis follows, unchanged, as the record of why each requirement exists.
 
@@ -190,8 +189,10 @@ localization scope, so a translated trigger would announce an English panel). Th
 standard is to omit rather than guess, and a missing key degrades to English by design.
 
 One key was a genuine gap: `footer.lastViewed` arrived with v4.9.0, after the triage pass, and was
-never sorted either way. Shipped 2026-08-10 under the generic-chrome tier. Coverage is now 67/76
-(88%), and `dictionaries.test.ts` pins the remaining nine so nothing goes untriaged again.
+never sorted either way. Shipped 2026-08-10 under the generic-chrome tier. Coverage was 67/76
+(88%) at that point, and `dictionaries.test.ts` pins the residue so nothing goes untriaged again.
+After the 2026-08-11 player-page round it reads **93/103 (90%)** — 27 keys added, 26 translated,
+one (`battleHistory.tile.windowWr`) added straight to the pinned residue with its reasoning.
 
 **What this means for detection.** The nine stay English until a native speaker clears them, so
 auto-defaulting ships a UI that is Korean or Japanese except for seven chart section headings on
@@ -204,6 +205,44 @@ what makes that recoverable in one click.
 
 **Not a cloaking risk.** The SSG shell stays English and translation happens client-side after
 mount, so crawler-visible output does not change.
+
+## 5b. Player-page wiring (2026-08-11, prerequisite to the flip)
+
+Three components, previously untouched by `t()`: `PlayerDetail.tsx` (the four summary cards, the
+recency and refresh meta lines, the share control's accessible name, the hidden-account notice),
+`BattleHistoryCard.tsx` (window pills, span header, mode caption, the six totals tiles, four of the
+eight ships-table column headers) and `BattleHistoryTreemaps.tsx` (the `battles ×` header and both
+mini-treemap titles).
+
+**A corpus pass came first, and corrected the research doc twice.** Against
+`asia.wows-numbers.com/{ko,ja}/player/<id>/`, whose summary table is the closest register match
+that exists to our card row:
+
+- **Survival** is `생존` / `生還`, not the long-predicted `생존율` / `生存率` — the percentage is
+  the value, so the label is the bare noun. The doc's "Not verified" entry had read as "no word
+  exists"; the word exists, the guess at its shape was wrong.
+- **KDR** is `격침 비율` / `キル/デス比` and **Frags/Battle** is `함선 격침` / `艦船撃沈`,
+  both identifiable because their values match ours row for row.
+
+**What stays English is a ruling, not a gap**: `PvP`/`PvE` (absent from both corpora as display
+text — only as URL query values), `Window WR` (our own framing of a span; omitted in both
+dictionaries and pinned in `dictionaries.test.ts`), the `WR %` / `Overall WR %` / `F/B` columns
+(the WR-stays-Latin rule), and the `WR% | dmg | Kills` pills (Latin as a set, so the control does
+not go mixed-script). Long hover tooltips in the card are still English — the largest remaining
+surface, and the obvious next round.
+
+**The screenshot pass earned its place again — third time.** Wiring the table headers made `티어`
+and `함종` wrap **per character** in the narrow `<th>`s at 390px, and `전투 수 ×` do the same in
+the treemap header: CJK has no spaces, so it breaks anywhere. 638 green tests, a clean lint and a
+clean production build all coexisted with it, because jsdom does no layout. Fixed with
+`whitespace-nowrap` on both. **Never ship a CJK string into a width-constrained control without
+looking at it at 390px.**
+
+English is byte-identical throughout, which is deliberate and asserted: `player.stats.winRate`
+('Win Rate') is a *separate key* from `common.winRate` ('Win rate') precisely so wiring the card
+could not silently restyle live English text — the casing trap the locale spec already recorded.
+The one exception is `battles ×` → `Battles ×`, a source-case change only: that label's container
+carries `uppercase`, so English still paints `BATTLES ×`.
 
 ## 6. The daily traffic email carries this readout
 
@@ -243,7 +282,7 @@ Verified against the working tree at `worktree-locale-beacon` and prod Umami on 
 | `?lang=` is not persisted | `LocaleContext.tsx resolveInitialLocale` (no `setItem` on the URL branch) |
 | head script reads only `localStorage` for the locale | `layout.tsx` inline script |
 | 7 switch events, 6 non-English, 0 `?lang=` arrivals | prod Umami, section 2 queries |
-| ko/ja dictionaries at 67/76 keys after `footer.lastViewed` | `dictionaries.test.ts` coverage line |
+| ko/ja dictionaries at 67/76 keys after `footer.lastViewed`; 93/103 after the 08-11 round | `dictionaries.test.ts` coverage line |
 | the other 9 are documented omissions, not a backlog | `ko.ts` NEEDS-NATIVE-CHECK block; research doc |
 | beacon behaviour (7 cases) | `app/components/__tests__/LocaleBeacon.test.tsx` |
 | email Language section, both denominators | `test_daily_traffic_email.py` `LocaleTests` + `RenderTests` |
@@ -260,3 +299,14 @@ Added 2026-08-11 with the autodetect build:
 | the player page is mostly English under a detected locale | same screenshots — see section 5 |
 | first live traffic email carrying the Language section | droplet journal, 2026-08-11 10:31 UTC: `[ok] sent: … traffic 2026-08-10` |
 | beacon baseline, first 27h | prod Umami: en 50 load-visits, ja 5 (2 visitors), **ko no row**, against 18 ko-browser and 26 ja-browser visits in the same window |
+
+Added 2026-08-11 with the player-page wiring (section 5b):
+
+| assertion | how verified |
+|---|---|
+| 생존/生還, 격침 비율/キル/デス比, 함선 격침/艦船撃沈 | Firecrawl scrape of `asia.wows-numbers.com/{ko,ja}/player/2013061726,…/`, summary-table rows quoted in the research doc |
+| PvP/PvE absent as display text | same two scrapes: zero hits outside `?type=` URL values; namu.wiki `월드 오브 워쉽` also zero |
+| the wiring works (not just the dictionary) | `PlayerDetailLocale.test.tsx` (6) + `BattleHistoryCard.test.tsx`'s locale block (4), rendered under the real dictionaries, each asserting the English literal is *gone* |
+| English is byte-identical | the English case in both suites, plus the deliberate `battles ×` → `Battles ×` source-case exception noted in 5b |
+| no CJK wrap regression | Playwright at 1280px and 390px, ko and ja, dark and light — this is what *found* the two wraps |
+| `Window WR` omission is deliberate | `dictionaries.test.ts` `NEEDS_NATIVE_CHECK` + a test asserting it still renders English under ko |

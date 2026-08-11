@@ -33,6 +33,13 @@ describe('dictionaries', () => {
     // pass cannot quietly guess a rendering, and cannot quietly drop one either
     // — both directions fail here and send the reader to the reasoning first.
     const NEEDS_NATIVE_CHECK: StringKey[] = [
+        // "Window" as a span of time is our own framing, not a WoWS term, and
+        // the 2026-08-11 corpus pass found no analogue: the ja player table
+        // says 期間平均値 for its averages block but never labels a window on
+        // its own, and the ko table's counterpart (전투 평균치) is a different
+        // word entirely. WR itself stays Latin by the documented rule, so a
+        // rendering would be a coinage bolted to an abbreviation.
+        'battleHistory.tile.windowWr',
         'insights.tabsAriaLabel',
         'landing.treemap.infoLabel',
         'player.section.battlesPlayedDistribution',

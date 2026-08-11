@@ -8,6 +8,8 @@ import { usePlayerRequestSignal } from '../context/PlayerRequestScopeContext';
 import wrColor from '../lib/wrColor';
 import { chartColors } from '../lib/chartTheme';
 import { useTheme } from '../context/ThemeContext';
+import { useT } from '../context/LocaleContext';
+import type { StringKey } from '../i18n';
 import { trackEvent } from '../lib/umami';
 import ShipStats from './ShipStats';
 import BattleHistoryTreemaps, { damageRatioColor } from './BattleHistoryTreemaps';
@@ -80,8 +82,11 @@ export interface BattleHistoryPayload {
 }
 
 export type BattleHistoryMode = 'random' | 'ranked';
-const MODE_LABEL: Record<BattleHistoryMode, string> = {
-    random: 'Random Battles', ranked: 'Ranked',
+// Key maps, not literals: the label is resolved through t() at the call site
+// so it follows the live locale. Kept as tables (rather than inlined switches)
+// because every consumer indexes them by the mode/window it already holds.
+const MODE_LABEL_KEY: Record<BattleHistoryMode, StringKey> = {
+    random: 'battleHistory.mode.random', ranked: 'battleHistory.mode.ranked',
 };
 const MODE_TITLE: Record<BattleHistoryMode, string> = {
     random: 'Random battles only',
@@ -291,7 +296,12 @@ const SortableTh: React.FC<SortableThProps> = ({
             aria-sort={active ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
             title={tooltip}
         >
-            <span>{children}</span>
+            {/* whitespace-nowrap is load-bearing for ko/ja, not cosmetic: CJK
+                has no spaces, so 티어/艦種 wrap PER CHARACTER in a narrow th
+                and the header column collapses to a vertical stack. English
+                never showed it (its labels are single unbreakable words), and
+                jsdom does no layout, so only a screenshot catches it. */}
+            <span className="whitespace-nowrap">{children}</span>
             <span className="ml-1 text-[10px]" aria-hidden="true">{arrow || '↕'}</span>
         </th>
     );
@@ -696,9 +706,15 @@ type BattleHistoryWindow = 'day' | 'week' | 'month' | 'fortyfive' | 'year';
 const VISIBLE_WINDOWS: ReadonlyArray<BattleHistoryWindow> = [
     'day', 'week', 'month', 'fortyfive',
 ];
-const WINDOW_LABEL: Record<BattleHistoryWindow, string> = {
-    day: 'Day', week: 'Week', month: 'Month',
-    fortyfive: '45d', year: 'Year',
+// `year` has no pill (see VISIBLE_WINDOWS above) and so no translated key —
+// it is unreachable UI, and inventing a key for it would put an untranslatable
+// string into the dictionaries' coverage denominator.
+const WINDOW_LABEL_KEY: Record<BattleHistoryWindow, StringKey | null> = {
+    day: 'battleHistory.window.day',
+    week: 'battleHistory.window.week',
+    month: 'battleHistory.window.month',
+    fortyfive: 'battleHistory.window.fortyfive',
+    year: null,
 };
 const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
     day: 'Today (UTC calendar date, matching the trend strip\'s last bar)',
@@ -719,7 +735,14 @@ const WINDOW_TITLE_EMPTY: Record<BattleHistoryWindow, string> = {
     fortyfive: 'No battles in the last 45 days',
     year: 'No battles in the last 365 days',
 };
-const WINDOW_HEADER: Record<BattleHistoryWindow, string> = {
+const WINDOW_HEADER_KEY: Record<BattleHistoryWindow, StringKey | null> = {
+    day: 'battleHistory.header.today',
+    week: 'battleHistory.header.last7',
+    month: 'battleHistory.header.last30',
+    fortyfive: 'battleHistory.header.last45',
+    year: null,
+};
+const WINDOW_HEADER_FALLBACK: Record<BattleHistoryWindow, string> = {
     day: 'Today',
     week: 'Last 7 days',
     month: 'Last 30 days',
@@ -787,6 +810,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         ship_id: number; ship_name: string; ship_tier: number | null; ship_type: string | null;
     } | null>(null);
     const { theme } = useTheme();
+    const t = useT();
     const palette = chartColors[theme];
 
     const shipTypeColor = (type: string | null | undefined): string => {
@@ -1106,7 +1130,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             about ranked. Falls back to the window label. */}
                         {mode === 'ranked' && payload?.ranked_season_name
                             ? payload.ranked_season_name
-                            : WINDOW_HEADER[window]}
+                            : (WINDOW_HEADER_KEY[window] ? t(WINDOW_HEADER_KEY[window]!) : WINDOW_HEADER_FALLBACK[window])}
                     </h2>
                     <div className="flex items-center gap-1 text-xs" role="group" aria-label="Lookback window">
                         {VISIBLE_WINDOWS.map((w) => {
@@ -1141,7 +1165,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                                 : 'text-[var(--accent-secondary-mid)] hover:text-[var(--text-strong)]'
                                     }`}
                                 >
-                                    {WINDOW_LABEL[w]}
+                                    {WINDOW_LABEL_KEY[w] ? t(WINDOW_LABEL_KEY[w]!) : w}
                                 </button>
                             );
                         })}
@@ -1161,7 +1185,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         className="rounded bg-[var(--accent-faint)] px-2 py-0.5 text-xs font-semibold text-[var(--accent-dark)]"
                         title={MODE_TITLE[mode]}
                     >
-                        {MODE_LABEL[mode]}
+                        {t(MODE_LABEL_KEY[mode])}
                     </span>
                 </div>
                 {/* Header summary text removed — duplicates the totals tile
@@ -1202,17 +1226,17 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     <div className="mt-4 flex shrink-0 flex-col overflow-hidden rounded-md border border-[var(--border)] bg-[rgba(120,120,120,0.12)] sm:flex-row">
                         <div className="flex flex-1 items-end px-4 py-3">
                         <div className="flex-1 text-center">
-                            <div className="text-xs text-[var(--text-muted)]">Battles</div>
+                            <div className="text-xs text-[var(--text-muted)]">{t('common.battles')}</div>
                             <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.battles)}</div>
                         </div>
                         <div className="flex-1 text-center">
-                            <div className="text-xs text-[var(--text-muted)]">Ships</div>
+                            <div className="text-xs text-[var(--text-muted)]">{t('battleHistory.tile.ships')}</div>
                             <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(distinctShips)}</div>
                         </div>
                         </div>
                         <div className="flex flex-1 items-end border-t border-[var(--border)] px-4 py-3 sm:border-l sm:border-t-0">
                         <div className="flex-1 text-center">
-                            <div className="text-xs text-[var(--text-muted)]">Window WR</div>
+                            <div className="text-xs text-[var(--text-muted)]">{t('battleHistory.tile.windowWr')}</div>
                             <div
                                 className="font-['Courier_New',Courier,monospace] text-2xl font-semibold tabular-nums"
                                 style={{ color: wrColor(totals!.win_rate) }}
@@ -1246,7 +1270,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         </div>
                         <div className="flex flex-1 items-end border-t border-[var(--border)] px-4 py-3 sm:border-l sm:border-t-0">
                         <div className="flex-1 text-center">
-                            <div className="text-xs text-[var(--text-muted)]">Avg damage</div>
+                            <div className="text-xs text-[var(--text-muted)]">{t('battleHistory.tile.avgDamage')}</div>
                             <div className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]">{formatInt(totals!.avg_damage)}</div>
                         </div>
                         {/* One per-battle frag tile — the old "Frags" total
@@ -1256,7 +1280,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                             tooltip; the table's F/B column is this same
                             metric per ship. */}
                         <div className="flex-1 text-center">
-                            <div className="text-xs text-[var(--text-muted)]">Frags/Battle</div>
+                            <div className="text-xs text-[var(--text-muted)]">{t('battleHistory.tile.fragsPerBattle')}</div>
                             <div
                                 className="font-['Courier_New',Courier,monospace] text-2xl font-semibold text-[var(--text-strong)]"
                                 title={`${formatInt(totals!.frags)} frags over ${formatInt(totals!.battles)} battles this window`}
@@ -1341,13 +1365,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 <table className="w-full min-w-[34rem] text-left text-base">
                     <thead>
                         <tr className="border-b border-[var(--accent-faint)] text-xs uppercase tracking-wide text-[var(--text-muted)]">
-                            <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">Ship</SortableTh>
-                            <SortableTh sortKey="ship_tier" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship tier (1–10, with the lowest tier ships being the smallest, less powerful, with the highest tier ships being the largest, most powerful). Click to sort by tier.">Tier</SortableTh>
-                            <SortableTh sortKey="ship_type" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Hull type — DD = Destroyer, CL/CA = Cruiser, BB = Battleship, CV = Carrier, SS = Submarine. Click to sort by type.">Type</SortableTh>
+                            <SortableTh sortKey="ship_name" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship played in the period. Click to sort A–Z.">{t('common.ship')}</SortableTh>
+                            <SortableTh sortKey="ship_tier" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Ship tier (1–10, with the lowest tier ships being the smallest, less powerful, with the highest tier ships being the largest, most powerful). Click to sort by tier.">{t('common.tier')}</SortableTh>
+                            <SortableTh sortKey="ship_type" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Hull type — DD = Destroyer, CL/CA = Cruiser, BB = Battleship, CV = Carrier, SS = Submarine. Click to sort by type.">{t('common.type')}</SortableTh>
                             <SortableTh sortKey="battles" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Battles played on this ship in the selected period. Click to sort by volume.">#</SortableTh>
                             <SortableTh sortKey="win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Win rate over the selected window on this ship. Color codes use Wargaming community thresholds. Click to sort by window WR.">WR %</SortableTh>
                             <SortableTh sortKey="lifetime_win_rate" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Overall (lifetime) win rate and its delta (Δ) vs this window. Click to sort by overall WR.">Overall WR %</SortableTh>
-                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period, colored against the ship's realm-wide 30-day average — red below it, gray at it, green above. Click to sort.">Avg dmg</SortableTh>
+                            <SortableTh sortKey="avg_damage" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Average damage dealt per battle on this ship in the selected period, colored against the ship's realm-wide 30-day average — red below it, gray at it, green above. Click to sort.">{t('common.avgDamage')}</SortableTh>
                             <SortableTh sortKey="kdr" activeKey={sort.key} direction={sort.direction} onSortClick={onSortClick} tooltip="Frags/Battle — average kills per battle this period (frags ÷ battles). Hover a row to see raw frag + battle counts. Click to sort.">F/B</SortableTh>
                         </tr>
                     </thead>

@@ -15,6 +15,7 @@ import TopShipBadges from './TopShipBadges';
 import CopyLinkButton from './CopyLinkButton';
 import type { PlayerClanBattleSummary } from './PlayerClanBattleSeasons';
 import { dispatchPlayerRouteSectionRendered, usePlayerRouteDiagnostics } from './usePlayerRouteDiagnostics';
+import { useT } from '../context/LocaleContext';
 import wrColor from '../lib/wrColor';
 
 interface PlayerDetailProps {
@@ -202,6 +203,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
     // is viewing it.
     const hasClanBattleData = Boolean(player.clan_battle_header_eligible);
     const [clanBattleShield, setClanBattleShield] = useState<ClanBattleShieldState | null>(() => getInitialClanBattleShieldState(player));
+    // useT (not useLocale): every string below is rendered TEXT inside the
+    // server-prerendered shell, so it must resolve English on the first client
+    // render and the real locale after mount.
+    const t = useT();
 
     usePlayerRouteDiagnostics(player.player_id, player.name);
 
@@ -251,13 +256,13 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 {hasEfficiencyRankIcon && efficiencyRankTier ? <EfficiencyRankIcon tier={efficiencyRankTier} percentile={player.efficiency_rank_percentile} populationSize={player.efficiency_rank_population_size} size="header" /> : null}
                                 {!player.is_hidden && <TopShipBadges badges={player.ship_badges} realm={player.realm} size="header" />}
                             </div>
-                            <CopyLinkButton eventName="player-share" ariaLabel="Copy shareable player URL" />
+                            <CopyLinkButton eventName="player-share" ariaLabel={t('player.header.shareAriaLabel')} />
                         </div>
                         <div className="mt-1 flex items-center justify-between gap-3">
                             <p className="text-sm text-[var(--accent-light)]">
                                 {player.days_since_last_battle === 0
-                                    ? 'Last played today'
-                                    : `Last played ${player.days_since_last_battle} days ago`}
+                                    ? t('player.header.lastPlayedToday')
+                                    : t('player.header.lastPlayedDaysAgo', { days: player.days_since_last_battle })}
                             </p>
                             {/* Right group: refresh status floats left of the streamer link
                                 (which stays right-most); refresh alone is right-justified. */}
@@ -274,7 +279,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                                 this pill marks a background freshness top-up of
                                                 the whole profile. "Loading" read as a hang/timeout
                                                 to users when the refresh took tens of seconds. */}
-                                            Updating…
+                                            {t('player.header.updating')}
                                         </span>
                                     ) : refreshStatus.secondsRemaining > 0 ? (
                                         <span
@@ -282,7 +287,7 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                             aria-live="polite"
                                             data-testid="live-refresh-status"
                                         >
-                                            {`Next update: ${Math.ceil(refreshStatus.secondsRemaining / 60)} min`}
+                                            {t('player.header.nextUpdate', { minutes: Math.ceil(refreshStatus.secondsRemaining / 60) })}
                                         </span>
                                     ) : null
                                 ) : null}
@@ -305,10 +310,10 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                     {player.is_hidden ? (
                         <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/40">
                             <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                                This player&apos;s stats are hidden.
+                                {t('player.hidden.title')}
                             </p>
                             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                                The player has set their profile to private. Detailed statistics and charts are not available.
+                                {t('player.hidden.body')}
                             </p>
                         </div>
                     ) : (
@@ -318,25 +323,25 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                     className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3"
                                     style={{ border: `3px solid ${wrColor(player.pvp_ratio)}` }}
                                 >
-                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Win Rate</p>
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">{t('player.stats.winRate')}</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_ratio}%</p>
                                     </div>
                                 </div>
                                 <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">PvP Battles</p>
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">{t('player.stats.pvpBattles')}</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_battles.toLocaleString()}</p>
                                     </div>
                                 </div>
                                 <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">KDR</p>
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">{t('player.stats.kdr')}</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{formatKillRatio(player.actual_kdr ?? null)}</p>
                                     </div>
                                 </div>
                                 <div className="flex min-h-[88px] flex-col rounded-md bg-[var(--accent-faint)] p-3">
-                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">Survival</p>
+                                    <p className="text-xs uppercase tracking-wide text-[var(--accent-light)]">{t('player.stats.survival')}</p>
                                     <div className="flex flex-1 items-center justify-center">
                                         <p className="text-center font-['Courier_New',Courier,monospace] text-3xl font-semibold text-[var(--accent-dark)]">{player.pvp_survival_rate}%</p>
                                     </div>
@@ -348,11 +353,11 @@ const PlayerDetail: React.FC<PlayerDetailProps> = ({
                                 moved up next to "Last played"; PvP Wins removed). */}
                             <div className="mt-4 flex flex-wrap gap-x-8 gap-y-1 text-sm text-[var(--accent-light)]">
                                 <div className="flex items-baseline gap-2">
-                                    <span>Total Battles:</span>
+                                    <span>{t('player.stats.totalBattles')}</span>
                                     <span className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{player.total_battles.toLocaleString()}</span>
                                 </div>
                                 <div className="flex items-baseline gap-2">
-                                    <span>PvE Battles:</span>
+                                    <span>{t('player.stats.pveBattles')}</span>
                                     <span className="font-['Courier_New',Courier,monospace] font-medium text-[var(--accent-mid)]">{pveBattles.toLocaleString()}</span>
                                 </div>
                             </div>

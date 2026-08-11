@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import wrColor from '../lib/wrColor';
 import { trackEvent } from '../lib/umami';
+import { useT } from '../context/LocaleContext';
 import type { BattleHistoryByShip } from './BattleHistoryCard';
 
 // Damage figures on tiles/tooltips: 3 significant digits ("60.3k", "1.2M") —
@@ -389,6 +390,13 @@ const writeColorMetricPref = (scope: string | null | undefined, metric: ShipsCol
 };
 
 // Pill order follows key order: WR% first (the default), then dmg, then Kills.
+// These three stay Latin in every locale, as a set. WR is Latin by the
+// documented rule (the localized wows-numbers tables keep it Latin too); 'dmg'
+// and 'Kills' are compact pills in the same control, and translating one of
+// the three would leave a mixed-script control group rather than close a gap.
+// The TITLES around them are translated — Type/Tier there are the same two
+// words the ships table below renders, and leaving those English was the
+// alternating-language defect this round exists to fix.
 const COLOR_METRIC_LABEL: Record<ShipsColorMetric, string> = {
     wr: 'WR%',
     dmg: 'dmg',
@@ -426,6 +434,7 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
     // Shared color metric (wr | dmg | kills) for ALL THREE maps — one pill row
     // in the ships-panel header drives the ships, type, and tier fills alike.
     // Persisted per player (prefScope); one analytics event per switch.
+    const t = useT();
     const [colorMetric, setColorMetric] = useState<ShipsColorMetric>(DEFAULT_COLOR_METRIC);
     // Hydrate this player's stored pick after mount, not in the useState
     // initializer: a localStorage read during render is invisible to the server
@@ -537,7 +546,10 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
             <MiniTreemap
                 title={(
                     <span className="flex items-center gap-1">
-                        <span>battles ×</span>
+                        {/* One interpolated string, not `{t(…)} ×` — the
+                            latter renders two text nodes and splits the label
+                            for anything matching on its text. */}
+                        <span className="whitespace-nowrap">{`${t('common.battles')} ×`}</span>
                         {(Object.keys(COLOR_METRIC_LABEL) as ShipsColorMetric[]).map((m) => (
                             <button
                                 key={m}
@@ -594,13 +606,13 @@ const BattleHistoryTreemaps: React.FC<BattleHistoryTreemapsProps> = ({
             />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <MiniTreemap
-                    title={`Type × ${COLOR_METRIC_LABEL[colorMetric]}`}
+                    title={`${t('common.type')} × ${COLOR_METRIC_LABEL[colorMetric]}`}
                     ariaLabel={`Battles by ship type, colored by ${METRIC_ARIA[colorMetric]}`}
                     data={typeTiles}
                     height={PANEL_HEIGHT / 2}
                 />
                 <MiniTreemap
-                    title={`Tier × ${COLOR_METRIC_LABEL[colorMetric]}`}
+                    title={`${t('common.tier')} × ${COLOR_METRIC_LABEL[colorMetric]}`}
                     ariaLabel={`Battles by ship tier, colored by ${METRIC_ARIA[colorMetric]}`}
                     data={tierTiles}
                     height={PANEL_HEIGHT / 2}

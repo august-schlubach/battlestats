@@ -10,6 +10,7 @@ import BattleHistoryCard, {
     BATTLE_HISTORY_FETCH_TTL_MS,
 } from '../BattleHistoryCard';
 import { fetchSharedJson } from '../../lib/sharedJsonFetch';
+import { LocaleProvider } from '../../context/LocaleContext';
 
 jest.mock('../../lib/sharedJsonFetch', () => ({
     fetchSharedJson: jest.fn(),
@@ -975,5 +976,81 @@ describe('buildWindowedDays UTC anchoring', () => {
         const last = padded[padded.length - 1];
         expect(last.date).toBe('2026-06-06');
         expect(last.battles).toBe(2);
+    });
+});
+
+
+// Activity-card locale wiring (2026-08-11). The card is the player page's
+// default tab and carries the densest label band on the site; until this round
+// every one of these strings was a hardcoded English literal, so a detected
+// ko/ja visitor read a translated header above an English card. Rendered under
+// the REAL dictionaries — an English-only assertion cannot tell a working t()
+// call from the literal it replaced.
+describe('BattleHistoryCard — locale coverage', () => {
+    beforeEach(() => {
+        localStorage.clear();
+        mockFetchSharedJson.mockReset();
+        mockTrackEvent.mockReset();
+        mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
+    });
+
+    const renderInLocale = async (locale: string) => {
+        localStorage.setItem('bs-locale', locale);
+        resolveWith(buildPayload());
+        render(
+            <LocaleProvider>
+                <BattleHistoryCard playerName="lil_boots" realm="na" />
+            </LocaleProvider>,
+        );
+        await waitFor(() => expect(screen.getByTestId('battle-history-card')).toBeInTheDocument());
+    };
+
+    it('renders the Korean window header, pills, mode caption and totals tiles', async () => {
+        await renderInLocale('ko');
+        expect(screen.getByText('최근 45일')).toBeInTheDocument();
+        expect(screen.getByText('일')).toBeInTheDocument();
+        expect(screen.getByText('주')).toBeInTheDocument();
+        expect(screen.getByText('월')).toBeInTheDocument();
+        expect(screen.getByText('랜덤전')).toBeInTheDocument();
+        expect(screen.getByText('전투 수')).toBeInTheDocument();
+        // Twice: the totals tile and the per-ship column. English abbreviates
+        // the column ('Avg dmg' vs 'Avg damage'); Korean has no such
+        // abbreviation convention, so both render the same word — expected,
+        // not a duplicate-key bug.
+        expect(screen.getAllByText('평균 데미지')).toHaveLength(2);
+        // The corpus's own label for average kills per battle.
+        expect(screen.getByText('함선 격침')).toBeInTheDocument();
+        expect(screen.queryByText('Last 45 days')).toBeNull();
+        expect(screen.queryByText('Frags/Battle')).toBeNull();
+    });
+
+    it('renders the Japanese window header, pills, mode caption and totals tiles', async () => {
+        await renderInLocale('ja');
+        expect(screen.getByText('直近45日間')).toBeInTheDocument();
+        expect(screen.getByText('ランダム戦')).toBeInTheDocument();
+        expect(screen.getByText('戦闘数')).toBeInTheDocument();
+        // Twice, same reason as the Korean case above.
+        expect(screen.getAllByText('平均ダメージ')).toHaveLength(2);
+        expect(screen.getByText('艦船撃沈')).toBeInTheDocument();
+        expect(screen.queryByText('Avg damage')).toBeNull();
+    });
+
+    it('keeps Window WR and the WR columns in English, deliberately', async () => {
+        // Not an oversight: "window" as a span is our own framing with no
+        // corpus analogue (pinned in dictionaries.test.ts's NEEDS_NATIVE_CHECK),
+        // and WR stays Latin in both locales by the documented rule — the
+        // localized wows-numbers tables keep it Latin too.
+        await renderInLocale('ko');
+        expect(screen.getByText('Window WR')).toBeInTheDocument();
+        expect(screen.getByText('WR Δ')).toBeInTheDocument();
+        expect(screen.getByText('WR %')).toBeInTheDocument();
+    });
+
+    it('leaves the English card exactly as it was', async () => {
+        await renderInLocale('en');
+        expect(screen.getByText('Last 45 days')).toBeInTheDocument();
+        expect(screen.getByText('Random Battles')).toBeInTheDocument();
+        expect(screen.getByText('Frags/Battle')).toBeInTheDocument();
+        expect(screen.getByText('Avg damage')).toBeInTheDocument();
     });
 });

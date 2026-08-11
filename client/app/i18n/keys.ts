@@ -35,6 +35,39 @@ export type StringKey =
     | 'player.section.clanBattlesVsWinRate'
     | 'player.section.clanSeasonTimeline'
     | 'player.section.efficiencyBadges'
+    // — player header: the four summary cards, the meta lines, the hidden-
+    //   account notice. Wired 2026-08-11 so a browser-language-detected
+    //   visitor gets a translated page body, not just translated chrome.
+    | 'player.stats.winRate'
+    | 'player.stats.pvpBattles'
+    | 'player.stats.kdr'
+    | 'player.stats.survival'
+    | 'player.stats.totalBattles'
+    | 'player.stats.pveBattles'
+    | 'player.header.lastPlayedToday'
+    | 'player.header.lastPlayedDaysAgo'
+    | 'player.header.updating'
+    | 'player.header.nextUpdate'
+    | 'player.header.shareAriaLabel'
+    | 'player.hidden.title'
+    | 'player.hidden.body'
+    // — Activity card (BattleHistoryCard): window pills, span header, mode
+    //   caption, and the six totals tiles. Long hover tooltips in that file
+    //   stay English for now; see the runbook's remaining-surface note.
+    | 'battleHistory.window.day'
+    | 'battleHistory.window.week'
+    | 'battleHistory.window.month'
+    | 'battleHistory.window.fortyfive'
+    | 'battleHistory.header.today'
+    | 'battleHistory.header.last7'
+    | 'battleHistory.header.last30'
+    | 'battleHistory.header.last45'
+    | 'battleHistory.mode.random'
+    | 'battleHistory.mode.ranked'
+    | 'battleHistory.tile.ships'
+    | 'battleHistory.tile.windowWr'
+    | 'battleHistory.tile.avgDamage'
+    | 'battleHistory.tile.fragsPerBattle'
     // — landing —
     | 'landing.treemap.heading'
     | 'landing.treemap.ariaLabel'

@@ -46,6 +46,59 @@ export const en: Record<StringKey, string> = {
     'player.section.clanSeasonTimeline': 'Clan Season Timeline',
     'player.section.efficiencyBadges': 'Efficiency Badges',
 
+    // PlayerDetail's four summary cards. Deliberately NOT reusing
+    // common.winRate: that key holds sentence-case 'Win rate' and this card
+    // renders TITLE case. Pointing the card at common.winRate would silently
+    // restyle live English text as a side effect of a translation change —
+    // the casing trap recorded in the locale spec's Known traps. Two keys,
+    // one Korean/Japanese value each, is the honest way to keep English
+    // byte-identical while the CJK renderings converge.
+    'player.stats.winRate': 'Win Rate',
+    'player.stats.pvpBattles': 'PvP Battles',
+    'player.stats.kdr': 'KDR',
+    'player.stats.survival': 'Survival',
+    // The colon is part of the string: CJK punctuation and spacing around it
+    // differ, so the separator belongs to the translator, not to the JSX.
+    // Same precedent as footer.lastViewed.
+    'player.stats.totalBattles': 'Total Battles:',
+    'player.stats.pveBattles': 'PvE Battles:',
+
+    // Header meta lines and the hidden-account notice. Generic UI chrome
+    // (recency, refresh state, a privacy notice) — no WoWS jargon beyond
+    // "battle"/"stats", both corpus-attested.
+    'player.header.lastPlayedToday': 'Last played today',
+    'player.header.lastPlayedDaysAgo': 'Last played {days} days ago',
+    'player.header.updating': 'Updating…',
+    'player.header.nextUpdate': 'Next update: {minutes} min',
+    'player.header.shareAriaLabel': 'Copy shareable player URL',
+    // Straight apostrophe, matching what the JSX &apos; entity rendered before
+    // this key existed — English text must come through byte-identical.
+    'player.hidden.title': 'This player\'s stats are hidden.',
+    'player.hidden.body': 'The player has set their profile to private. Detailed statistics and charts are not available.',
+
+    // Activity card. The window pills and their span header are two different
+    // strings for the same span on purpose (pill '45d' vs header 'Last 45
+    // days') — the pill is width-constrained, the header is not.
+    'battleHistory.window.day': 'Day',
+    'battleHistory.window.week': 'Week',
+    'battleHistory.window.month': 'Month',
+    'battleHistory.window.fortyfive': '45d',
+    'battleHistory.header.today': 'Today',
+    'battleHistory.header.last7': 'Last 7 days',
+    'battleHistory.header.last30': 'Last 30 days',
+    'battleHistory.header.last45': 'Last 45 days',
+    'battleHistory.mode.random': 'Random Battles',
+    'battleHistory.mode.ranked': 'Ranked',
+    // Plural, so it cannot reuse common.ship ('Ship', the table column).
+    'battleHistory.tile.ships': 'Ships',
+    // 'Window' here is our own framing of the selected span, not a WoWS term —
+    // untranslated in both locales, see the dictionaries' residue block.
+    'battleHistory.tile.windowWr': 'Window WR',
+    // Distinct from common.avgDamage ('Avg dmg', the narrow table column):
+    // this tile has room for the unabbreviated word and shows it.
+    'battleHistory.tile.avgDamage': 'Avg damage',
+    'battleHistory.tile.fragsPerBattle': 'Frags/Battle',
+
     // Composed at runtime; word order differs per language, so the whole
     // sentence is one template rather than concatenated fragments. {bucket}
     // and {suffix} are themselves resolved through t() in the component

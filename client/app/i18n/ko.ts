@@ -78,6 +78,67 @@ export const ko: Partial<Record<StringKey, string>> = {
     // term for it. This is the weakest attestation in this change, flagged
     // deliberately rather than left to blend in with the rest.
     'common.award': '등급',
+    // PlayerDetail's summary cards and header meta. Corpus pass 2026-08-11
+    // against asia.wows-numbers.com/ko/player/<id>/ — the player summary table
+    // there is the same four-or-five stat rows this card row shows, so it is
+    // the closest possible register match.
+    'player.stats.winRate': '승률',
+    // 생존, NOT 생존율. The research doc's "Not verified" section predicted
+    // 생존율 and found no hit; this pass found the real label, and it has no
+    // 율 suffix — the site's stat row reads `| 생존 | 39.28% |`. Our card is
+    // labelled "Survival" (not "Survival rate"), so the shorter form is also
+    // the exact register match. Do not "correct" this to 생존율.
+    'player.stats.survival': '생존',
+    // The kill/death row on the same table (`| 격침 비율 | 1.16 |`, the same
+    // value the JA page labels キル/デス比). Our English shows the Latin
+    // abbreviation KDR; the corpus never abbreviates this one, unlike WR/PR,
+    // so it is translated rather than left Latin.
+    'player.stats.kdr': '격침 비율',
+    // PvP/PvE stay Latin: neither appears as display text anywhere in the ko
+    // corpus (the only hits are URL query values, `?type=cpvp`). That is the
+    // WR/PR precedent — an abbreviation the community reads untranslated —
+    // combined with the verified noun 전투 수.
+    'player.stats.pvpBattles': 'PvP 전투 수',
+    'player.stats.pveBattles': 'PvE 전투 수:',
+    // NEEDS-NATIVE-CHECK: 전체 is admitted generic chrome (common.all) and
+    // 전투 수 is verified, but the compound is this task's own composition.
+    'player.stats.totalBattles': '전체 전투 수:',
+    // Restructured deliberately, not calqued: English leads with the verb
+    // ("Last played …"), Korean leads with the noun and puts the time after a
+    // colon, which is how the corpus writes the same idea (최근 전적).
+    'player.header.lastPlayedToday': '마지막 전투: 오늘',
+    'player.header.lastPlayedDaysAgo': '마지막 전투: {days}일 전',
+    'player.header.updating': '업데이트 중…',
+    'player.header.nextUpdate': '다음 업데이트: {minutes}분',
+    'player.header.shareAriaLabel': '플레이어 URL 복사',
+    // 전적 is the corpus's word for a player's record (Verified terms table);
+    // 통계 is the formal register, used here for "detailed statistics" where
+    // the sentence is institutional anyway. NEEDS-NATIVE-CHECK on the second
+    // sentence — it is longer prose than anything else in this dictionary.
+    'player.hidden.title': '이 플레이어의 전적은 비공개입니다.',
+    'player.hidden.body': '플레이어가 프로필을 비공개로 설정했습니다. 상세 통계와 차트는 볼 수 없습니다.',
+
+    // Activity card. Pills are generic-chrome calendar words; the span headers
+    // reuse 최근, the corpus's own recency word (Verified terms table).
+    'battleHistory.window.day': '일',
+    'battleHistory.window.week': '주',
+    'battleHistory.window.month': '월',
+    'battleHistory.window.fortyfive': '45일',
+    'battleHistory.header.today': '오늘',
+    'battleHistory.header.last7': '최근 7일',
+    'battleHistory.header.last30': '최근 30일',
+    'battleHistory.header.last45': '최근 45일',
+    // Compact battle-mode forms, the resolved fork: what players write and
+    // what wows-numbers' own tables use.
+    'battleHistory.mode.random': '랜덤전',
+    'battleHistory.mode.ranked': '랭크전',
+    'battleHistory.tile.ships': '함선',
+    'battleHistory.tile.avgDamage': '평균 데미지',
+    // The corpus's own label for average kills per battle, from the "battle
+    // averages" block of the player summary table (`| 함선 격침 | 0.7 |`) —
+    // same metric as our Frags/Battle tile, same register.
+    'battleHistory.tile.fragsPerBattle': '함선 격침',
+
     'common.battles': '전투 수',
     'common.avgDamage': '평균 데미지',
     'common.winRate': '승률',
@@ -118,9 +179,16 @@ export const ko: Partial<Record<StringKey, string>> = {
     //   player.section.efficiencyBadges  ("efficiency" isn't a WoWS term — see
     //   below for why the Efficiency TAB label ships anyway)
     //   insights.tabsAriaLabel  ("insights" as a UI concept is ours, not WG's)
+    //   battleHistory.tile.windowWr  (added 2026-08-11 — "window" as a span is
+    //   our framing; the ko player table's nearest block reads 전투 평균치,
+    //   a different idea, and WR itself stays Latin by the documented rule)
     //
     // Flagged "not verified" in the research doc directly:
-    //   player.section.winRateVsSurvival  (생존율 has no corpus hit)
+    //   player.section.winRateVsSurvival  — HALF-RESOLVED 2026-08-11: the
+    //   corpus pass attested the survival noun after all (생존, not the
+    //   predicted 생존율; see player.stats.survival above). This heading stays
+    //   omitted for the OTHER reason — its "vs" connective, unattested like
+    //   the rest of the compound headings below.
     //
     // Compound headings whose connective isn't attested (nouns are covered
     // individually, but "vs" and "timeline" as constructions are not):

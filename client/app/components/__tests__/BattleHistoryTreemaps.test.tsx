@@ -70,7 +70,11 @@ describe('BattleHistoryTreemaps (presentational)', () => {
         );
         // Ships-panel header: "battles ×" + the shared color-metric pill row,
         // WR% default; the type/tier titles echo the active metric.
-        expect(screen.getByText('battles ×')).toBeInTheDocument();
+        // 'Battles ×' since the label was wired to common.battles (2026-08-11)
+        // — the source case changed, the RENDERED case did not: the container
+        // carries `uppercase`, so English still paints "BATTLES ×". The CJK
+        // typography rule neutralizes that class for ko/ja.
+        expect(screen.getByText('Battles ×')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'WR%' })).toHaveAttribute('aria-pressed', 'true');
         expect(screen.getByRole('button', { name: 'dmg' })).toHaveAttribute('aria-pressed', 'false');
         expect(screen.getByRole('button', { name: 'Kills' })).toHaveAttribute('aria-pressed', 'false');

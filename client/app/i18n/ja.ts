@@ -75,6 +75,60 @@ export const ja: Partial<Record<StringKey, string>> = {
     // term for it. This is the weakest attestation in this change, flagged
     // deliberately rather than left to blend in with the rest.
     'common.award': '等級',
+    // PlayerDetail's summary cards and header meta. Corpus pass 2026-08-11
+    // against asia.wows-numbers.com/ja/player/<id>/ — its player summary table
+    // carries the same stat rows as this card row, the closest register match
+    // available.
+    'player.stats.winRate': '勝率',
+    // 生還, NOT 生存率. The research doc predicted 生存率 and found no hit;
+    // this pass found the site's actual row label (`| 生還 | 39.28% |`).
+    // Do not "correct" this to 生存率.
+    'player.stats.survival': '生還',
+    // The kill/death row on the same table (`| キル/デス比 | 1.16 |`, the
+    // same value the KO page labels 격침 비율). Translated rather than left
+    // Latin because, unlike WR/PR, the corpus never abbreviates this one.
+    'player.stats.kdr': 'キル/デス比',
+    // PvP/PvE stay Latin: neither appears as display text anywhere in the ja
+    // corpus. WR/PR precedent + the verified noun 戦闘数.
+    'player.stats.pvpBattles': 'PvP 戦闘数',
+    'player.stats.pveBattles': 'PvE 戦闘数:',
+    // NEEDS-NATIVE-CHECK: すべて is admitted generic chrome (common.all) and
+    // 戦闘数 is verified, but the compound is this task's own composition.
+    // The page's own "all battles" tab reads 総合, which is a mode name rather
+    // than a count label, so it was not borrowed here.
+    'player.stats.totalBattles': 'すべての戦闘数:',
+    // Restructured deliberately, not calqued — noun first, time after the
+    // colon, matching how the corpus writes recency (最近 / 直近N日).
+    'player.header.lastPlayedToday': '最終戦闘: 本日',
+    'player.header.lastPlayedDaysAgo': '最終戦闘: {days}日前',
+    'player.header.updating': '更新中…',
+    'player.header.nextUpdate': '次の更新: {minutes}分',
+    'player.header.shareAriaLabel': 'プレイヤーURLをコピー',
+    // 戦績 is the corpus's word for a player's record (Verified terms table).
+    // NEEDS-NATIVE-CHECK on the second sentence — longer prose than anything
+    // else in this dictionary.
+    'player.hidden.title': 'このプレイヤーの戦績は非公開です。',
+    'player.hidden.body': 'このプレイヤーはプロフィールを非公開に設定しています。詳細な統計とチャートは表示できません。',
+
+    // Activity card. Pills are generic-chrome calendar words; the span headers
+    // reuse 直近, already shipped in the landing window phrases.
+    'battleHistory.window.day': '日',
+    'battleHistory.window.week': '週',
+    'battleHistory.window.month': '月',
+    'battleHistory.window.fortyfive': '45日',
+    'battleHistory.header.today': '本日',
+    'battleHistory.header.last7': '直近7日間',
+    'battleHistory.header.last30': '直近30日間',
+    'battleHistory.header.last45': '直近45日間',
+    'battleHistory.mode.random': 'ランダム戦',
+    'battleHistory.mode.ranked': 'ランク戦',
+    'battleHistory.tile.ships': '艦艇',
+    'battleHistory.tile.avgDamage': '平均ダメージ',
+    // The corpus's own label for average kills per battle, from the 期間平均値
+    // block of the player summary table (`| 艦船撃沈 | 0.7 |`) — same metric
+    // as our Frags/Battle tile, same register.
+    'battleHistory.tile.fragsPerBattle': '艦船撃沈',
+
     'common.battles': '戦闘数',
     'common.avgDamage': '平均ダメージ',
     'common.winRate': '勝率',
@@ -112,9 +166,15 @@ export const ja: Partial<Record<StringKey, string>> = {
     // Our coinage, no in-game/community term:
     //   player.section.efficiencyBadges  (see below for why the Efficiency
     //   TAB label ships anyway), insights.tabsAriaLabel
+    //   battleHistory.tile.windowWr  (added 2026-08-11 — "window" as a span is
+    //   our framing; 期間平均値 on the ja player table labels an averages
+    //   block, not a window, and WR stays Latin by the documented rule)
     //
     // Explicitly "not verified" in the research doc:
-    //   player.section.winRateVsSurvival  (生存率 has no corpus hit)
+    //   player.section.winRateVsSurvival  — HALF-RESOLVED 2026-08-11: the
+    //   corpus pass attested the survival noun (生還, not the predicted
+    //   生存率; see player.stats.survival above). The heading stays omitted
+    //   for its unattested "vs" connective, like the compounds below.
     //
     // Compound headings — connective ("vs", "timeline") unattested:
     //   player.section.rankedGamesVsWinRate, player.section.clanBattlesVsWinRate,
