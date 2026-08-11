@@ -57,7 +57,19 @@ Neither existing guard could catch it. `crawl_bucket_mismatch` is structurally b
 
 A healthy pass fails essentially nothing: **0 failed fetches in 9,625 NA clans** and **1 in a full EU pass**, both observed 2026-08-11. So 25 sits far above the noise floor while still tripping ~5 seconds into an outage.
 
-Aborting costs almost nothing because the marker survives: the next dispatch resumes and the run-scoped resume skip drops every clan already walked. A false abort therefore costs one clan-list re-fetch (~2 min), not a re-walk.
+For a **transient** outage the abort costs almost nothing: the marker survives, the next dispatch resumes, and the run-scoped resume skip drops every clan already walked, so a false abort costs one clan-list re-fetch (~2 min) rather than a re-walk.
+
+### The failure mode this trade introduces: a persistent block wedges the realm
+
+Read this before concluding the abort is free. The old `continue` was resilient to a **permanently** failing run of clans at the cost of outage blindness; the abort inverts that trade.
+
+If 25+ consecutive clans fail *every* time — a bad ID range, a migrating shard, a WG record bug, rather than an outage — then each day's dispatch resumes on the same marker, skips everything already walked, arrives at the same block, and aborts at the same clan index. **The realm stops making progress until the marker's 21-day TTL expires.**
+
+- **Failure signature:** `Aborting crawl pass` recurring across days at the **same clan index**, for the same realm.
+- **Detection:** a repeat-aborting realm emits no snapshot at all, so its newest crawl-yield snapshot ages out and `snapshot_stale:crawl-yield:<realm>` fires once past `crawl_max_age_hours = 168.0` (7 days). Detectable, but not quickly.
+- **Response:** set `CLAN_CRAWL_MAX_CONSECUTIVE_FAILURES=0` to restore the walk-through-everything behaviour and unwedge the realm immediately, then investigate the clan-ID range the abort index points at.
+
+No loop-detection logic was added: the scenario is unobserved, the wedge is reversible with one env value, and guessing at a detector would be speculative complexity in the path that just caused an incident.
 
 ### Why there is no retry and no backoff
 
@@ -80,7 +92,7 @@ Deliberate. After a clean abort the task's `finally` clears the lock and heartbe
 ## Follow-ups
 
 - **Ops-email condition for aborts.** No condition fires on an aborted pass today; the 7-day `snapshot_stale` window is the only backstop. A `crawl_pass_aborted:<realm>` condition would need a signal the ops email can read (it reads snapshots, not journals) — for example, having the abort write a small `status: aborted` marker file into the crawl-yield directory that `gather_crawl_yield` skips for trend purposes but `_evaluate_crawl` can see. Deliberately out of scope here.
-- **`fetch_member_ids` has the same shape.** A clan whose member fetch returns `[]` still increments `clans_processed`, so an outage confined to that call would again look healthy. Left alone because empty rosters are legitimate and the observed failure mode was `clans/info/`; revisit if it ever bites.
+- **`fetch_players_bulk` is the real unguarded sibling.** It is the only crawl call on a *different* endpoint (`account/info/`, vs `clans/info/` for both `fetch_clan_info` and `fetch_member_ids` — so an outage of the clan endpoint trips the new guard on the first call and never reaches the second). It is also where **100% of the yield comes from**: if it fails wholesale, `player_map` is empty, `clans_processed += 1` still runs, and the pass completes with near-zero `players_saved` — exactly the false-complete just fixed, caught again only by `crawl_low_classified`'s magnitude. Guarding it needs a distinct signal, since an empty `player_map` is legitimate for a clan of hidden accounts.
 - **Consider raising `crawl_classified_min`.** At 150,000 against a ~275,000 healthy NA pass, a pass can lose 45% of the realm and stay quiet. The abort makes this less load-bearing, but the threshold is still loose.
 
 ## Related

@@ -1850,11 +1850,19 @@ def crawl_all_clans_task(self, resume=True, dry_run=False, limit=None, realm=DEF
         # A normal return means the pass walked the entire clan list, so emit
         # the per-pass yield snapshot (then clear) and clear the marker; the
         # next scheduled run starts a fresh full pass. Everything that does NOT
-        # reach here keeps the marker so the pass can be resumed instead of
-        # restarted: an interrupting exception (SoftTimeLimit / SIGTERM), whose
-        # redelivered task continues where this one stopped, and the
-        # CrawlUpstreamFailure abort above. In every one of those cases the
-        # partial yield aggregate keeps accumulating into the same pass.
+        # reach here keeps the marker, so the pass resumes instead of restarting
+        # at clan 0 — but HOW it resumes differs, and conflating the two costs
+        # debugging time:
+        #   - SIGTERM/SIGKILL (deploy, OOM): the message was never acked, so
+        #     acks_late redelivers it and the pass continues within minutes.
+        #   - SoftTimeLimitExceeded and the CrawlUpstreamFailure abort above:
+        #     Celery ACKS a task that raises or returns, so there is NO
+        #     redelivery. The `finally` clears the lock, so the watchdog sees no
+        #     stale lock and reports `idle`. The pass therefore waits for the
+        #     realm's next daily Beat dispatch (observed 2026-08-11: a 14:45 NA
+        #     soft-timeout sat unresumed, correctly, until the next dispatch).
+        # In all cases the partial yield aggregate keeps accumulating into the
+        # same pass_id, so the eventual snapshot covers the whole pass.
         if not dry_run:
             try:
                 from warships.clan_crawl import emit_crawl_yield_snapshot
