@@ -182,10 +182,49 @@ would triple the alert surface for no added detection.
 
 | metric | observed range | threshold | class |
 |---|---|---|---|
-| `players_classified` | na 274.2k .. 275.7k; eu 262.3k .. 473.8k; asia 256.8k .. 260.8k | `< 150,000` | backstop |
+| `players_classified` | steady na 274.2k .. 275.9k; eu 471.7k .. 473.8k; asia 256.8k .. 260.8k | **per realm** (`thr_realm`): na `< 250,000`, eu `< 430,000`, asia `< 235,000`; global fallback `< 150,000` | tuned |
 | `yield_total` (`discovered_active + reactivated`) | na 2,089 .. 7,234; eu 5,234 .. 25,970; asia 3,282 .. 11,150 | `< 200` | backstop |
 | bucket sum vs `players_classified` | exact on 39/39 passes | mismatch alerts | tuned (shape) |
 | `yield_frac` / `overlap_frac` / `discovered_dormant` / `refreshed_active` / `still_dormant` | na `yield_frac` as low as 0.0076; `discovered_dormant` as low as 0 | **none** | see below |
+
+#### `players_classified` went per realm on 2026-08-11 (and this one CAN fire historically)
+
+`players_classified` is a **per-realm catalog size**, not a rate, and the realms
+differ by 1.8× (asia ~260k vs eu ~473k). A single global floor is therefore only
+ever tight for the smallest realm: at `150,000` it tolerated a 45% coverage loss
+on na and **68% on eu**. It let two genuinely partial passes through silently and
+caught the third only by magnitude.
+
+Each realm's healthy band is narrow — the within-realm spread is 0.45%–1.5% over
+seven weeks — so floors sit at ~91% of each realm's observed steady-state minimum,
+leaving 6–19× the observed variation as headroom while detecting a ~9% coverage
+loss:
+
+| realm | steady band (n) | floor | = % of min | env override |
+|---|---|---|---|---|
+| na | 274,188 .. 275,869 (18) | 250,000 | 91.2% | `OPS_ALERT_CRAWL_CLASSIFIED_MIN_NA` |
+| eu | 471,664 .. 473,814 (9) | 430,000 | 91.2% | `OPS_ALERT_CRAWL_CLASSIFIED_MIN_EU` |
+| asia | 256,847 .. 260,796 (12) | 235,000 | 91.5% | `OPS_ALERT_CRAWL_CLASSIFIED_MIN_ASIA` |
+
+**This is the one rule that deliberately breaks the "never fired on the historical
+record" invariant this file otherwise holds.** Backtested against the full
+42-snapshot corpus: 39 quiet, 3 fire, and all 3 are passes that were not healthy
+full walks.
+
+| pass | classified | % of floor | what it was |
+|---|---|---|---|
+| na 2026-08-10 | 93,353 | 37% | the WG `504` + DNS outage; the incident that prompted this |
+| eu 2026-07-17 | 336,000 | 78% | a partial pass the old global floor absorbed **silently** |
+| eu 2026-06-22 | 262,271 | 61% | the instrumentation-rollout first pass, partially accumulated |
+
+The old global fired on 1 of those 3. Note the eu 2026-07-17 pass is why the
+invariant had to give: `crawl_bucket_mismatch` could not see it either, because
+its five buckets summed to 336,000 exactly. A partial pass is internally
+consistent — only its magnitude betrays it.
+
+`yield_total` stays **global and loose on purpose**. Unlike classified it is
+genuinely volatile (a 3–4× swing within one realm) because it tracks real player
+churn rather than catalog size, so a tight floor would cry regression constantly.
 
 No threshold on `yield_frac`, `overlap_frac` or the individual buckets, and this
 is a deliberate refusal, not an oversight. A low `yield_frac` is a **cadence /

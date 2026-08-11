@@ -335,7 +335,33 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "obs_realm_distinct_productive_min": 8000,  # lowest observed 13,142 (asia)
 
     # --- crawl yield, per realm ---
-    "crawl_classified_min": 150000,  # lowest observed 256,800 (asia)
+    # players_classified is PER-REALM CATALOG SIZE, and the realms differ by
+    # 1.8x, so one global floor cannot be tight for all three. Calibrated
+    # 2026-08-11 from the full 42-snapshot corpus. Each realm's healthy band is
+    # remarkably narrow -- the spread within a realm is 0.45%-1.5% across seven
+    # weeks -- so a floor at ~91% of the observed steady-state minimum leaves
+    # 6-19x the observed variation as headroom while catching a ~9% coverage
+    # loss instead of the old 45-68%.
+    #   na    steady 274,188 .. 275,869 (18 passes)  -> 250,000 = 91.2% of min
+    #   eu    steady 471,664 .. 473,814 (9 passes)   -> 430,000 = 91.2% of min
+    #   asia  steady 256,847 .. 260,796 (12 passes)  -> 235,000 = 91.5% of min
+    # This DELIBERATELY breaks this file's usual "never fired on the historical
+    # record" invariant: it fires on the 3 corpus passes that were not healthy
+    # full walks -- na 2026-08-10 (93,353, the WG outage that prompted this),
+    # eu 2026-07-17 (336,000, a partial the old floor absorbed silently), and
+    # eu 2026-06-22 (262,271, the instrumentation-rollout first pass). It stays
+    # silent on all 39 healthy passes. Resolution + env override: `thr_realm`.
+    "crawl_classified_min:na": 250000,
+    "crawl_classified_min:eu": 430000,
+    "crawl_classified_min:asia": 235000,
+    # Global fallback, used only for a realm with no calibrated band (a new
+    # realm). Deliberately loose -- with no observed corpus a tight floor would
+    # just false-fire; add a per-realm entry once a band exists.
+    "crawl_classified_min": 150000,
+    # Yield stays GLOBAL and loose on purpose: unlike classified, yield_total is
+    # genuinely volatile (na 1,686..7,234, eu 5,234..25,970 -- a 3-4x swing
+    # within one realm), because it tracks real player churn rather than catalog
+    # size. A tight yield floor would cry regression constantly.
     "crawl_yield_total_min": 200,    # lowest observed 2,089 (na); 10x below
 
     # --- recapture, per realm ---
@@ -361,6 +387,30 @@ def thr(name: str) -> float:
         except ValueError:
             pass
     return float(DEFAULT_THRESHOLDS[name])
+
+
+def thr_realm(name: str, realm: str) -> float:
+    """Per-realm threshold, falling back to the global one.
+
+    Resolution order, first hit wins:
+      1. env  OPS_ALERT_<NAME>_<REALM>
+      2.      DEFAULT_THRESHOLDS["<name>:<realm>"]
+      3. the global `thr(name)` (env OPS_ALERT_<NAME>, then DEFAULT_THRESHOLDS)
+
+    Exists because some instruments measure a per-realm population rather than a
+    rate, and the realms are not the same size. One global floor on such a metric
+    is only ever tight for the smallest realm.
+    """
+    raw = cfg(f"OPS_ALERT_{name.upper()}_{realm.upper()}", "")
+    if raw.strip():
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    key = f"{name}:{realm}"
+    if key in DEFAULT_THRESHOLDS:
+        return float(DEFAULT_THRESHOLDS[key])
+    return thr(name)
 
 
 def _cond(code: str, detail: str) -> dict:
@@ -528,9 +578,11 @@ def _evaluate_crawl(crawl: dict) -> list[dict]:
         if isinstance(classified, (int, float)) and buckets and bsum != classified:
             out.append(_cond(f"crawl_bucket_mismatch:{r}",
                              f"{r}: buckets sum to {bsum} but players_classified={classified}"))
-        if isinstance(classified, (int, float)) and classified < thr("crawl_classified_min"):
+        classified_floor = thr_realm("crawl_classified_min", r)
+        if isinstance(classified, (int, float)) and classified < classified_floor:
             out.append(_cond(f"crawl_low_classified:{r}",
-                             f"{r}.players_classified={classified} < {thr('crawl_classified_min'):g}"))
+                             f"{r}.players_classified={classified} < {classified_floor:g} "
+                             f"({classified / classified_floor:.0%} of this realm's floor)"))
         yt = L.get("yield_total")
         if isinstance(yt, (int, float)) and yt < thr("crawl_yield_total_min"):
             out.append(_cond(f"crawl_no_yield:{r}",

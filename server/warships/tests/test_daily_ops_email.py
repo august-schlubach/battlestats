@@ -18,6 +18,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -246,6 +247,9 @@ class HealthyInputTests(OpsAlertTestCase):
 # 2. each individual condition sends
 # --------------------------------------------------------------------------- #
 class TrippedConditionTests(OpsAlertTestCase):
+    def assert_quiet(self):
+        self.assertEqual(self.codes(), [])
+
     def assert_fires(self, expected_code_prefix):
         codes = self.codes()
         self.assertTrue(
@@ -361,6 +365,69 @@ class TrippedConditionTests(OpsAlertTestCase):
         obj["buckets"]["still_dormant"] += 5000
         f.write_text(json.dumps(obj))
         self.assert_fires("crawl_bucket_mismatch:eu")
+
+    # -- per-realm classified floor -------------------------------------
+    # Realms differ in size by 1.8x (asia ~260k classified vs eu ~473k), so one
+    # global floor is necessarily loose for the largest realm. The old global
+    # 150,000 tolerated a 68% coverage loss on eu and silently absorbed two
+    # genuinely partial passes: na 2026-08-10 (93,353, the WG outage) and eu
+    # 2026-07-17 (336,000). Floors are now per realm, at ~91% of each realm's
+    # observed steady-state minimum.
+
+    def set_classified(self, realm, classified):
+        """Rewrite a realm's newest pass to `classified`, keeping buckets summed
+        so crawl_bucket_mismatch can't fire and confound the assertion."""
+        d = self.bench / "crawl-yield"
+        f = sorted(d.glob(f"*_{realm}.json"))[-1]
+        obj = json.loads(f.read_text())
+        obj["players_classified"] = classified
+        b = obj["buckets"]
+        b["still_dormant"] = classified - sum(
+            v for k, v in b.items() if k != "still_dormant")
+        f.write_text(json.dumps(obj))
+
+    def test_eu_partial_pass_the_old_global_floor_missed_now_fires(self):
+        # The real 2026-07-17 eu pass: 336,000 of a ~473k realm — 71% coverage,
+        # comfortably above the old 150,000 global, so it never alerted.
+        self.set_classified("eu", 336000)
+        self.assert_fires("crawl_low_classified:eu")
+
+    def test_a_healthy_asia_sized_pass_is_partial_for_eu(self):
+        # 260,000 is a normal asia pass and a 45%-loss eu pass. One global floor
+        # cannot tell those apart; per-realm floors must.
+        self.set_classified("asia", 260000)
+        self.assert_quiet()
+        self.set_classified("eu", 260000)
+        self.assert_fires("crawl_low_classified:eu")
+
+    def test_each_realm_is_quiet_just_above_and_fires_just_below(self):
+        for realm in ("na", "eu", "asia"):
+            floor = doe.thr_realm("crawl_classified_min", realm)
+            with self.subTest(realm=realm, floor=floor):
+                write_healthy_tree(self.bench, self.now)
+                self.set_classified(realm, int(floor) + 1)
+                self.assert_quiet()
+                self.set_classified(realm, int(floor) - 1)
+                self.assert_fires(f"crawl_low_classified:{realm}")
+
+    def test_floors_are_ordered_by_realm_size(self):
+        # Guards the calibration itself: eu is the largest realm and asia the
+        # smallest, so a floor set from the wrong realm's band is caught here.
+        asia = doe.thr_realm("crawl_classified_min", "asia")
+        na = doe.thr_realm("crawl_classified_min", "na")
+        eu = doe.thr_realm("crawl_classified_min", "eu")
+        self.assertLess(asia, na)
+        self.assertLess(na, eu)
+
+    def test_per_realm_env_override_wins(self):
+        with patch.dict(os.environ,
+                        {"OPS_ALERT_CRAWL_CLASSIFIED_MIN_EU": "100000"}):
+            self.set_classified("eu", 336000)
+            self.assert_quiet()
+
+    def test_unknown_realm_falls_back_to_the_global_floor(self):
+        self.assertEqual(doe.thr_realm("crawl_classified_min", "zz"),
+                         doe.thr("crawl_classified_min"))
 
     def test_crawl_yield_collapse_sends(self):
         d = self.bench / "crawl-yield"
