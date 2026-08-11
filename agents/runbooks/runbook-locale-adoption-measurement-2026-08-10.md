@@ -220,9 +220,11 @@ that exists to our card row:
 
 - **Survival** is `생존` / `生還`, not the long-predicted `생존율` / `生存率` — the percentage is
   the value, so the label is the bare noun. The doc's "Not verified" entry had read as "no word
-  exists"; the word exists, the guess at its shape was wrong.
+  exists"; the word exists, the guess at its shape was wrong. *(The ja half was later overturned
+  again — see 5c.)*
 - **KDR** is `격침 비율` / `キル/デス比` and **Frags/Battle** is `함선 격침` / `艦船撃沈`,
-  both identifiable because their values match ours row for row.
+  both identifiable because their values match ours row for row. *(The Frags value was wrong in
+  both languages for a reason a corpus quote cannot show — see 5c.)*
 
 **What stays English is a ruling, not a gap**: `PvP`/`PvE` (absent from both corpora as display
 text — only as URL query values), `Window WR` (our own framing of a span; omitted in both
@@ -243,6 +245,59 @@ English is byte-identical throughout, which is deliberate and asserted: `player.
 could not silently restyle live English text — the casing trap the locale spec already recorded.
 The one exception is `battles ×` → `Battles ×`, a source-case change only: that label's container
 carries `uppercase`, so English still paints `BATTLES ×`.
+
+## 5c. Native terminology audit (2026-08-11) — what a corpus quote cannot tell you
+
+Two independent per-language audits ran over the shipped dictionaries, briefed on ontology rather
+than grammar: *does this term denote exactly the metric our UI attaches it to, in the register WoWS
+players use*. They overturned three of 5b's values and corrected two standing claims. **The 5b
+evidence was not careless — every citation reproduced.** It was the wrong *kind* of evidence for
+two of the calls.
+
+**Finding 1 — context-stripping (both languages, the important one).** A label borrowed from a
+table can depend on a section header we do not render. `함선 격침` / `艦船撃沈` sit under
+`전투 평균치` / `期間平均値` ("battle averages"), which is what made them mean *per battle*. The
+same pages also use those exact strings for a **raw single-battle record count** (ja: beside 武蔵,
+value **10**), so the bare form carries no per-battle sense at all. Our tile has no header — it
+sits beside `전투 수 38`, a raw count — so the borrowed label read as "ships sunk, total". Every
+header-free form in the corpus leads with 평균/平均. Now `평균 격침` / `平均撃沈数`.
+
+  *Generalize this*: when lifting a label out of a dense table, check what the nearest header is
+  doing. Verify the citation reproduces **and** that the borrowed position matches ours.
+
+**Finding 2 — source tier, and the locales legitimately diverge.** ja `生還` → **`生存率`**:
+`生還` is what the localization site writes, `生存率` is what the JP community writes about its own
+stats (`wikiwiki.jp/nanjwows/指標` heading `### 生存率`, ×2, `生還` ×0). This doc's Register target
+is the community's. **ko stays `생존`** — its localizer and its label-register evidence agree
+(bare label, % in the value, no governing header, four pages across two hosts), and KO's `생존률`
+appears only in prose. Divergent on purpose; do not harmonize.
+
+**Finding 3 — ja `common.ship` was the wrong half of a pair.** Its only call site is the column
+whose cells hold ship *names*, and the corpus splits the senses on one page: `艦名` heads that
+column, `艦艇` is the object noun (`艦艇発見数`). Now `艦名`. Korean needs no split — its own table
+heads the same column `함선`.
+
+**Finding 4 — a locale bug outside either dictionary.** The landing window label rendered
+`27 6月 – 10 8月`: `shipSeason.ts` hardcoded day-then-month order *and* read the month name from
+`toLocaleDateString(undefined, …)`, i.e. **the browser's locale, not ours**. That is a contract
+break, not a cosmetic one — it put a Japanese month inside an English page for any ja-browser
+visitor, and `?lang=` could not override it. Now locale-aware and numeric in CJK
+(`6월 1일–30일` / `6月1日–30日`), with the English branch pinned to `en-GB` so no formatter here
+can consult the browser again. Covered by `app/lib/__tests__/shipSeason.test.ts`.
+
+**Also upheld, on better evidence than it shipped with**: `격침 비율` = KDR, proved by arithmetic
+rather than assertion — from one page, 생존 45.39% and 함선 격침 0.52 give frags ÷ deaths =
+0.52 ÷ 0.5461 = 0.952 against that page's printed 격침 비율 of 0.95.
+
+**Evidence-channel caveat.** The Korean audit could not fetch wows-numbers directly (Cloudflare 403
+on every engine) and worked from search-index snippets. Its central claims were re-verified here
+against a **first-party scrape** taken earlier the same day: `함선 격침` at line 56 under
+`| 전투 평균치 |` and again at line 194 as a record count, `평균 격침` heading four header-free
+columns. Snippet-tier evidence, upgraded before acting on it.
+
+**Left open, deliberately**: the card's hover tooltips; the `F/B` and `Overall WR %` columns (gaps,
+not rulings — see the research doc); `common.award` and `feedback.category.languageIssue` (our own
+coinages, unattestable by any corpus); ja `総戦闘数` (search-snippet only, refused).
 
 ## 6. The daily traffic email carries this readout
 
@@ -310,3 +365,15 @@ Added 2026-08-11 with the player-page wiring (section 5b):
 | English is byte-identical | the English case in both suites, plus the deliberate `battles ×` → `Battles ×` source-case exception noted in 5b |
 | no CJK wrap regression | Playwright at 1280px and 390px, ko and ja, dark and light — this is what *found* the two wraps |
 | `Window WR` omission is deliberate | `dictionaries.test.ts` `NEEDS_NATIVE_CHECK` + a test asserting it still renders English under ko |
+
+Added 2026-08-11 with the native audits (section 5c):
+
+| assertion | how verified |
+|---|---|
+| `함선 격침` is header-dependent, `평균 격침` is not | first-party scrape of the ko player page: line 56 under `\| 전투 평균치 \|`, line 194 as a record count, `평균 격침` heading 4 header-free columns |
+| the ja case is identical | same, ja page: line 57 under `\| 期間平均値 \|`, line 195 beside 武蔵 with value **10**; `平均撃破数` heads the header-free per-ship column |
+| `生存率` is the JP community's label form | `wikiwiki.jp/nanjwows/指標` re-fetched here: 生存率 ×2, 生還 ×0, 平均撃沈数 ×2, キル/デス比 ×1 |
+| ja `艦名` heads the ship-NAME column | first-party ja scrape line 378: `\| 艦名 \| Tier \| 国家 \| …` |
+| ja `直近N日` is corpus-attested | first-party ja scrape line 50: `\| 全期間 \| 最近 \| 直近７日 \| …` — the old "no corpus hit" claim was false |
+| the browser-locale leak in the window label | `shipSeason.test.ts` (5 cases, incl. one asserting no CJK month can reach the English branch) |
+| the new values render without CJK wrapping | Playwright, ko + ja at 1280px and 390px, after the change |

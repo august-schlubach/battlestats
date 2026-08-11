@@ -1018,9 +1018,12 @@ describe('BattleHistoryCard — locale coverage', () => {
         // abbreviation convention, so both render the same word — expected,
         // not a duplicate-key bug.
         expect(screen.getAllByText('평균 데미지')).toHaveLength(2);
-        // The corpus's own label for average kills per battle.
-        expect(screen.getByText('함선 격침')).toBeInTheDocument();
+        // 평균 격침, not the corpus's 함선 격침: that form only means "per
+        // battle" under a 전투 평균치 block header we do not render, and the
+        // same page uses it for a raw record count elsewhere.
+        expect(screen.getByText('평균 격침')).toBeInTheDocument();
         expect(screen.queryByText('Last 45 days')).toBeNull();
+        expect(screen.getByText('함선 수')).toBeInTheDocument();
         expect(screen.queryByText('Frags/Battle')).toBeNull();
     });
 
@@ -1031,7 +1034,9 @@ describe('BattleHistoryCard — locale coverage', () => {
         expect(screen.getByText('戦闘数')).toBeInTheDocument();
         // Twice, same reason as the Korean case above.
         expect(screen.getAllByText('平均ダメージ')).toHaveLength(2);
-        expect(screen.getByText('艦船撃沈')).toBeInTheDocument();
+        // 平均撃沈数, not the corpus's bare 艦船撃沈: that form only means
+        // "per battle" under a 期間平均値 section header we do not render.
+        expect(screen.getByText('平均撃沈数')).toBeInTheDocument();
         expect(screen.queryByText('Avg damage')).toBeNull();
     });
 

@@ -80,7 +80,11 @@ describe('RealmTopShipsTreemapSVG — locale coverage (composed-template blocker
                 windowStart: '2026-06-01', windowEnd: '2026-07-01',
             });
             const heading = screen.getByRole('heading');
-            expect(heading.textContent).toBe('NA 서버에서 가장 많이 플레이한 T10 순양함 · 상위 50% · 1–30 Jun');
+            // The window range renders month-first and numerically in ko/ja now
+            // (2026-08-11): it used to read '1–30 Jun' in EVERY locale, and worse,
+            // its month name came from the BROWSER locale, so a ja-browser visitor
+            // saw '6月' inside an English page.
+            expect(heading.textContent).toBe('NA 서버에서 가장 많이 플레이한 T10 순양함 · 상위 50% · 6월 1일–30일');
             expect(heading.textContent).not.toMatch(RAW_TOKEN_LEAK);
             expect(heading.textContent).not.toMatch(ENGLISH_CLAUSE_LEAK);
         });
@@ -170,7 +174,7 @@ describe('RealmTopShipsTreemapSVG — locale coverage (composed-template blocker
                 windowStart: '2026-06-01', windowEnd: '2026-07-01',
             });
             const heading = screen.getByRole('heading');
-            expect(heading.textContent).toBe('NAサーバーで最もプレイされたT10 巡洋艦 · 上位50% · 1–30 Jun');
+            expect(heading.textContent).toBe('NAサーバーで最もプレイされたT10 巡洋艦 · 上位50% · 6月1日–30日');
             expect(heading.textContent).not.toMatch(RAW_TOKEN_LEAK);
             expect(heading.textContent).not.toMatch(ENGLISH_CLAUSE_LEAK);
         });

@@ -58,10 +58,10 @@ Counts are occurrences in the corpus above.
 | Ship type / class (umbrella) | 艦種 | 함종 | `asia.wows-numbers.com/ko/ships/` and `/ja/ships/`, corpus pass 2026-08-04. Appears **twice on the page, in both roles**: as the filter label above the ranking table (`**함종:** 전체 \| 구축함 항공모함 …`) and as a column header in the table itself (`\| 함선 \| 단계 \| 함종 \| 국가 \| …`). Reproduces on both hosts. (Fix round 1 first recorded "column header", a later pass over-corrected to "filter label only"; both were partial — it is both, which is the strongest form of the evidence, since our own use is a filter label.) Distinct from the individual class nouns (전함/戦艦, 순양함/巡洋艦, …) already attested above. Closes the gap the client-locale-toggle spec named as the blocker on `common.type`. |
 | Nation (ship nationality) | 国家 | 국가 | Same 2026-08-04 pass, same page, same dual role as 함종/艦種 above: it labels the nationality filter and heads the nationality column (`\| 함종 \| 국가 \| 전투 \| …`). Closes the gap the spec named as the blocker on `common.nation`. |
 | Top N% (percentile filter, KO only) | — (see note) | 상위{pct}% | **Re-cited, fix round 1** — the original attribution to `asia.wows-numbers.com/ko/ships/` was wrong; re-verification found zero occurrences of `상위` there. The real source is `namu.wiki/w/월드 오브 워쉽` (`상위` ×3). Already shipped as `landing.treemap.topPct`'s Korean value under the generic-chrome tier (2026-08-04, follow-on #1); promoted here now that namu.wiki attests it directly. **Japanese `上位` is NOT promoted** — see the demotion note under Generic UI chrome below; its only hit is a single occurrence on an unvetted source. |
-| Survival (player stat) | 生還 | 생존 | **2026-08-11 pass**, `asia.wows-numbers.com/{ko,ja}/player/<id>/`. The player summary table's own row: `\| 생존 \| 39.28% \|` / `\| 生還 \| 39.28% \|`. Bare noun, no 率/율 — the percentage is the value, not the label, exactly as in our card. Supersedes the "Not verified" entry below, whose predicted 생존율/生存率 appear nowhere. |
-| Kill/death ratio | キル/デス比 | 격침 비율 | Same 2026-08-11 pass, same table (`\| 격침 비율 \| 1.16 \|`, `\| キル/デス比 \| 1.16 \|` — identical value, so the two label the same metric). Our card shows the Latin abbreviation **KDR**; the corpus never abbreviates this one, unlike WR and PR, so it ships translated. |
-| Frags per battle | 艦船撃沈 | 함선 격침 | Same pass, the "battle averages" block (`전투 평균치` / `期間平均値`) of the same table: `\| 함선 격침 \| 0.7 \|`, `\| 艦船撃沈 \| 0.7 \|` — average kills per battle, our Frags/Battle tile's metric exactly. |
-| Recent / last (KO) | — (see note) | 최근 | **Re-cited, fix round 1** — the original attribution was wrong; re-verification found zero occurrences on the `ships/` pages. Real sources: `namu.wiki/w/월드 오브 워쉽` (`최근` ×8) and `asia.wows-numbers.com/ko/` root (`최근 이벤트`, `최근 전적` ×2 — `최근 전적` is exactly our register, "recent record"). Already shipped as the `최근` clause inside `landing.treemap.windowPhraseWithDays`'s and `landing.shipLeaderboard.windowSuffix`'s Korean values; promoted for the same reason as Top N% above. Japanese's `直近`, used in the same two keys, is a *different* word with no corpus hit of its own: it stays unattested and stays a generic-chrome admission (see the admission table below) — this row promotes the Korean word only. |
+| Survival (player stat) | **生存率** | 생존 | **Two sources, two tiers, and the locales end up DIVERGENT — this is deliberate.** The 2026-08-11 corpus pass found the localization site's row (`\| 생존 \| 39.28% \|` / `\| 生還 \| 39.28% \|`) — a bare label, percentage in the value, no block header supplying "rate", reproduced across four player pages on two hosts. The native audit later that day upheld **ko 생존** on exactly that structural ground, and overturned **ja 生還**: JP's best LABEL-register source, `wikiwiki.jp/nanjwows/指標`, carries the heading `### 生存率` (×2 on the page; 生還 ×0), and a player blog enumerating his own stat screen reads `…勝数(勝率)/生存率/ダメージ/平均キル数…`. Where a localizer and the community disagree, this doc's Register target picks the community — and Korean's community evidence for the *label* position agrees with its localizer while Japanese's does not. Do not "harmonize" the two. (KO prose does say 생존률 — `arca.live` "게임 전체 평균 생존률이 50프로 언저리" — but that is prose, not label, register.) |
+| Kill/death ratio | キル/デス比 | 격침 비율 | Same 2026-08-11 pass, same table (`\| 격침 비율 \| 1.16 \|`, `\| キル/デス比 \| 1.16 \|` — identical value, so the two label the same metric). Our card shows the Latin abbreviation **KDR**; the corpus never abbreviates this one, unlike WR and PR, so it ships translated. **Upheld by the native audit on arithmetic rather than assertion**: from one quoted ko page, 생존 45.39% and 함선 격침 0.52 give deaths/battle = 0.5461 and frags ÷ deaths = 0.952, against that page's printed 격침 비율 of 0.95. So 격침 비율 *is* kills ÷ deaths. |
+| Frags per battle | **平均撃沈数** | **평균 격침** | **The corpus uses TWO labels for this one metric, and which one is correct depends on whether a block header is present. Read this row before "restoring" the older citation — it is real, and it describes a different position on the page.** *Header present*: under `전투 평균치` / `期間平均値` ("battle averages") the table reads `\| 함선 격침 \| 0.7 \|` / `\| 艦船撃沈 \| 0.7 \|`; the header supplies the per-battle sense. *Header absent*: the same page heads its per-ship columns `평균 격침` (×4 on the ko page: `\| 전투 \| 전투 % \| 승률 \| PR \| 평균 격침 \| 평균 데미지 \|`) and `平均撃破数` on the ja side, and `wikiwiki.jp/nanjwows/指標` has the heading `### 平均撃沈数` (×2). **The clincher**: both pages ALSO use the bare form for a raw single-battle record count (ko `함선 격침` line 194, ja `艦船撃沈` beside 武蔵 with the value **10**), so it carries no per-battle sense of its own. Our tile is header-free — it sits beside `전투 수 38` / `戦闘数 38` — so it takes the 평균/平均 form. 撃沈 over 撃破 on ship-specificity (judgment, both attested). |
+| Recent / last (KO) | — (see note) | 최근 | **Re-cited, fix round 1** — the original attribution was wrong; re-verification found zero occurrences on the `ships/` pages. Real sources: `namu.wiki/w/월드 오브 워쉽` (`최근` ×8) and `asia.wows-numbers.com/ko/` root (`최근 이벤트`, `최근 전적` ×2 — `최근 전적` is exactly our register, "recent record"). Already shipped as the `최근` clause inside `landing.treemap.windowPhraseWithDays`'s and `landing.shipLeaderboard.windowSuffix`'s Korean values; promoted for the same reason as Top N% above. Japanese's `直近` was recorded here as having "no corpus hit of its own" — **that is false, corrected 2026-08-11 by the native audit**: the ja player page's own column header row reads `\| 全期間 \| 最近 \| 直近７日 \| 直近3週間 \| 直近 90 日 \| 直近 180 日 \| 直近 365 日 \|`, which attests `直近N日` in exactly the role our window phrases use it. Promote it alongside the Korean. |
 
 ## Deliberately untranslated: `PvP` / `PvE`, `Window WR`, and the metric pills
 
@@ -106,8 +106,9 @@ section, which records the same ruling.
 
 Flagged rather than guessed. These need a second pass or a native check before shipping:
 
-- ~~**Survival rate**~~ — **resolved by the 2026-08-11 corpus pass, and the
-  prediction was wrong in an instructive way.** This entry expected `生存率` /
+- ~~**Survival rate**~~ — **resolved 2026-08-11, in two steps, and the original
+  prediction was wrong in an instructive way** (see the Verified terms row for
+  the final values: ja `生存率`, ko `생존` — deliberately divergent).** This entry expected `生存率` /
   `생존율` and found nothing, which read as "the corpus has no word for it."
   It does; the word simply has no 率/율 suffix. `asia.wows-numbers.com`'s player
   summary table carries the row `| 생존 | 39.28% |` in ko and `| 生還 |
@@ -221,6 +222,33 @@ two compounds built from already-admitted or already-verified parts:
 | `battleHistory.header.today/last7/last30/last45` | 오늘 / 최근 7일 / 최근 30일 / 최근 45일 | 本日 / 直近7日間 / 直近30日間 / 直近45日間 |
 | `battleHistory.tile.ships` | 함선 | 艦艇 |
 
+Amended 2026-08-11 by the native audits (both languages, independently):
+
+| Key | Korean | Japanese |
+|---|---|---|
+| `player.header.nextUpdate` | 다음 업데이트: {minutes}**분 후** | 次の更新: {minutes}**分後** |
+| `battleHistory.tile.ships` | **함선 수** (was 함선) | 艦艇 |
+
+`분 후`/`分後` because the bare minute unit denotes a *duration* ("15 minutes"),
+not the time-until the English means; both audits raised this independently in
+their own language. `함선 수` puts the ship COUNT in parallel with the attested
+`전투 수` beside it — a composition of ours, admitted on that pattern, and it
+also removes the 함선/함선-격침 collision that made the old Frags tile misread.
+Japanese needs no equivalent: `艦艇` is already the object/count noun there,
+distinct from `艦名` for the name column (see `common.ship`).
+
+`player.stats.totalBattles`'s Korean NEEDS-NATIVE-CHECK is **cleared**: `전체`
+is not merely our admitted chrome word, it is the site's own "all" column
+header on the same table. The Japanese half stays flagged — its `総戦闘数`
+alternative rests on a search snippet, which the audit refused to promote.
+
+**Still unkeyed, and gaps rather than rulings** (recorded so the next round
+does not have to rediscover them): the ships-table's `F/B` column — the same
+metric as the Frags tile, for which the corpus gives `평균 격침` outright — and
+`Overall WR %`, where the WR-stays-Latin ruling covers `WR` but not `Overall`
+(`전체` is available). Neither exists in `keys.ts`, so neither is covered by
+`NEEDS_NATIVE_CHECK`.
+
 **The two `lastPlayed` keys are restructured, not calqued.** English leads with
 the verb ("Last played 2 days ago"); both translations lead with the noun and
 put the time after a colon, which is how the corpus writes recency (`최근 전적`,
@@ -250,10 +278,13 @@ stay listed here rather than moving wholesale: each composes a full phrase
 ("N-day ship-standings window", "last N days rolling") where only the Korean
 `최근` word inside is independently attested — the rest of the phrase ("함선
 순위 집계 기간", the standings-window concept itself) is still our own
-coinage, not a WoWS term. Japanese `直近`, used in the same two keys, has no
-corpus hit of its own (not even a weak one) and remains a generic-chrome
-admission (see the client-locale-toggle spec's "Known traps" section, which
-names this explicitly).
+coinage, not a WoWS term. Japanese `直近`, used in the same two keys, was
+recorded here as having "no corpus hit of its own (not even a weak one)" —
+**corrected 2026-08-11**: it heads the ja player page's own window columns
+(`直近７日`, `直近 90 日`, `直近 365 日`), so the WORD is attested in exactly
+our role; only the surrounding standings-window phrase remains our coinage.
+(The client-locale-toggle spec's "Known traps" section still carries the old
+claim and should be read against this correction.)
 
 † `landing.treemap.topPct`'s Japanese value (`上位{pct}%`) is a **weak signal,
 not an attestation**: one occurrence on `gamewith.jp`, unvetted. Recorded here

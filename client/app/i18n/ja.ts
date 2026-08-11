@@ -80,10 +80,19 @@ export const ja: Partial<Record<StringKey, string>> = {
     // carries the same stat rows as this card row, the closest register match
     // available.
     'player.stats.winRate': '勝率',
-    // 生還, NOT 生存率. The research doc predicted 生存率 and found no hit;
-    // this pass found the site's actual row label (`| 生還 | 39.28% |`).
-    // Do not "correct" this to 生存率.
-    'player.stats.survival': '生還',
+    // 生存率. **This reverses the 2026-08-11 value (生還) on a native-audit
+    // finding, 2026-08-11 later the same day — the earlier comment here told
+    // the next reader NOT to make this change, so read the reasoning before
+    // reverting it back.** Both values are attested; they sit at different
+    // TIERS of source. 生還 is what asia.wows-numbers.com's ko/ja localization
+    // writes (`| 生還 | 39.28% |`). 生存率 is what the JP WoWS community writes
+    // about its own stats: wikiwiki.jp/nanjwows/指標 carries the section
+    // heading `### 生存率` (×2, and 生還 ×0 on that page), and a player blog
+    // enumerating his own stat screen reads
+    // "戦闘数/平均Tier/PR/勝数(勝率)/生存率/ダメージ/平均キル数/キルレシオ".
+    // This project's Register target is the community's register, not a
+    // localizer's, so the community source wins where they disagree.
+    'player.stats.survival': '生存率',
     // The kill/death row on the same table (`| キル/デス比 | 1.16 |`, the
     // same value the KO page labels 격침 비율). Translated rather than left
     // Latin because, unlike WR/PR, the corpus never abbreviates this one.
@@ -102,7 +111,9 @@ export const ja: Partial<Record<StringKey, string>> = {
     'player.header.lastPlayedToday': '最終戦闘: 本日',
     'player.header.lastPlayedDaysAgo': '最終戦闘: {days}日前',
     'player.header.updating': '更新中…',
-    'player.header.nextUpdate': '次の更新: {minutes}分',
+    // 分後, not 分: bare 分 reads as a duration ("15 minutes"), 後 makes it the
+    // deadline the English means ("in 15 min").
+    'player.header.nextUpdate': '次の更新: {minutes}分後',
     'player.header.shareAriaLabel': 'プレイヤーURLをコピー',
     // 戦績 is the corpus's word for a player's record (Verified terms table).
     // NEEDS-NATIVE-CHECK on the second sentence — longer prose than anything
@@ -124,15 +135,34 @@ export const ja: Partial<Record<StringKey, string>> = {
     'battleHistory.mode.ranked': 'ランク戦',
     'battleHistory.tile.ships': '艦艇',
     'battleHistory.tile.avgDamage': '平均ダメージ',
-    // The corpus's own label for average kills per battle, from the 期間平均値
-    // block of the player summary table (`| 艦船撃沈 | 0.7 |`) — same metric
-    // as our Frags/Battle tile, same register.
-    'battleHistory.tile.fragsPerBattle': '艦船撃沈',
+    // 平均撃沈数. **Also reverses a 2026-08-11 value (艦船撃沈) — same audit,
+    // and this one was a genuine ontology error, not a register call.**
+    // 艦船撃沈 carries no per-battle sense of its own: it appears TWICE on the
+    // source page with two different denotations — `| 艦船撃沈 | 0.7 |` under
+    // the section header `| 期間平均値 |` (an average), and `艦船撃沈 / 10`
+    // under `### 記録` beside 武蔵 (a raw single-battle count). The header is
+    // doing the work. Our tile has no such header: it sits in a totals band
+    // beside 戦闘数 38 and 艦艇 11, both raw counts, so the borrowed label
+    // reads as "ships sunk, total". Every header-less form in the corpus leads
+    // with 平均 — `平均撃破数` heads the per-ship column on that same page, and
+    // wikiwiki.jp/nanjwows/指標 has the heading `### 平均撃沈数` (×2).
+    // 撃沈 over 撃破 because it is the ship-specific verb.
+    'battleHistory.tile.fragsPerBattle': '平均撃沈数',
 
     'common.battles': '戦闘数',
     'common.avgDamage': '平均ダメージ',
     'common.winRate': '勝率',
-    'common.ship': '艦艇',
+    // 艦名 (ship NAME), not 艦艇 (ship as an object) — the audit's third
+    // finding. This key's only call site is the ships-table column whose cells
+    // hold names (Nagato, ARP Yamato), and the source corpus splits the two
+    // senses on one page: `| 艦名 | Tier | 国家 | …` heads that column, while
+    // 艦艇 is the object noun there (艦艇発見数 = ships spotted, 通常艦艇).
+    // Korean needs no such split — its own table heads the same column 함선
+    // (`|  | 함선 | 단계 | 국가 |`), so ko.ts keeps one word for both.
+    // **If a future call site uses this key for the ship as an OBJECT rather
+    // than its name, split the key** — 艦名 would be wrong there, and
+    // battleHistory.tile.ships (a count) already uses 艦艇 for that reason.
+    'common.ship': '艦名',
     'common.player': 'プレイヤー',
     'common.season': 'シーズン',
 

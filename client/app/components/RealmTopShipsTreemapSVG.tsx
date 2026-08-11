@@ -23,7 +23,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import * as d3 from 'd3';
 import { useDisplayRealm, useRealm } from '../context/RealmContext';
-import { useT } from '../context/LocaleContext';
+import { useDisplayLocale, useT } from '../context/LocaleContext';
 import type { StringKey } from '../i18n';
 import { buildShipPath } from '../lib/entityRoutes';
 import { formatSeasonLabel } from '../lib/shipSeason';
@@ -147,6 +147,7 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
     // Hydration-safe realm for the heading/aria-label rendered in the SSG shell.
     const displayRealm = useDisplayRealm();
     const t = useT();
+    const displayLocale = useDisplayLocale();
     const router = useRouter();
     const containerRef = useRef<HTMLDivElement | null>(null);
     const svgRef = useRef<SVGSVGElement | null>(null);
@@ -209,8 +210,11 @@ const RealmTopShipsTreemapSVG: React.FC<RealmTopShipsTreemapSVGProps> = ({
         const startMs = Date.parse(windowStart);
         const endMs = Date.parse(windowEnd);
         if (Number.isNaN(startMs) || Number.isNaN(endMs)) return null;
-        return formatSeasonLabel(startMs, endMs);
-    }, [windowStart, windowEnd]);
+        // useDisplayLocale, not useLocale: this label is rendered TEXT inside
+        // the prerendered shell, so it must read 'en' until mount like every
+        // other translated string here.
+        return formatSeasonLabel(startMs, endMs, displayLocale);
+    }, [windowStart, windowEnd, displayLocale]);
 
     // Window length in days, derived from the payload's date bounds so the
     // standings-window copy always matches the actual served window (30/45/60/90

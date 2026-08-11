@@ -88,6 +88,19 @@ export const ko: Partial<Record<StringKey, string>> = {
     // 율 suffix — the site's stat row reads `| 생존 | 39.28% |`. Our card is
     // labelled "Survival" (not "Survival rate"), so the shorter form is also
     // the exact register match. Do not "correct" this to 생존율.
+    //
+    // UPHELD by the 2026-08-11 native audit, on stronger evidence than it
+    // shipped with: 생존 there is NOT under a block header supplying "rate" —
+    // it sits in the top block beside 전투/승률/PR as a bare label with a %
+    // value, reproduced across four player pages on two hosts. That is
+    // structurally identical to our card. (The community does write 생존률 in
+    // prose — arca.live "게임 전체 평균 생존률이 50프로 언저리" — but that is
+    // prose register, not label register.)
+    // **Deliberately divergent from ja.ts, which moved to 生存率.** Not an
+    // oversight to harmonize: Japanese's best LABEL-register source (the
+    // wikiwiki metrics page, heading `### 生存率`) disagrees with its
+    // localization site, while Korean's label-register evidence agrees with
+    // its own. Each locale follows its own best source.
     'player.stats.survival': '생존',
     // The kill/death row on the same table (`| 격침 비율 | 1.16 |`, the same
     // value the JA page labels キル/デス比). Our English shows the Latin
@@ -100,8 +113,10 @@ export const ko: Partial<Record<StringKey, string>> = {
     // combined with the verified noun 전투 수.
     'player.stats.pvpBattles': 'PvP 전투 수',
     'player.stats.pveBattles': 'PvE 전투 수:',
-    // NEEDS-NATIVE-CHECK: 전체 is admitted generic chrome (common.all) and
-    // 전투 수 is verified, but the compound is this task's own composition.
+    // NEEDS-NATIVE-CHECK CLEARED by the 2026-08-11 native audit: 전체 is not
+    // merely our admitted chrome word, it is the site's own "all" column
+    // header on this very table (`전체, 최근 ; 전투, 17, -`), and 전투 수 is
+    // verified. 총 전투 수 is equally natural; no reason to switch.
     'player.stats.totalBattles': '전체 전투 수:',
     // Restructured deliberately, not calqued: English leads with the verb
     // ("Last played …"), Korean leads with the noun and puts the time after a
@@ -109,7 +124,10 @@ export const ko: Partial<Record<StringKey, string>> = {
     'player.header.lastPlayedToday': '마지막 전투: 오늘',
     'player.header.lastPlayedDaysAgo': '마지막 전투: {days}일 전',
     'player.header.updating': '업데이트 중…',
-    'player.header.nextUpdate': '다음 업데이트: {minutes}분',
+    // 분 후, not 분: bare 분 denotes a duration, 후 makes it the time-until
+    // the English means. Both audits flagged this independently in their own
+    // language (ja took 分後 for the same reason).
+    'player.header.nextUpdate': '다음 업데이트: {minutes}분 후',
     'player.header.shareAriaLabel': '플레이어 URL 복사',
     // 전적 is the corpus's word for a player's record (Verified terms table);
     // 통계 is the formal register, used here for "detailed statistics" where
@@ -132,12 +150,27 @@ export const ko: Partial<Record<StringKey, string>> = {
     // what wows-numbers' own tables use.
     'battleHistory.mode.random': '랜덤전',
     'battleHistory.mode.ranked': '랭크전',
-    'battleHistory.tile.ships': '함선',
+    // 함선 수, parallel to the attested 전투 수 beside it: this tile is a
+    // COUNT of distinct ships, not the ship noun. Our own composition (no
+    // corpus analogue — wows-numbers has no such tile), admitted as generic
+    // chrome on the strength of the 전투 수 pattern.
+    'battleHistory.tile.ships': '함선 수',
     'battleHistory.tile.avgDamage': '평균 데미지',
-    // The corpus's own label for average kills per battle, from the "battle
-    // averages" block of the player summary table (`| 함선 격침 | 0.7 |`) —
-    // same metric as our Frags/Battle tile, same register.
-    'battleHistory.tile.fragsPerBattle': '함선 격침',
+    // 평균 격침. **This reverses the 2026-08-11 value (함선 격침) on a native
+    // audit the same day — read this before "restoring" the older citation,
+    // which is real but describes a different position on the page.**
+    // wows-numbers ko uses TWO labels for this one metric, chosen by whether a
+    // block header is present:
+    //   header present → `| 전투 평균치 |` … `| 함선 격침 | 0.7 |` (an average)
+    //   header absent  → `평균 격침`, four times as a bare column header:
+    //                    `| 전투 | 전투 % | 승률 | PR | 평균 격침 | 평균 데미지 |`
+    // The same page also uses `함선 격침` for a RAW single-battle record count,
+    // which is what settles it: that form carries no per-battle sense of its
+    // own. Our tile has no header — it sits beside 전투 수 38 and 함선 수 11,
+    // both raw counts — so it needs the header-free form. Bonus: 평균 격침 vs
+    // 격침 비율 (our KDR card) is exactly the contrast pair wows-numbers itself
+    // renders as two adjacent columns.
+    'battleHistory.tile.fragsPerBattle': '평균 격침',
 
     'common.battles': '전투 수',
     'common.avgDamage': '평균 데미지',

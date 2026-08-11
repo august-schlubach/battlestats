@@ -108,7 +108,8 @@ describe('PlayerDetail header — locale coverage', () => {
         expect(screen.getByText('전체 전투 수:')).toBeInTheDocument();
         expect(screen.getByText('PvE 전투 수:')).toBeInTheDocument();
         expect(screen.getByText('마지막 전투: 2일 전')).toBeInTheDocument();
-        expect(screen.getByText('다음 업데이트: 15분')).toBeInTheDocument();
+        // 분 후: bare 분 would read as a duration, not a time-until.
+        expect(screen.getByText('다음 업데이트: 15분 후')).toBeInTheDocument();
         // The English literals are gone, which is what proves the wiring
         // rather than a coincidental dictionary hit.
         expect(screen.queryByText('Win Rate')).toBeNull();
@@ -119,7 +120,9 @@ describe('PlayerDetail header — locale coverage', () => {
         localStorage.setItem('bs-locale', 'ja');
         renderPlayer();
         expect(screen.getByText('勝率')).toBeInTheDocument();
-        expect(screen.getByText('生還')).toBeInTheDocument();
+        // 生存率 is the JP community's word for this stat; 生還 is the
+        // localization site's. See ja.ts for why the community source wins.
+        expect(screen.getByText('生存率')).toBeInTheDocument();
         expect(screen.getByText('キル/デス比')).toBeInTheDocument();
         expect(screen.getByText('PvP 戦闘数')).toBeInTheDocument();
         expect(screen.getByText('すべての戦闘数:')).toBeInTheDocument();
