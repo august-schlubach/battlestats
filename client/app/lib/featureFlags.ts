@@ -18,3 +18,15 @@ export const isPlayerDewaterfallEnabled = (): boolean =>
 // exposing a control. Set NEXT_PUBLIC_LOCALE_SELECTOR=1 to reveal it.
 export const isLocaleSelectorEnabled = (): boolean =>
     process.env.NEXT_PUBLIC_LOCALE_SELECTOR === '1';
+
+// Browser-language defaulting. Off unless explicitly enabled. With it on, a
+// visitor who has never chosen a language gets the first locale we support out
+// of navigator.languages instead of English; precedence becomes
+// ?lang= > bs-locale > navigator.languages > en. The detected value is NEVER
+// persisted — bs-locale stays the record of an explicit choice, so one click of
+// the selector undoes detection permanently. Measured motivation: ~37% of new
+// visitors arrive with a ko/ja browser and six had ever found the selector
+// (runbook-locale-adoption-measurement-2026-08-10.md §5). Two consumers must
+// agree: LocaleContext (React) and the pre-paint head script (lib/bootScript).
+export const isLocaleAutodetectEnabled = (): boolean =>
+    process.env.NEXT_PUBLIC_LOCALE_AUTODETECT === '1';

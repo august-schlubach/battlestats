@@ -16,6 +16,8 @@ import { DegradationProvider } from "./context/DegradationContext";
 import ConnectionHint from "./components/ConnectionHint";
 import VisitorIdentity from "./components/VisitorIdentity";
 import LocaleBeacon from "./components/LocaleBeacon";
+import { buildBootScript } from "./lib/bootScript";
+import { isLocaleAutodetectEnabled } from "./lib/featureFlags";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -64,7 +66,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('bs-theme');if(t!=='light'&&t!=='dark')t='dark';document.documentElement.dataset.theme=t;var r=localStorage.getItem('bs-realm');if(r&&['na','eu','asia'].indexOf(r)>=0)document.documentElement.dataset.realm=r;else document.documentElement.dataset.realm='na';var l=localStorage.getItem('bs-locale');if(l!=='ko'&&l!=='ja')l='en';document.documentElement.lang=l;document.documentElement.dataset.lang=l;})();` }} />
+        <script dangerouslySetInnerHTML={{ __html: buildBootScript({ autodetectLocale: isLocaleAutodetectEnabled() }) }} />
         {enableUmami ? <script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848" /> : null}
       </head>
       <body className={inter.className}>

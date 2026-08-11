@@ -1,16 +1,24 @@
-// The inline <head> script is a string in layout.tsx. Extracting its behaviour
-// into a test means a typo inside the string literal fails CI instead of
-// shipping a header that never stamps.
+// The <head> script's BEHAVIOUR now lives in lib/bootScript.ts and is executed
+// for real in lib/__tests__/bootScript.test.ts — that suite is what proves the
+// stamping works. What can only be checked here, by source, is that layout.tsx
+// actually injects it and passes the autodetect flag through: a server
+// component rendering a raw string into <head> has nothing to assert against.
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('layout head script', () => {
     const source = readFileSync(join(process.cwd(), 'app/layout.tsx'), 'utf8');
 
-    it('stamps the locale from localStorage before hydration', () => {
-        expect(source).toContain("localStorage.getItem('bs-locale')");
-        expect(source).toContain('documentElement.lang');
-        expect(source).toContain("dataset.lang");
+    it('injects the boot script before paint', () => {
+        expect(source).toContain('buildBootScript(');
+        expect(source).toContain('dangerouslySetInnerHTML');
+    });
+
+    it('passes the autodetect flag into the boot script', () => {
+        // Without this the pre-paint stamp and LocaleContext disagree, and a
+        // detected ko visitor renders one frame under the Latin typography
+        // rules before React corrects it.
+        expect(source).toContain('autodetectLocale: isLocaleAutodetectEnabled()');
     });
 
     it('wraps the tree in LocaleProvider', () => {

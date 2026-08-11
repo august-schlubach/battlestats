@@ -1,7 +1,8 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { isLocale, translate, type Locale, type StringKey } from '../i18n';
+import { detectLocale, isLocale, translate, type Locale, type StringKey } from '../i18n';
+import { isLocaleAutodetectEnabled } from '../lib/featureFlags';
 
 const STORAGE_KEY = 'bs-locale';
 
@@ -15,10 +16,17 @@ const LocaleContext = createContext<LocaleContextValue>({
     setLocale: () => undefined,
 });
 
-// Resolved synchronously at first render, same precedence the realm uses:
-// explicit ?lang= wins, else the stored preference, else English. SSR has no
-// window, so it returns 'en' there — see useDisplayLocale for the text that
-// renders during SSR.
+// Resolved synchronously at first render: explicit ?lang= wins, else the stored
+// preference, else — only with NEXT_PUBLIC_LOCALE_AUTODETECT=1 — the browser's
+// own language, else English. SSR has no window, so it returns 'en' there — see
+// useDisplayLocale for the text that renders during SSR.
+//
+// The detected locale is deliberately NOT written to storage (setLocale is the
+// only writer). bs-locale must mean "the visitor chose this": that is what lets
+// a Korean-browser visitor who prefers English pick it once and keep it, since
+// a stored value outranks detection, and it lets a later refinement of the
+// mapping reach everyone who never chose. This same precedence is mirrored in
+// the pre-paint head script (lib/bootScript.ts) so the first frame agrees.
 const resolveInitialLocale = (): Locale => {
     if (typeof window === 'undefined') {
         return 'en';
@@ -34,6 +42,15 @@ const resolveInitialLocale = (): Locale => {
         }
     } catch {
         // URL / localStorage unavailable
+    }
+    if (isLocaleAutodetectEnabled()) {
+        const languages = typeof navigator === 'undefined'
+            ? undefined
+            : (navigator.languages?.length ? navigator.languages : [navigator.language]);
+        const detected = detectLocale(languages);
+        if (detected) {
+            return detected;
+        }
     }
     return 'en';
 };

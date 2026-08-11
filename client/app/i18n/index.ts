@@ -12,6 +12,24 @@ export const LOCALES: Locale[] = ['en', 'ko', 'ja'];
 export const isLocale = (value: unknown): value is Locale =>
     typeof value === 'string' && (LOCALES as string[]).includes(value);
 
+// First supported locale in a browser's language list, or null when it asks for
+// nothing we speak. Two properties carry the whole design:
+//   - it walks the list IN ORDER, so ['en-US','ko-KR'] resolves to English. A
+//     visitor who prefers English and also reads Korean must not be flipped.
+//   - it matches on the PRIMARY SUBTAG, folding ko-KR→ko, ja-JP→ja, en-GB→en.
+// Caller decides what to do with null (LocaleContext falls back to 'en'). This
+// mapping is duplicated in the pre-paint head script — see lib/bootScript.ts,
+// which cannot import — so any change here needs the same change there.
+export const detectLocale = (languages: readonly string[] | undefined): Locale | null => {
+    for (const tag of languages ?? []) {
+        const primary = String(tag ?? '').split('-')[0].toLowerCase();
+        if (isLocale(primary)) {
+            return primary;
+        }
+    }
+    return null;
+};
+
 const DICTIONARIES: Record<Locale, Partial<Record<StringKey, string>>> = { en, ko, ja };
 
 export const resolveDictionary = (locale: Locale): Partial<Record<StringKey, string>> =>

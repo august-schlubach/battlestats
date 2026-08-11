@@ -38,11 +38,24 @@ const Probe: React.FC = () => {
 const renderProbe = () => render(<LocaleProvider><Probe /></LocaleProvider>);
 
 describe('LocaleContext', () => {
+    const originalAutodetect = process.env.NEXT_PUBLIC_LOCALE_AUTODETECT;
+
     beforeEach(() => {
         localStorage.clear();
         document.documentElement.removeAttribute('data-lang');
         window.history.replaceState({}, '', '/');
         translateMock.mockClear();
+        // Every test above the autodetect block asserts the pre-detection
+        // precedence, which only holds with the flag off.
+        delete process.env.NEXT_PUBLIC_LOCALE_AUTODETECT;
+    });
+
+    afterAll(() => {
+        if (originalAutodetect === undefined) {
+            delete process.env.NEXT_PUBLIC_LOCALE_AUTODETECT;
+        } else {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = originalAutodetect;
+        }
     });
 
     it('defaults to en', () => {
@@ -134,6 +147,78 @@ describe('LocaleContext', () => {
         expect(translateMock.mock.calls.length).toBeGreaterThanOrEqual(2);
         expect(translateMock.mock.calls[0][0]).toBe('en');
         expect(translateMock.mock.calls[translateMock.mock.calls.length - 1][0]).toBe('ko');
+    });
+
+    // Browser-language defaulting. The flag ships dark, so every assertion here
+    // states which side of it it is on. Precedence under detection is
+    // ?lang= > bs-locale > navigator.languages > en, and the detected value is
+    // never persisted — bs-locale stays the record of an EXPLICIT choice, which
+    // is what lets a Korean-browser visitor pick English once and keep it.
+    describe('browser-language autodetect', () => {
+        const setLanguages = (languages: string[]) => {
+            Object.defineProperty(window.navigator, 'languages', { value: languages, configurable: true });
+        };
+
+        beforeEach(() => {
+            setLanguages(['en-US']);
+        });
+
+        it('ignores the browser language while the flag is off', () => {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '0';
+            setLanguages(['ko-KR', 'en-US']);
+            renderProbe();
+            expect(screen.getByTestId('locale')).toHaveTextContent('en');
+        });
+
+        it('defaults to the browser language while the flag is on', () => {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+            setLanguages(['ko-KR', 'en-US']);
+            renderProbe();
+            expect(screen.getByTestId('locale')).toHaveTextContent('ko');
+            expect(document.documentElement.dataset.lang).toBe('ko');
+        });
+
+        it('lets a stored explicit choice outrank detection', () => {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+            localStorage.setItem('bs-locale', 'en');
+            setLanguages(['ko-KR']);
+            renderProbe();
+            expect(screen.getByTestId('locale')).toHaveTextContent('en');
+        });
+
+        it('lets ?lang= outrank detection', () => {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+            window.history.replaceState({}, '', '/?lang=ja');
+            setLanguages(['ko-KR']);
+            renderProbe();
+            expect(screen.getByTestId('locale')).toHaveTextContent('ja');
+        });
+
+        it('does not persist the detected locale', () => {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+            setLanguages(['ja-JP']);
+            renderProbe();
+            expect(screen.getByTestId('locale')).toHaveTextContent('ja');
+            expect(localStorage.getItem('bs-locale')).toBeNull();
+        });
+
+        it('falls back to en for an unsupported browser language', () => {
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+            setLanguages(['de-DE']);
+            renderProbe();
+            expect(screen.getByTestId('locale')).toHaveTextContent('en');
+        });
+
+        it('still resolves English on the first render, so hydration matches the en shell', () => {
+            // Detection happens on the client only; the server prerenders 'en'.
+            // useT()/useDisplayLocale must keep their mounted gate or a detected
+            // ko visitor hits the exact hydration mismatch they exist to avoid.
+            process.env.NEXT_PUBLIC_LOCALE_AUTODETECT = '1';
+            setLanguages(['ko-KR']);
+            renderProbe();
+            expect(translateMock.mock.calls[0][0]).toBe('en');
+            expect(translateMock.mock.calls[translateMock.mock.calls.length - 1][0]).toBe('ko');
+        });
     });
 
     it('useDisplayLocale returns en before mount and the stored locale after', () => {

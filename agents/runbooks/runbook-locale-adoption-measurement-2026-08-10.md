@@ -125,7 +125,38 @@ WHERE website_id = '27c0ee6a-f534-42d4-b49f-27bbadad9848'
 GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
 ```
 
-## 5. Browser-language defaulting (analysis, not implemented)
+## 5. Browser-language defaulting (BUILT 2026-08-11, shipping dark)
+
+**Status: implemented and shipping behind `NEXT_PUBLIC_LOCALE_AUTODETECT`, default off.** The
+mechanism is live in the bundle; prod behaviour is unchanged until the flag flips on the droplet.
+The four requirements below are what was built, and each names its landing place:
+
+1. `detectLocale()` in `app/i18n/index.ts` — precedence in `LocaleContext.resolveInitialLocale`.
+2. Nothing writes `bs-locale` but `setLocale`. Pinned by *does not persist the detected locale*.
+3. `app/lib/bootScript.ts` — the head script was extracted out of `layout.tsx` into a built string
+   so it could be executed in jsdom (`bootScript.test.ts`); it was untestable inline. The theme and
+   realm halves are byte-identical to the previous script.
+4. `isLocaleAutodetectEnabled()` in `app/lib/featureFlags.ts`, threaded into the head script as
+   `buildBootScript({ autodetectLocale })` — verified in built output: the detection code is
+   present in the prerendered HTML with the flag on and **absent** with it off.
+
+Verified in a real browser (Playwright, dev against prod API, 2026-08-11), four cases:
+`['ko-KR','en-US']` → ko · `['ja-JP','en-US']` → ja · `['en-US','ko-KR']` → **en** ·
+`['ko-KR']` with `bs-locale='en'` → **en**. `localStorage.bs-locale` stayed `null` in every
+detected case. Landing and player pages screenshotted at 1280px and 390px in both ko and ja: no CJK
+wrap regression.
+
+**What that visual pass also showed, and section 5's earlier "seven chart section headings" did
+not: the player page is mostly English under any locale.** The tab strip translates; the header
+stat cards (Win Rate / PvP Battles / KDR / Survival), the window pills, the metric row, the treemap
+controls and the ships-table headers do not. Dictionary coverage (67/76) measures the *dictionary*,
+not *call-site wiring* — those labels have no `t()` call to resolve. This does not change the
+flip decision (a translated chrome and an English body still beats an all-English page the visitor
+never chose), but it is the honest description of what a detected ko visitor sees, and it makes
+wiring `PlayerDetail.tsx` the highest-value next translation round — which runs into the
+`common.winRate` sentence-vs-title-case trap recorded in section 2's related notes.
+
+The original analysis follows, unchanged, as the record of why each requirement exists.
 
 The measured problem is discoverability: 37% CJK-browser arrivals, six selector users. Defaulting
 the initial locale from `navigator.languages` is the direct answer. What it would take:
@@ -217,3 +248,15 @@ Verified against the working tree at `worktree-locale-beacon` and prod Umami on 
 | beacon behaviour (7 cases) | `app/components/__tests__/LocaleBeacon.test.tsx` |
 | email Language section, both denominators | `test_daily_traffic_email.py` `LocaleTests` + `RenderTests` |
 | the email section against real prod data | dry run on the droplet, 2026-08-10, day 2026-08-09 — exercised the **unmeasured** branch only, since that day predates the beacon; the populated branch is fixture-tested and first runs live on 2026-08-11 |
+
+Added 2026-08-11 with the autodetect build:
+
+| assertion | how verified |
+|---|---|
+| detection precedence + non-persistence | `LocaleContext.test.tsx` autodetect block (7 cases), `detectLocale.test.ts` (6) |
+| the head script's own branches | `bootScript.test.ts` evaluates the real string in jsdom (10 cases) |
+| the flag actually reaches the built HTML | `grep navigator.languages .next/server/app/index.html` — present with the flag on, absent with it off |
+| the four browser cases and no CJK wrap regression | Playwright, dev server against the prod API, ko/ja at 1280px and 390px |
+| the player page is mostly English under a detected locale | same screenshots — see section 5 |
+| first live traffic email carrying the Language section | droplet journal, 2026-08-11 10:31 UTC: `[ok] sent: … traffic 2026-08-10` |
+| beacon baseline, first 27h | prod Umami: en 50 load-visits, ja 5 (2 visitors), **ko no row**, against 18 ko-browser and 26 ja-browser visits in the same window |
