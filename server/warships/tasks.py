@@ -234,6 +234,10 @@ def _ships_bucket_warm_lock_key(realm, tier, ship_type, mode="random") -> str:
             f":t{tier}:{ship_type}:lock")
 
 
+def _top_ships_treemap_warm_lock_key(realm, mode="random") -> str:
+    return f"warships:tasks:warm_top_ships_treemap:{realm}:{mode}:lock"
+
+
 def _rotated_ship_buckets(tiers, on_date=None):
     """The (tier, ship_type) warm order for one day, rotated by date.
 
@@ -1520,9 +1524,7 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
     bucket ever requested. Runbook: runbook-leaderboard-updates.md.
     """
     from warships.data import (
-        compute_realm_top_ships, compute_realm_ships_by_tier_type,
-        _badge_tiers, SHIP_LEADERBOARD_TYPES,
-        SHIP_LIST_DEFAULT_TIER, SHIP_LIST_DEFAULT_TYPE,
+        _badge_tiers, SHIP_LIST_DEFAULT_TIER, SHIP_LIST_DEFAULT_TYPE,
     )
 
     lock_key = _realm_top_ships_warm_lock_key(realm)
@@ -1535,40 +1537,51 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
     succeeded = False
     try:
         results = {}
-        for mode in ("random", "ranked"):
-            payload = compute_realm_top_ships(
-                realm, limit=25, mode=mode, use_cache=False)
-            results[mode] = len(payload.get("ships", []))
 
-        # Tier/type list buckets — only mode="random" is ever requested.
+        # PURE DISPATCHER — this task computes nothing (2026-08-12, second pass).
         #
-        # DISPATCHED, not computed inline (2026-08-12). Walking all 15 buckets on
-        # this task's single 540s budget meant a run got 2-5 of them done and was
-        # killed, discarding every bucket after the cut — so T9/T10, including the
-        # landing default, never warmed on any realm while t8's head stayed fresh.
-        # One subtask per bucket gives each the full budget (~2-5x what a bucket
+        # The first pass moved only the 15-bucket loop onto subtasks and left the
+        # two treemap recomputes and the default pct bucket inline, ahead of the
+        # dispatch. That was enough for NA and ASIA but not EU, the largest realm:
+        # its inline work alone exhausted the 540s budget, so the task died BEFORE
+        # dispatching anything and EU warmed zero buckets while the smaller realms
+        # looked fixed. Anything heavy left on the orchestrator's own budget is a
+        # single point of failure for every bucket behind it, so nothing heavy
+        # stays. Dispatch is milliseconds; the budget is now unreachable.
+        spacing = 0
+
+        # Treemap modes.
+        for mode in ("random", "ranked"):
+            warm_top_ships_treemap_task.apply_async(
+                kwargs={"realm": realm, "mode": mode},
+                countdown=spacing * SHIPS_BUCKET_WARM_SPACING_SECONDS)
+            spacing += 1
+        results["treemap_modes_dispatched"] = 2
+
+        # Tier/type list buckets — only mode="random" is ever requested. One
+        # subtask per bucket gives each the full budget (~2-5x what a bucket
         # needs) and makes a slow bucket cost one bucket instead of the tail.
         # Order rotates daily so no bucket can be last every day.
         buckets = _rotated_ship_buckets(_badge_tiers())
-        for index, (tier, ship_type) in enumerate(buckets):
+        for tier, ship_type in buckets:
             warm_ships_bucket_task.apply_async(
                 kwargs={"realm": realm, "tier": tier,
                         "ship_type": ship_type, "mode": "random"},
-                countdown=index * SHIPS_BUCKET_WARM_SPACING_SECONDS,
-            )
+                countdown=spacing * SHIPS_BUCKET_WARM_SPACING_SECONDS)
+            spacing += 1
         results["tier_type_buckets_dispatched"] = len(buckets)
 
-        # The landing list now defaults to the top-50% WR view, so pre-warm the
-        # ONE default bucket's percentile (one heavy per-(ship,player) query that
-        # materializes both 50 & 25) to keep the primary landing view instant.
-        # Every other pct bucket stays lazy (queue + poll on first view). Guard
-        # the default tier against the realm's badge tiers so a misconfigured
-        # default can't 400 the warm.
+        # The landing list defaults to the top-50% WR view, so the ONE default
+        # bucket's percentile is warmed ahead of the rest to keep the primary
+        # landing view instant. Measured at 383s on EU — far too heavy to keep on
+        # this task's budget, so it is dispatched to the existing pct warmer
+        # rather than computed here. Guard the default tier against the realm's
+        # badge tiers so a misconfigured default can't 400 the warm.
         if SHIP_LIST_DEFAULT_TIER in _badge_tiers():
-            compute_realm_ships_by_tier_type(
-                realm, tier=SHIP_LIST_DEFAULT_TIER,
-                ship_type=SHIP_LIST_DEFAULT_TYPE, mode="random",
-                wr_pct=50, use_cache=False)
+            warm_ships_by_pct_task.apply_async(
+                kwargs={"realm": realm, "tier": SHIP_LIST_DEFAULT_TIER,
+                        "ship_type": SHIP_LIST_DEFAULT_TYPE, "mode": "random"},
+                countdown=0)
             results["default_pct_bucket"] = (
                 f"t{SHIP_LIST_DEFAULT_TIER}/{SHIP_LIST_DEFAULT_TYPE}")
 
@@ -1595,6 +1608,38 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
         # to REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT.
         if succeeded:
             cache.delete(_realm_top_ships_warm_dispatch_key(realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_top_ships_treemap_task(self, realm=DEFAULT_REALM, mode="random"):
+    """Recompute ONE realm+mode top-ships treemap payload.
+
+    Split off the orchestrator for the same reason as the tier x type buckets:
+    on EU the two modes together consumed the whole 540s budget, killing the task
+    before it dispatched a single bucket. Each mode now has its own budget and
+    its own lock. Runbook: runbook-top-ships-warm-soft-limit-2026-08-12.md
+    """
+    from warships.data import compute_realm_top_ships
+
+    lock_key = _top_ships_treemap_warm_lock_key(realm, mode)
+    if not cache.add(lock_key, self.request.id,
+                     timeout=SHIPS_BUCKET_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_top_ships_treemap_task realm=%s mode=%s — already running",
+            realm, mode)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        payload = compute_realm_top_ships(
+            realm, limit=25, mode=mode, use_cache=False)
+        ships = len(payload.get("ships", []))
+        logger.info(
+            "Warmed top-ships treemap realm=%s mode=%s ships=%s",
+            realm, mode, ships)
+        return {"status": "completed", "realm": realm, "mode": mode,
+                "ships": ships}
+    finally:
+        cache.delete(lock_key)
 
 
 @app.task(bind=True, **TASK_OPTS)

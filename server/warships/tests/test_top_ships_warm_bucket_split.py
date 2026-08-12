@@ -71,7 +71,7 @@ class TopShipsWarmDispatchDebounceTests(TestCase):
         )
 
         cache.add(_realm_top_ships_warm_dispatch_key("na"), "queued", timeout=900)
-        with mock.patch("warships.data.compute_realm_top_ships",
+        with mock.patch("warships.tasks.warm_top_ships_treemap_task.apply_async",
                         side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 warm_realm_top_ships_task(realm="na")
@@ -86,7 +86,7 @@ class TopShipsWarmDispatchDebounceTests(TestCase):
             _realm_top_ships_warm_lock_key, warm_realm_top_ships_task,
         )
 
-        with mock.patch("warships.data.compute_realm_top_ships",
+        with mock.patch("warships.tasks.warm_top_ships_treemap_task.apply_async",
                         side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 warm_realm_top_ships_task(realm="na")
@@ -102,18 +102,41 @@ class TopShipsWarmBucketSplitTests(TestCase):
     # than whatever the test environment happens to be configured for.
     PROD_TIERS = [8, 9, 10]
 
+    def test_orchestrator_computes_nothing_at_all(self):
+        # THE LOAD-BEARING CONTRACT. Anything heavy left on the orchestrator's own
+        # budget is a single point of failure for every subtask behind it: the
+        # first pass of this fix left the two treemap recomputes and the default
+        # pct bucket inline, and on EU (the largest realm) they exhausted the 540s
+        # budget before a single bucket was dispatched — so EU warmed nothing
+        # while NA and ASIA, small enough to squeak through, looked fixed.
+        from warships.tasks import warm_realm_top_ships_task
+
+        with mock.patch("warships.data._badge_tiers",
+                        return_value=self.PROD_TIERS), \
+                mock.patch("warships.tasks.queue_realm_ships_pct_warm",
+                           return_value={"status": "queued"}), \
+                mock.patch("warships.data.compute_realm_top_ships") as treemap, \
+                mock.patch("warships.data.compute_realm_ships_by_tier_type") as buckets, \
+                mock.patch("warships.tasks.warm_ships_bucket_task.apply_async"), \
+                mock.patch("warships.tasks.warm_top_ships_treemap_task.apply_async"), \
+                mock.patch("warships.tasks.warm_ships_by_pct_task.apply_async"):
+            result = warm_realm_top_ships_task(realm="na")
+
+        treemap.assert_not_called()
+        buckets.assert_not_called()
+        self.assertEqual(result["status"], "completed")
+
     def test_orchestrator_dispatches_one_subtask_per_bucket(self):
         # The whole point: buckets are no longer computed inline under one shared
         # budget, so one slow bucket cannot discard every bucket after it.
         from warships.tasks import warm_realm_top_ships_task
 
-        with mock.patch("warships.data.compute_realm_top_ships",
-                        return_value={"ships": []}), \
-                mock.patch("warships.data._badge_tiers",
-                           return_value=self.PROD_TIERS), \
+        with mock.patch("warships.data._badge_tiers",
+                        return_value=self.PROD_TIERS), \
                 mock.patch("warships.tasks.queue_realm_ships_pct_warm",
                            return_value={"status": "queued"}), \
-                mock.patch("warships.data.compute_realm_ships_by_tier_type") as inline, \
+                mock.patch("warships.tasks.warm_top_ships_treemap_task.apply_async") as tm, \
+                mock.patch("warships.tasks.warm_ships_by_pct_task.apply_async") as pct, \
                 mock.patch("warships.tasks.warm_ships_bucket_task.apply_async") as sub:
             result = warm_realm_top_ships_task(realm="na")
 
@@ -121,15 +144,33 @@ class TopShipsWarmBucketSplitTests(TestCase):
         self.assertEqual(sub.call_count, 3 * len(SHIP_LEADERBOARD_TYPES))
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["results"]["tier_type_buckets_dispatched"], 15)
-        # No ALL-VIEW bucket may be computed inline — those are what blew the
-        # budget. The single `wr_pct=50` call that remains is the deliberate
-        # pre-warm of the default landing percentile view (one ~20s query), which
-        # predates this split and is intentionally kept on the orchestrator.
-        all_view_calls = [
-            c for c in inline.call_args_list if not c.kwargs.get("wr_pct")]
-        self.assertEqual(all_view_calls, [])
+        # Both treemap modes and the default pct bucket are dispatched too.
+        self.assertEqual(tm.call_count, 2)
         self.assertEqual(
-            [c.kwargs["wr_pct"] for c in inline.call_args_list], [50])
+            sorted(c.kwargs["kwargs"]["mode"] for c in tm.call_args_list),
+            ["random", "ranked"])
+        self.assertEqual(pct.call_count, 1)
+
+    def test_every_dispatch_is_staggered_across_all_three_families(self):
+        # Treemaps, buckets and the pct bucket share one spacing sequence so the
+        # 17 jobs do not land on the shared queue simultaneously.
+        from warships.tasks import (
+            SHIPS_BUCKET_WARM_SPACING_SECONDS, warm_realm_top_ships_task,
+        )
+
+        with mock.patch("warships.data._badge_tiers",
+                        return_value=self.PROD_TIERS), \
+                mock.patch("warships.tasks.queue_realm_ships_pct_warm",
+                           return_value={"status": "queued"}), \
+                mock.patch("warships.tasks.warm_ships_by_pct_task.apply_async"), \
+                mock.patch("warships.tasks.warm_top_ships_treemap_task.apply_async") as tm, \
+                mock.patch("warships.tasks.warm_ships_bucket_task.apply_async") as sub:
+            warm_realm_top_ships_task(realm="na")
+
+        seen = ([c.kwargs["countdown"] for c in tm.call_args_list]
+                + [c.kwargs["countdown"] for c in sub.call_args_list])
+        self.assertEqual(
+            seen, [i * SHIPS_BUCKET_WARM_SPACING_SECONDS for i in range(17)])
 
     def test_every_tier_type_pair_is_covered_exactly_once(self):
         from warships.tasks import warm_realm_top_ships_task
@@ -149,28 +190,6 @@ class TopShipsWarmBucketSplitTests(TestCase):
         expected = sorted(
             (t, st) for t in (8, 9, 10) for st in SHIP_LEADERBOARD_TYPES)
         self.assertEqual(pairs, expected)
-
-    def test_dispatches_are_staggered_not_burst(self):
-        # 15 buckets of real work landing at once would spike a queue already
-        # shared with enrichment and snapshots.
-        from warships.tasks import (
-            SHIPS_BUCKET_WARM_SPACING_SECONDS, warm_realm_top_ships_task,
-        )
-
-        with mock.patch("warships.data.compute_realm_top_ships",
-                        return_value={"ships": []}), \
-                mock.patch("warships.data._badge_tiers",
-                           return_value=self.PROD_TIERS), \
-                mock.patch("warships.tasks.queue_realm_ships_pct_warm",
-                           return_value={"status": "queued"}), \
-                mock.patch("warships.tasks.warm_ships_bucket_task.apply_async") as sub:
-            warm_realm_top_ships_task(realm="na")
-
-        countdowns = [c.kwargs["countdown"] for c in sub.call_args_list]
-        self.assertEqual(countdowns[0], 0)
-        self.assertEqual(
-            countdowns,
-            [i * SHIPS_BUCKET_WARM_SPACING_SECONDS for i in range(15)])
 
     def test_bucket_order_rotates_by_day(self):
         # Cheap insurance: if a bucket ever does exceed its own budget, a fixed

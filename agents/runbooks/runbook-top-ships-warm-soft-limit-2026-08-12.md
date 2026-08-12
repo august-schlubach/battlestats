@@ -268,7 +268,35 @@ stale T10 view, which is the symptom visitors actually see.
 - Dispatches are staggered by `SHIPS_BUCKET_WARM_SPACING_SECONDS` (default 20s) so 15 real
   jobs do not land on the shared queue in one burst.
 
-**Tests:** 15 new in `test_top_ships_warm_bucket_split.py` — lock-outlives-hard-limit for both
+### Second pass, same day — the first pass was incomplete
+
+**v5.3.3 fixed NA and ASIA and did nothing for EU.** Post-deploy the orchestrator logged 2
+successes (NA 14:07, ASIA 22:36) and **5 soft-limit kills**, and EU dispatched **zero**
+buckets in nine hours — its coverage stayed at 1/15 while the other two reached 15/15.
+
+Cause: the first pass moved only the 15-bucket loop onto subtasks and left three heavy
+computes **inline, ahead of the dispatch**:
+
+```
+1. compute_realm_top_ships(random)    inline
+2. compute_realm_top_ships(ranked)    inline
+3. dispatch 15 buckets                <- never reached on EU
+4. default pct bucket                 inline  (measured 383s on EU)
+```
+
+EU is the largest realm; steps 1–2 alone exhaust 540s, so it died *before* dispatching
+anything. NA and ASIA are small enough to squeak through, which is exactly why the fix
+looked complete. **The lesson generalises: anything heavy left on an orchestrator's own
+budget is a single point of failure for every subtask behind it.**
+
+The orchestrator is now a **pure dispatcher** — it computes nothing. Both treemap modes moved
+to a new `warm_top_ships_treemap_task` (own lock, own budget), and the default pct bucket is
+dispatched to the existing `warm_ships_by_pct_task` rather than computed. All 17 dispatches
+share one stagger sequence. A test asserts the orchestrator calls neither
+`compute_realm_top_ships` nor `compute_realm_ships_by_tier_type` at all, so this cannot
+regress silently.
+
+**Tests:** 16 in `test_top_ships_warm_bucket_split.py` — lock-outlives-hard-limit for both
 locks, debounce survives failure / clears on success, lock released on both outcomes, one
 subtask per bucket with no all-view bucket computed inline, every pair covered exactly once,
 daily rotation, rotation-is-a-rotation, staggered countdowns, per-bucket lock skip, bucket
