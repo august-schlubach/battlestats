@@ -34,7 +34,11 @@ METRIC VOCABULARY (Umami v2.20 semantics, verified against the live schema):
   * Visitors      = COUNT(DISTINCT session_id) over the day's events.
   * Visits        = COUNT(DISTINCT visit_id). Umami opens a new visit_id after
     30 minutes of inactivity. This is the "session" in ordinary analytics usage.
-  * Pageviews     = event_type 1. Custom events = event_type 2.
+  * Pageviews     = event_type 1. Custom events = event_type 2, minus the
+    page-load beacons in INSTRUMENTATION_EVENTS: everywhere this report counts
+    custom events as visitor ACTIONS it counts interactions only. See that
+    constant for why, and the Events triggered section for where the beacons
+    are still printed.
   * New visitor   = a visitor whose session.created_at falls inside the day.
     Returning     = first seen on an earlier day. Denominator is the day's
     active visitors, not visits. See NEW_VS_RETURNING_NOTE below for the caveat.
@@ -77,6 +81,32 @@ ANTHROPIC_VERSION = "2023-06-01"
 
 # Days of history pulled for the trend table and the 7-day mean.
 TREND_DAYS = 7
+
+# Custom events that fire unconditionally on every page load rather than in
+# response to something a visitor chose to do. `locale-active` is this entire
+# class today: LocaleBeacon emits it once per page load, English included,
+# because the locale runbook needs English as the denominator. Counted as an
+# interaction it is a second pageview tally wearing an event's clothes, and it
+# entered the roster on 2026-08-10, so it both wins any ranking by count and
+# breaks its own 7-day comparison at its own ship date: the 2026-08-11 report
+# led on "locale-active at 75 against a prior daily mean of 2.86", which
+# describes the deploy, not the day. Everything it measures is already reported,
+# against its proper denominator, in the Language section. So it is excluded
+# from the headline Custom events row, from the engagement second-event test,
+# from the feature roster, and from the figures the model is shown; it is still
+# printed once, under Events triggered, so the count is never simply lost.
+INSTRUMENTATION_EVENTS = ("locale-active",)
+
+# Derived, not written out, so adding a beacon to the tuple above really is the
+# only edit required: a hardcoded name here would quietly go stale.
+_BEACON_NAMES = ", ".join(INSTRUMENTATION_EVENTS)
+
+_BEACON_EXCLUSION_NOTE = (
+    f"Custom events counts interactions only. The page-load beacons ({_BEACON_NAMES}) fire on "
+    "every load rather than on anything the visitor chose, so counting them here would restate "
+    "pageviews and would measure a day against a 7-day mean predating them. Their counts are "
+    "under Events triggered; what they measure is under Language."
+)
 
 NEW_VS_RETURNING_NOTE = (
     "New = this visitor's first-ever appearance in Umami (session.created_at "
@@ -179,6 +209,11 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
     lo, hi, tlo = _lit(day_lo.isoformat()), _lit(day_hi.isoformat()), _lit(trend_lo.isoformat())
     scope = f"we.website_id = {w}::uuid"
     in_day = f"we.created_at >= {lo}::timestamptz AND we.created_at < {hi}::timestamptz"
+    # Applied wherever a custom event is COUNTED as a visitor action. coalesce
+    # first: an unnamed event is not a beacon, and `NULL NOT IN (...)` is NULL,
+    # which a FILTER reads as false and would silently drop it.
+    beacons = ", ".join(_lit(name) for name in INSTRUMENTATION_EVENTS)
+    interaction = f"coalesce(we.event_name, '') NOT IN ({beacons})"
 
     return {
         # --- per-day trend, including the target day itself ------------------
@@ -186,6 +221,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
             WITH ev AS (
               SELECT date_trunc('day', we.created_at AT TIME ZONE 'UTC') AS day,
                      we.session_id, we.visit_id, we.event_type,
+                     {interaction} AS is_interaction,
                      (s.created_at AT TIME ZONE 'UTC') AS sess_first
               FROM website_event we JOIN session s USING (session_id)
               WHERE {scope}
@@ -194,18 +230,22 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
             )
             SELECT to_char(day, 'YYYY-MM-DD') AS day,
                    count(*) FILTER (WHERE event_type = 1) AS pageviews,
-                   count(*) FILTER (WHERE event_type = 2) AS events,
+                   count(*) FILTER (WHERE event_type = 2 AND is_interaction) AS events,
                    count(DISTINCT session_id) AS visitors,
                    count(DISTINCT visit_id) AS visits,
                    count(DISTINCT session_id) FILTER (WHERE sess_first >= day) AS new_visitors
             FROM ev GROUP BY day ORDER BY day
         """,
         # --- depth / duration for the target day -----------------------------
+        # `ev` counts interactions only. A beacon fires on every page load, so
+        # counting it here would make "single-view visit (no second event)"
+        # structurally impossible from 2026-08-10 onward: the measure would read
+        # zero forever and look like an engagement win.
         "engagement": f"""
             WITH v AS (
               SELECT we.visit_id,
                      count(*) FILTER (WHERE we.event_type = 1) AS pv,
-                     count(*) FILTER (WHERE we.event_type = 2) AS ev,
+                     count(*) FILTER (WHERE we.event_type = 2 AND {interaction}) AS ev,
                      extract(epoch FROM max(we.created_at) - min(we.created_at)) AS dur
               FROM website_event we WHERE {scope} AND {in_day} GROUP BY 1
             )
@@ -315,6 +355,8 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
             GROUP BY 1 ORDER BY visitors DESC, lang
         """,
         # --- custom events. Ranked by visitors; prior-window mean for context.
+        # Deliberately unfiltered: the beacon rows are wanted, just not mixed in
+        # with the interactions. compute() splits the roster in two.
         "events": f"""
             WITH day_ev AS (
               SELECT we.event_name,
@@ -427,11 +469,19 @@ def compute(raw: dict, day: date) -> dict:
     events = raw.get("events") or []
     for row in events:
         row["vs_prior_daily_mean"] = _delta(row.get("events"), row.get("prior_daily_mean"))
+    # Split, never blend: `rows` is what visitors chose to do and is what every
+    # total, ranking and model-visible figure below is drawn from; `beacon_rows`
+    # is instrumentation, kept so the number stays visible but held out of the
+    # ranking it would otherwise head. See INSTRUMENTATION_EVENTS.
+    interactions = [r for r in events if (r.get("event_name") or "") not in INSTRUMENTATION_EVENTS]
+    beacon_rows = [r for r in events if (r.get("event_name") or "") in INSTRUMENTATION_EVENTS]
     event_summary = {
-        "total_events": sum((_num(r.get("events")) or 0) for r in events),
-        "distinct_event_names": len(events),
-        "rows": events,
-        "families": _event_families(events),
+        "total_events": sum((_num(r.get("events")) or 0) for r in interactions),
+        "distinct_event_names": len(interactions),
+        "rows": interactions,
+        "families": _event_families(interactions),
+        "beacon_rows": beacon_rows,
+        "beacon_events": sum((_num(r.get("events")) or 0) for r in beacon_rows),
     }
 
     pages = [dict(r, label=_pretty_path(r["url_path"])) for r in (raw.get("pages") or [])]
@@ -594,6 +644,35 @@ def _ui_coverage_caveat(loc: dict) -> str:
     )
 
 
+def _beacon_summary(ev: dict) -> str:
+    """One flat sentence naming the beacons held out of everything above.
+
+    Deliberately a sentence and not a table: a table would rank it, and the whole
+    point is that a per-page-load beacon has no business at the head of a
+    ranking. No delta is printed either; a beacon's day-over-day movement is
+    pageview movement, which the Totals section already reports.
+    """
+    rows = ev.get("beacon_rows") or []
+    if not rows:
+        return ""
+    named = "; ".join(
+        f"{r.get('event_name')} {r.get('events')} events from {r.get('visitors')} visitors"
+        for r in rows
+    )
+    return (
+        f"Instrumentation, excluded from every figure above: {named}. These fire on page load "
+        "rather than on a visitor action, so they measure delivery, not interest; what the "
+        "locale beacon reports is in the Language section."
+    )
+
+
+def _beacon_line_html(ev: dict) -> str:
+    text = _beacon_summary(ev)
+    if not text:
+        return ""
+    return f"<div style='font-size:12px;color:#777;margin:-8px 0 14px'>{_esc(text)}</div>"
+
+
 def _h2(text: str) -> str:
     return f"<h2 style='font:600 15px/1.3 system-ui,sans-serif;margin:20px 0 4px'>{_esc(text)}</h2>"
 
@@ -644,12 +723,13 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
                     ("visitors", "Visitors (distinct devices)"),
                     ("visits", "Visits / sessions"),
                     ("pageviews", "Pageviews"),
-                    ("events", "Custom events"),
+                    ("events", "Custom events (interactions)"),
                 )
             ],
             "Visitors = distinct Umami session_id, a hash of IP + user-agent. Visits = "
             "distinct visit_id; Umami opens a new visit after 30 minutes idle. Visits are "
-            "averaged per day, never summed: a visit straddling midnight belongs to both days.",
+            "averaged per day, never summed: a visit straddling midnight belongs to both days. "
+            + _BEACON_EXCLUSION_NOTE,
         )
     )
 
@@ -722,6 +802,8 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
                 for r in data["trend"]
             ]
             or [["(no data)", "", "", "", "", ""]],
+            "Events counts interactions only, on every day of the window, so the column stays "
+            "comparable across the arrival of a page-load beacon.",
         )
     )
 
@@ -809,8 +891,8 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
     ev = data["events"]
     parts.append(_h2("Events triggered"))
     parts.append(
-        f"<div style='font-size:13px;margin:0 0 8px'>{ev['total_events']} custom events across "
-        f"{ev['distinct_event_names']} distinct event names.</div>"
+        f"<div style='font-size:13px;margin:0 0 8px'>{ev['total_events']} interaction events "
+        f"across {ev['distinct_event_names']} distinct event names.</div>"
     )
     parts.append(
         _table(
@@ -838,6 +920,7 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
             "the seven days before this one; an event first emitted since then shows 0.",
         )
     )
+    parts.append(_beacon_line_html(ev))
 
     parts.append(
         "<hr style='border:0;border-top:1px solid #ddd;margin:22px 0 8px'>"
@@ -860,11 +943,11 @@ def render_text(data: dict, lead: str = "") -> str:
         ("visitors", "Visitors"),
         ("visits", "Visits/sessions"),
         ("pageviews", "Pageviews"),
-        ("events", "Custom events"),
+        ("events", "Events (interactions)"),
     ):
         node = h[key]
         out.append(
-            f"  {label:<16} {node['value']:>6}   vs prev day {_fmt_delta(node['vs_prev_day'])}"
+            f"  {label:<21} {node['value']:>6}   vs prev day {_fmt_delta(node['vs_prev_day'])}"
             f"   vs 7d mean {_fmt_delta(node['vs_mean_prior_7d'])}"
         )
     out += [
@@ -904,11 +987,14 @@ def render_text(data: dict, lead: str = "") -> str:
     out += [f"  {r['visitors']:>3}  browser {r['lang']}" for r in loc["browser_rows"]] or [
         "  (none)"
     ]
-    out += ["", "EVENTS TRIGGERED (ranked by visitors)"]
+    out += ["", "EVENTS TRIGGERED (interactions, ranked by visitors)"]
     out += [
         f"  {r['visitors']:>3}  {r['event_name']} ({r['events']} events)"
         for r in data["events"]["rows"]
     ] or ["  (none)"]
+    beacons = _beacon_summary(data["events"])
+    if beacons:
+        out += ["", f"  {beacons}"]
     return "\n".join(out)
 
 
@@ -963,6 +1049,13 @@ def llm_payload(data: dict) -> dict:
     What remains is either a whole-day total, a pre-computed delta, or a label
     with no number attached, so a cross-denominator ratio has no operands to be
     built from.
+
+    Instrumentation beacons are withheld for the same reason. `top_event_names`
+    is drawn from data["events"]["rows"], which compute() has already stripped of
+    INSTRUMENTATION_EVENTS, so the lead cannot open on "the event mix is
+    dominated by locale-active" -- a true sentence about a beacon that says
+    nothing about the day. Telling the model the event is uninteresting would not
+    hold; not showing it does.
     """
     return {
         "day": data["day"],

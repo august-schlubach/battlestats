@@ -7,12 +7,13 @@ content, the SQL's ranking/timezone discipline, and the FAILED path.
 """
 import ast
 import importlib.util
+import json
 import os
 import pathlib
 import re
 import subprocess
 import tempfile
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -106,7 +107,17 @@ RAW = {
         {"lang": "de", "visitors": 2},
         {"lang": "??", "visitors": 1},
     ],
+    # Ordered as the SQL returns it: by visitors DESC. The page-load beacon
+    # therefore arrives at the HEAD of the roster, which is exactly the position
+    # it must not keep once compute() has split it out.
     "events": [
+        {
+            "event_name": "locale-active",
+            "events": 75,
+            "visitors": 28,
+            "visits": 41,
+            "prior_daily_mean": 2.86,
+        },
         {
             "event_name": "ship-leaderboard-filter",
             "events": 17,
@@ -134,6 +145,12 @@ RAW = {
 
 def _computed(raw=None):
     return mod.compute({k: list(v) for k, v in (raw or RAW).items()}, DAY)
+
+
+def _bounds():
+    """(day_lo, day_hi, trend_lo) as build_sqls takes them."""
+    lo = datetime(2026, 8, 8, tzinfo=timezone.utc)
+    return lo, lo + timedelta(days=1), lo - timedelta(days=7)
 
 
 # --------------------------------------------------------------------------- #
@@ -198,6 +215,8 @@ class IdentityTests(SimpleTestCase):
 
 class EventSummaryTests(SimpleTestCase):
     def test_totals_and_distinct_names(self):
+        """Interaction events only: the fixture's 75 beacon events are not in the
+        24, and the beacon is not one of the 3 names."""
         ev = _computed()["events"]
         self.assertEqual(ev["total_events"], 24)
         self.assertEqual(ev["distinct_event_names"], 3)
@@ -216,6 +235,66 @@ class EventSummaryTests(SimpleTestCase):
         self.assertEqual(mod._event_family("search"), "search")
         self.assertEqual(mod._event_family("theme-change"), "theme-change")
         self.assertEqual(mod._event_family("player-insights-profile"), "player-insights")
+
+
+class InstrumentationEventTests(SimpleTestCase):
+    """A page-load beacon is not an interaction. It outranks every real event by
+    construction (one per page load, English included), and it arrived on
+    2026-08-10, so left in the roster it heads the ranking and shows a 26x rise
+    against a 7-day mean that predates it. Both statements are true and neither
+    describes the day."""
+
+    def test_the_beacon_is_held_out_of_the_ranked_roster(self):
+        ev = _computed()["events"]
+        self.assertNotIn("locale-active", [r["event_name"] for r in ev["rows"]])
+        self.assertEqual(ev["rows"][0]["event_name"], "ship-leaderboard-filter")
+
+    def test_the_beacon_is_held_out_of_the_feature_roster(self):
+        """`locale-active` would otherwise be the largest "feature area" on the
+        page, ahead of every feature anyone actually used."""
+        self.assertNotIn("locale-active", [f["family"] for f in _computed()["events"]["families"]])
+
+    def test_the_beacon_count_is_kept_rather_than_discarded(self):
+        ev = _computed()["events"]
+        self.assertEqual(ev["beacon_events"], 75)
+        self.assertEqual([r["event_name"] for r in ev["beacon_rows"]], ["locale-active"])
+
+    def test_the_model_never_sees_the_beacon(self):
+        """The file's standing doctrine: withholding the operands is what works;
+        instructing the model not to dwell on it does not."""
+        payload = mod.llm_payload(_computed())
+        self.assertNotIn("locale-active", [r["event_name"] for r in payload["top_event_names"]])
+        self.assertEqual(payload["total_custom_events"], 24)
+        self.assertNotIn("locale-active", json.dumps(payload))
+
+    def test_the_headline_event_count_excludes_beacons_on_every_day_of_the_window(self):
+        """Excluding it from the day but not the prior window would replace one
+        discontinuity with a worse one."""
+        sqls = mod.build_sqls("w-id", *_bounds())
+        self.assertIn(
+            "count(*) FILTER (WHERE event_type = 2 AND is_interaction) AS events", sqls["trend"]
+        )
+        self.assertIn("'locale-active'", sqls["trend"])
+
+    def test_single_view_visits_ignores_beacons(self):
+        """The beacon fires on every page load, so counting it as the "second
+        event" would make a single-view visit impossible and read as engagement
+        rising to a perfect score."""
+        sql = mod.build_sqls("w-id", *_bounds())["engagement"]
+        self.assertIn("event_type = 2 AND coalesce(we.event_name, '') NOT IN", sql)
+        self.assertIn("pv <= 1 AND ev = 0", sql)
+
+    def test_an_unnamed_event_is_not_mistaken_for_a_beacon(self):
+        """`NULL NOT IN (...)` is NULL, which a FILTER reads as false. The
+        coalesce is what keeps an unnamed custom event counted as an
+        interaction instead of silently vanishing from the totals."""
+        for name in ("trend", "engagement"):
+            self.assertIn("coalesce(we.event_name, '')", mod.build_sqls("w-id", *_bounds())[name])
+
+    def test_the_events_query_itself_stays_unfiltered(self):
+        """The split is done in Python so the beacon's own count survives to be
+        printed. Filtering in SQL would lose it."""
+        self.assertNotIn("locale-active", mod.build_sqls("w-id", *_bounds())["events"])
 
 
 class LocaleTests(SimpleTestCase):
@@ -345,6 +424,40 @@ class RenderTests(SimpleTestCase):
         for name in ("ship-leaderboard-filter", "search", "theme-change"):
             self.assertIn(name, self.html)
 
+    def test_the_beacon_is_reported_once_as_instrumentation_not_as_a_ranked_row(self):
+        """Demoted, not suppressed: the operator still gets the number, in a flat
+        sentence that cannot head a ranking, and is told why it is set apart."""
+        self.assertIn("Instrumentation, excluded from every figure above", self.html)
+        self.assertIn("locale-active 75 events from 28 visitors", self.html)
+        # Never a row in the ranked table: cells render as <td ...>name</td>.
+        self.assertNotIn(">locale-active</td>", self.html)
+        # No delta beside it: a beacon's movement is pageview movement, which
+        # Totals already reports.
+        self.assertNotIn("2.86", self.html)
+
+    def test_the_headline_row_says_what_it_counts(self):
+        self.assertIn("Custom events (interactions)", self.html)
+        self.assertIn("fire on every load rather than on anything the visitor chose", self.html)
+
+    def test_the_legends_name_the_beacons_from_the_constant(self):
+        """The runbook promises that adding a beacon needs no other edit. A
+        hardcoded name in a legend would quietly break that promise."""
+        self.assertIn("(locale-active)", mod._BEACON_EXCLUSION_NOTE)
+        for name in mod.INSTRUMENTATION_EVENTS:
+            self.assertIn(name, mod._BEACON_EXCLUSION_NOTE)
+
+    def test_text_alternative_carries_the_same_demotion(self):
+        text = self.email["text"]
+        self.assertIn("EVENTS TRIGGERED (interactions, ranked by visitors)", text)
+        self.assertIn("Instrumentation, excluded from every figure above", text)
+        self.assertEqual(text.count("locale-active"), 1)
+
+    def test_a_day_with_no_beacon_prints_no_instrumentation_line(self):
+        raw = dict(RAW, events=[r for r in RAW["events"] if r["event_name"] != "locale-active"])
+        email = mod.render(_computed(raw))
+        self.assertNotIn("Instrumentation, excluded", email["html_body"])
+        self.assertNotIn("Instrumentation, excluded", email["text"])
+
     def test_html_is_escaped_not_injected(self):
         raw = dict(RAW, pages=[{"url_path": "/<script>x</script>", "visitors": 1, "visits": 1, "pageviews": 1}])
         html = mod.render(mod.compute(raw, DAY))["html_body"]
@@ -358,7 +471,7 @@ class RenderTests(SimpleTestCase):
 
     def test_text_alternative_carries_the_headline_and_the_split(self):
         text = self.email["text"]
-        self.assertIn("Visitors             29", text)
+        self.assertIn("Visitors                  29", text)
         self.assertIn("new 13 (44.8%); returning 16 (55.2%)", text)
 
     def test_language_section_states_both_denominators_in_the_email_itself(self):
