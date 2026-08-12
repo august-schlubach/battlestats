@@ -2993,6 +2993,32 @@
                 "recapture-lapsed-players-removed"
             ]
         },
+        "agents/runbooks/runbook-recapture-upstream-failure-guard-2026-08-12.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "recapture upstream failure guard",
+                "recapture abort",
+                "recapture chunk failure abort",
+                "recapture aborted pass"
+            ],
+            "tags": [
+                "recapture",
+                "abort",
+                "upstream-failure",
+                "ops-email",
+                "alerting",
+                "chunk-errors",
+                "dns",
+                "benchmark-snapshots"
+            ],
+            "archive_on": [
+                "recapture-lapsed-players-removed"
+            ]
+        },
         "agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md": {
             "kind": "runbook",
             "status": "active",
