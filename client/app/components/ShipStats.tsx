@@ -70,6 +70,13 @@ interface ShipCombatPayload {
     user_battles: number;
     has_user_data: boolean;
     clusters: ShipStatCluster[];
+    // First-ever view of this ship on this realm: the population aggregation is
+    // warming in the background (too heavy for the request thread — see
+    // data._ship_population_brackets_30d). `clusters` is EMPTY on a pending
+    // payload, so this must be checked BEFORE clusters.length or the panel
+    // reports "not enough data" for a ship that simply has not warmed yet.
+    // Absent on ready payloads.
+    pending?: boolean;
 }
 
 interface ShipStatsProps {
@@ -119,7 +126,9 @@ const ShipStats: React.FC<ShipStatsProps> = ({
     playerName, realm, shipId, shipName, onClose,
 }) => {
     const [payload, setPayload] = useState<ShipCombatPayload | null>(null);
-    const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
+    const [state, setState] = useState<
+        'loading' | 'warming' | 'warming_timeout' | 'ready' | 'empty' | 'error'
+    >('loading');
     const [bracket, setBracket] = useState<SkillBracket>('all');
 
     useEffect(() => {
@@ -127,21 +136,64 @@ const ShipStats: React.FC<ShipStatsProps> = ({
         setPayload(null);
         setState('loading');
 
-        fetchSharedJson<ShipCombatPayload>(
-            withRealm(`/api/player/${encodeURIComponent(playerName)}/ship/${shipId}/combat-stats`, realm),
-            { label: 'Ship combat stats', ttlMs: PLAYER_ROUTE_PANEL_FETCH_TTL_MS },
-        )
-            .then(({ data }) => {
-                if (cancelled) return;
-                setPayload(data);
-                setState(data.clusters.length > 0 ? 'ready' : 'empty');
-            })
-            .catch(() => {
-                if (cancelled) return;
-                setState('error');
-            });
+        const url = withRealm(
+            `/api/player/${encodeURIComponent(playerName)}/ship/${shipId}/combat-stats`,
+            realm,
+        );
+        // Poll cadence for a warming population: ~3s × 20 ≈ 60s, comfortably over
+        // the ~36s worst observed cold compute plus warm-queue latency. Only the
+        // very first view of a ship on a realm warms; every later one is served
+        // from the durable `:published` copy, so the opening fetch keeps the
+        // normal panel TTL. Every POLL must bypass the settled cache (ttlMs:0) —
+        // with a TTL the poll would keep re-reading the cached pending stub and
+        // never observe the warm landing. The server cache + in-flight dedup keep
+        // the re-fetches cheap.
+        const POLL_MS = 3000;
+        const MAX_POLLS = 20;
+        let polls = 0;
+        let timer: ReturnType<typeof setTimeout> | undefined;
 
-        return () => { cancelled = true; };
+        const run = () => {
+            fetchSharedJson<ShipCombatPayload>(url, {
+                label: 'Ship combat stats',
+                ttlMs: polls === 0 ? PLAYER_ROUTE_PANEL_FETCH_TTL_MS : 0,
+            })
+                .then(({ data }) => {
+                    if (cancelled) return;
+                    // Check `pending` BEFORE clusters.length — a pending payload
+                    // carries no clusters, so on ANY path where it reaches the
+                    // branch below it would render "not enough data" for a ship
+                    // that has simply not warmed. That includes exhausting the
+                    // poll budget: the warm runs on the `background` queue, which
+                    // can be minutes deep behind enrichment batches, and on the
+                    // first day after deploy no ship has a published copy yet —
+                    // so timing out is expected, not exceptional. It gets its own
+                    // terminal state and never falls through.
+                    if (data.pending) {
+                        setPayload(data);
+                        if (polls < MAX_POLLS) {
+                            polls += 1;
+                            setState('warming');
+                            timer = setTimeout(run, POLL_MS);
+                        } else {
+                            setState('warming_timeout');
+                        }
+                        return;
+                    }
+                    setPayload(data);
+                    setState(data.clusters.length > 0 ? 'ready' : 'empty');
+                })
+                .catch(() => {
+                    if (cancelled) return;
+                    setState('error');
+                });
+        };
+        run();
+
+        return () => {
+            cancelled = true;
+            if (timer) clearTimeout(timer);
+        };
     }, [playerName, realm, shipId]);
 
     const headerName = payload?.ship_name || shipName || `Ship ${shipId}`;
@@ -182,6 +234,18 @@ const ShipStats: React.FC<ShipStatsProps> = ({
 
             {state === 'loading' ? (
                 <p className="mt-3 animate-pulse text-sm text-[var(--accent-light)]">Loading ship combat profile…</p>
+            ) : null}
+
+            {state === 'warming' ? (
+                <p className="mt-3 animate-pulse text-sm text-[var(--accent-light)]">
+                    Building this ship&apos;s population comparison for the first time…
+                </p>
+            ) : null}
+
+            {state === 'warming_timeout' ? (
+                <p className="mt-3 text-sm text-[var(--text-muted)]">
+                    Still building this ship&apos;s comparison — check back in a minute.
+                </p>
             ) : null}
 
             {state === 'error' ? (

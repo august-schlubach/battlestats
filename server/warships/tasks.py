@@ -199,6 +199,16 @@ def _ships_by_pct_warm_dispatch_key(realm, tier, ship_type, mode) -> str:
             f":t{tier}:{ship_type}:dispatch")
 
 
+def _ship_combat_pop_warm_lock_key(realm, ship_id, window_days) -> str:
+    return (f"warships:tasks:warm_ship_combat_pop:{realm}"
+            f":{int(ship_id)}:{window_days}:lock")
+
+
+def _ship_combat_pop_warm_dispatch_key(realm, ship_id, window_days) -> str:
+    return (f"warships:tasks:warm_ship_combat_pop:{realm}"
+            f":{int(ship_id)}:{window_days}:dispatch")
+
+
 def _realm_ships_pct_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_realm_ships_pct:{realm}:lock"
 
@@ -448,6 +458,48 @@ def queue_ships_by_pct_warm(realm=DEFAULT_REALM, tier=None, ship_type=None,
         logger.warning(
             "Skipping ships-by-pct warm enqueue because broker dispatch failed: %s",
             error,
+        )
+        return {"status": "skipped", "reason": "enqueue-failed"}
+
+
+def queue_ship_combat_pop_warm(ship_id, realm=DEFAULT_REALM,
+                               window_days=None):
+    """Lock- + dispatch-aware enqueue of the ship-combat population warmer.
+
+    Called from the cold read path (`data._ship_population_brackets_30d`) when
+    a ship's day-scoped population key is cold. The recompute is a per-(ship,
+    player) aggregation joined to `warships_player` — 36s on prod for a popular
+    T10 (2026-08-12), past the 25s gunicorn timeout — so the request thread
+    NEVER computes it: it serves last-good (or a `pending` stub on first-ever
+    view) while this background warm fills the key. The per-(realm, ship) lock
+    + dispatch dedup coalesce a burst of pollers into at most one warm. Mirrors
+    queue_ships_by_pct_warm.
+    """
+    from warships.data import SHIP_COMBAT_WINDOW_DAYS
+
+    if window_days is None:
+        window_days = SHIP_COMBAT_WINDOW_DAYS
+
+    lock_key = _ship_combat_pop_warm_lock_key(realm, ship_id, window_days)
+    if cache.get(lock_key):
+        return {"status": "skipped", "reason": "already-running"}
+
+    dispatch_key = _ship_combat_pop_warm_dispatch_key(
+        realm, ship_id, window_days)
+    if not cache.add(
+        dispatch_key, "queued", timeout=REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT,
+    ):
+        return {"status": "skipped", "reason": "already-queued"}
+
+    try:
+        warm_ship_combat_pop_task.delay(
+            ship_id=ship_id, realm=realm, window_days=window_days)
+        return {"status": "queued"}
+    except Exception as error:
+        cache.delete(dispatch_key)
+        logger.warning(
+            "Skipping ship-combat-pop warm enqueue because broker dispatch "
+            "failed: %s", error,
         )
         return {"status": "skipped", "reason": "enqueue-failed"}
 
@@ -1474,6 +1526,48 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
         # Let the next cold-read enqueue fire (mirrors the other warmers).
         cache.delete(_realm_top_ships_warm_dispatch_key(realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_ship_combat_pop_task(self, ship_id=None, realm=DEFAULT_REALM,
+                              window_days=None):
+    """Compute + cache one ship's skill-bracketed population for the ShipStats panel.
+
+    The only path that runs the heavy aggregation. Writes both the day-scoped
+    fresh key and the durable `:published` last-good copy, so tomorrow's first
+    viewer gets yesterday's numbers instantly instead of a pending poll. Held
+    under a per-(realm, ship) lock so a burst of pollers on a popular ship
+    cannot queue N concurrent 36s jobs. Runs on the `background` queue, off the
+    user-facing lanes. See queue_ship_combat_pop_warm.
+    """
+    from warships.data import (
+        SHIP_COMBAT_WINDOW_DAYS, _ship_population_brackets_30d,
+    )
+
+    if window_days is None:
+        window_days = SHIP_COMBAT_WINDOW_DAYS
+
+    lock_key = _ship_combat_pop_warm_lock_key(realm, ship_id, window_days)
+    if not cache.add(lock_key, self.request.id, timeout=300):
+        logger.info(
+            "Skipping warm_ship_combat_pop_task realm=%s ship=%s — already running",
+            realm, ship_id)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        brackets = _ship_population_brackets_30d(
+            ship_id, realm, window_days, use_cache=False)
+        players = brackets["all"]["players"]
+        logger.info(
+            "Warmed ship-combat population realm=%s ship=%s players=%s",
+            realm, ship_id, players)
+        return {"status": "completed", "realm": realm, "ship_id": ship_id,
+                "window_days": window_days, "players": players}
+    finally:
+        cache.delete(lock_key)
+        # Let the next cold-read enqueue fire (mirrors the other warmers).
+        cache.delete(_ship_combat_pop_warm_dispatch_key(
+            realm, ship_id, window_days))
 
 
 @app.task(bind=True, **TASK_OPTS)

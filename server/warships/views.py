@@ -1336,7 +1336,14 @@ def ship_combat_stats(request, player_name: str, ship_id: int) -> Response:
 
     from warships.data import compute_ship_combat_comparison
     payload = compute_ship_combat_comparison(player, ship_id, realm)
-    return Response(payload)
+    response = Response(payload)
+    # First-ever view of this ship on this realm: the population aggregation is
+    # warming in the background (it is far too heavy for the request thread).
+    # The client polls (also signalled by `pending: true` in the body) until it
+    # lands. Every later view serves the durable `:published` copy instead.
+    if payload.get("pending"):
+        response["X-Ship-Combat-Pending"] = "true"
+    return response
 
 
 @api_view(["GET"])

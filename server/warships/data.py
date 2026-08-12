@@ -46,6 +46,29 @@ def _elevated_work_mem():
         pass  # SET LOCAL resets at transaction end
 
 
+@contextmanager
+def _statement_timeout(timeout_ms: int):
+    """Bound a heavy analytical statement so it can never outlive its caller.
+
+    Must be used INSIDE a `transaction.atomic()` — `SET LOCAL` resets at
+    transaction end. An over-budget statement raises `OperationalError`
+    ("canceling statement due to statement timeout") instead of running until
+    the gunicorn worker is SIGABRT'd, which is what turned a slow ship-combat
+    population query into a 500 with an empty body (2026-08-12). No-op off
+    PostgreSQL so the sqlite test harness is unaffected.
+    """
+    if connection.vendor != 'postgresql':
+        yield
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL statement_timeout = %s", [int(timeout_ms)])
+    try:
+        yield
+    finally:
+        pass  # SET LOCAL resets at transaction end
+
+
 KILL_RATIO_LOW_TIER_WEIGHT = 0.15
 KILL_RATIO_MID_TIER_WEIGHT = 0.65
 KILL_RATIO_HIGH_TIER_WEIGHT = 1.0
@@ -7106,6 +7129,13 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
 
 SHIP_COMBAT_WINDOW_DAYS = 30
 _SHIP_COMBAT_POP_CACHE_TTL = 3600  # 1h — population aggregate is player-independent
+# Hard ceiling for the population aggregation, applied inside the warm task's
+# transaction. Sized well above the ~36s observed for a popular T10 on prod
+# (2026-08-12) so a normal warm always completes, but bounded so a pathological
+# ship cannot pin a `background` worker or a DB backend indefinitely. Env-tunable
+# because the ceiling depends on DB size/sizing, not on code.
+SHIP_COMBAT_POP_STATEMENT_TIMEOUT_MS = int(
+    os.getenv('SHIP_COMBAT_POP_STATEMENT_TIMEOUT_MS', '180000'))  # 3 min
 
 # The widened per-day columns summed for the population aggregate. ships_stats_json
 # calls damage `damage_dealt`; PlayerDailyShipStats calls it `damage` — normalized
@@ -7371,26 +7401,69 @@ _SHIP_COMBAT_BRACKET_FRACTION = {'all': 1.0, 'top50': 0.50, 'top25': 0.25}
 _SHIP_COMBAT_MIN_ACCOUNT_BATTLES = 200
 
 
-def _ship_population_brackets_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW_DAYS):
+def _ship_combat_pop_fresh_cache_key(realm, ship_id, window_days) -> str:
+    """Day-scoped key for one ship's population brackets. Rotates at UTC
+    midnight so the window advances with the calendar."""
+    return (
+        f"ship_combat_pop:v2:{realm}:{int(ship_id)}:{window_days}:"
+        f"{django_timezone.now().date().isoformat()}"
+    )
+
+
+def _ship_combat_pop_published_cache_key(realm, ship_id, window_days) -> str:
+    """Durable, window-INDEPENDENT last-good copy (`timeout=None`).
+
+    The fresh key above rotates daily, so without this every ship's first
+    viewer of the day would get a `pending` stub and have to poll through a
+    ~36s warm. Serving yesterday's brackets is a fine answer for a 30-day
+    rolling population. Mirrors the ships-by-pct `:published` idiom.
+    """
+    return (f"ship_combat_pop:published:{realm}:{int(ship_id)}:{window_days}")
+
+
+def _ship_population_brackets_30d(ship_id, realm,
+                                  window_days=SHIP_COMBAT_WINDOW_DAYS,
+                                  use_cache=True):
     """Per-skill-bracket summed PlayerDailyShipStats (random) for one ship over
     the trailing window. Players are aggregated individually, ranked by overall
     account random win rate (Player.pvp_ratio, accounts with >=200 pvp battles),
-    then summed into the All / top-50% / top-25% brackets. Cached per
-    (realm, ship, day)."""
+    then summed into the All / top-50% / top-25% brackets.
+
+    **Never computed on the request thread.** This is a per-(ship, player)
+    aggregation joined to `warships_player`; measured at 36s on prod for a
+    popular T10 (2026-08-12), well past the 25s `GUNICORN_TIMEOUT_SECONDS`,
+    which SIGABRT'd the worker and returned a 500 with an empty body. The join
+    is disk-bound random I/O (~119k reads), so neither a join reorder nor an
+    index brings it under the client's 15s timeout — it belongs off the
+    request thread entirely, like the ships-by-pct buckets.
+
+    With `use_cache=True` (the read path) this returns the day-scoped copy, the
+    durable `:published` last-good copy, or **None** — never the aggregation.
+    `None` means "no data yet"; the caller serves a `pending` payload and the
+    client polls. The background warm (`warm_ship_combat_pop_task`) calls with
+    `use_cache=False`, which is the only path that runs the query.
+    """
     import math
     from warships.models import PlayerDailyShipStats
 
-    cache_key = (
-        f"ship_combat_pop:v2:{realm}:{ship_id}:{window_days}:"
-        f"{django_timezone.now().date().isoformat()}"
-    )
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
+    cache_key = _ship_combat_pop_fresh_cache_key(realm, ship_id, window_days)
+    published_key = _ship_combat_pop_published_cache_key(
+        realm, ship_id, window_days)
+
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+        # Fresh key cold (daily rotation / eviction / never computed). Queue one
+        # background warm and serve last-good if we have it, else signal pending.
+        from warships.tasks import queue_ship_combat_pop_warm
+        queue_ship_combat_pop_warm(ship_id, realm, window_days)
+        return cache.get(published_key)
 
     cutoff = django_timezone.now().date() - timedelta(days=window_days)
     sum_kwargs = {f: Sum(f) for f in _SHIP_COMBAT_SUM_FIELDS}
-    with transaction.atomic(), _elevated_work_mem():
+    with transaction.atomic(), _elevated_work_mem(), \
+            _statement_timeout(SHIP_COMBAT_POP_STATEMENT_TIMEOUT_MS):
         per_player = list(
             PlayerDailyShipStats.objects
             .filter(ship_id=ship_id, mode='random', date__gte=cutoff,
@@ -7419,6 +7492,9 @@ def _ship_population_brackets_30d(ship_id, realm, window_days=SHIP_COMBAT_WINDOW
         result[bracket] = _sum_rows(per_player[:count])
 
     cache.set(cache_key, result, _SHIP_COMBAT_POP_CACHE_TTL)
+    # Write-new-then-overwrite: the durable copy is what a cold fresh key falls
+    # back to tomorrow, so it must never be cleared before its replacement lands.
+    cache.set(published_key, result, None)
     return result
 
 
@@ -7477,6 +7553,28 @@ def compute_ship_combat_comparison(player, ship_id, realm,
     may be None (no battles in the window / empty bracket)."""
     ship_id = int(ship_id)
     brackets = _ship_population_brackets_30d(ship_id, realm, window_days)
+    if brackets is None:
+        # Population not computed yet and no last-good copy (first-ever view of
+        # this ship on this realm). A background warm is running; return a
+        # `pending` stub the client polls on. Identity is resolved so the modal
+        # can render its header meanwhile. NB the client must branch on
+        # `pending` BEFORE `clusters.length`, or an empty cluster list reads as
+        # "no data for this ship".
+        pending_ship = Ship.objects.filter(ship_id=ship_id).first()
+        return {
+            'ship_id': ship_id,
+            'ship_name': (pending_ship.name if pending_ship else ''),
+            'ship_tier': pending_ship.tier if pending_ship else None,
+            'ship_type': pending_ship.ship_type if pending_ship else None,
+            'window_days': window_days,
+            'min_account_battles': _SHIP_COMBAT_MIN_ACCOUNT_BATTLES,
+            'brackets': {bracket: {'players': 0, 'battles': 0}
+                         for bracket in _SHIP_COMBAT_BRACKETS},
+            'user_battles': 0,
+            'has_user_data': False,
+            'clusters': [],
+            'pending': True,
+        }
     pop_all = brackets['all']
     # 30d window totals for the core per-battle metrics (match the table); career
     # totals for the accuracy ratios (30d gunnery is too sparse — see specs).

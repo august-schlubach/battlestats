@@ -111,4 +111,113 @@ describe('ShipStats', () => {
         await waitFor(() => expect(screen.getByText('55.1%')).toBeInTheDocument());
         expect(screen.queryByText('49.4%')).not.toBeInTheDocument();
     });
+
+    // ── warming (population not yet computed) ────────────────────────────────
+    // A pending payload carries NO clusters. Checked in the wrong order this
+    // reads as "empty" and the panel confidently reports there is no data for a
+    // ship that simply has not warmed yet. See ShipCombatPayload.pending.
+    describe('while the population is warming', () => {
+        const pendingPayload = {
+            ...payload,
+            brackets: {
+                all: { players: 0, battles: 0 },
+                top50: { players: 0, battles: 0 },
+                top25: { players: 0, battles: 0 },
+            },
+            user_battles: 0,
+            has_user_data: false,
+            clusters: [],
+            pending: true,
+        };
+
+        it('shows the warming notice, not the "not enough data" empty state', async () => {
+            mockFetch.mockResolvedValue({ data: pendingPayload } as never);
+            renderPanel();
+            expect(
+                await screen.findByText(/Building this ship.s population comparison/i),
+            ).toBeInTheDocument();
+            expect(
+                screen.queryByText(/Not enough recent server data/i),
+            ).not.toBeInTheDocument();
+        });
+
+        it('keeps the ship name visible so the header is not a bare id', async () => {
+            mockFetch.mockResolvedValue({ data: pendingPayload } as never);
+            renderPanel();
+            await screen.findByText(/Building this ship.s population comparison/i);
+            expect(screen.getByText('Henri IV')).toBeInTheDocument();
+        });
+
+        it('polls and renders the table once the warm lands', async () => {
+            mockFetch
+                .mockResolvedValueOnce({ data: pendingPayload } as never)
+                .mockResolvedValue({ data: payload } as never);
+            jest.useFakeTimers();
+            try {
+                renderPanel();
+                // First response is pending → warming, no table yet.
+                await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+                expect(screen.queryByText('Win rate')).not.toBeInTheDocument();
+                jest.advanceTimersByTime(3000);
+                await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+            } finally {
+                jest.useRealTimers();
+            }
+            expect(await screen.findByText('Win rate')).toBeInTheDocument();
+        });
+
+        it('never renders the empty state after the poll budget is exhausted', async () => {
+            // The warm runs on the `background` queue, which can be minutes deep;
+            // timing out is expected, not exceptional. A still-pending payload
+            // must NOT fall through to "not enough data" — that is the same lie
+            // the pending branch exists to prevent, just deferred.
+            mockFetch.mockResolvedValue({ data: pendingPayload } as never);
+            jest.useFakeTimers();
+            try {
+                renderPanel();
+                // 1 opening fetch + MAX_POLLS (20) polls.
+                for (let i = 0; i < 21; i += 1) {
+                    await waitFor(() =>
+                        expect(mockFetch).toHaveBeenCalledTimes(i + 1));
+                    jest.advanceTimersByTime(3000);
+                }
+            } finally {
+                jest.useRealTimers();
+            }
+            await waitFor(() =>
+                expect(screen.getByText(/Still building this ship.s comparison/i))
+                    .toBeInTheDocument());
+            expect(
+                screen.queryByText(/Not enough recent server data/i),
+            ).not.toBeInTheDocument();
+            // And it stops polling rather than hammering forever.
+            const settled = mockFetch.mock.calls.length;
+            jest.useFakeTimers();
+            jest.advanceTimersByTime(30000);
+            jest.useRealTimers();
+            expect(mockFetch).toHaveBeenCalledTimes(settled);
+        });
+
+        it('bypasses the settled cache when polling so the warm is observable', async () => {
+            mockFetch
+                .mockResolvedValueOnce({ data: pendingPayload } as never)
+                .mockResolvedValue({ data: payload } as never);
+            jest.useFakeTimers();
+            try {
+                renderPanel();
+                await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
+                jest.advanceTimersByTime(3000);
+                await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+            } finally {
+                jest.useRealTimers();
+            }
+            // Opening fetch keeps the panel TTL; the poll must use ttlMs 0, or it
+            // would keep re-reading the cached pending stub forever.
+            expect(mockFetch.mock.calls[0][1]).toEqual(
+                expect.objectContaining({ ttlMs: expect.any(Number) }));
+            expect((mockFetch.mock.calls[0][1] as { ttlMs: number }).ttlMs)
+                .toBeGreaterThan(0);
+            expect((mockFetch.mock.calls[1][1] as { ttlMs: number }).ttlMs).toBe(0);
+        });
+    });
 });
