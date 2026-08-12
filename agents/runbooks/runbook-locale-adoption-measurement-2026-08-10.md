@@ -322,6 +322,14 @@ reports a UI figure covering roughly eight hours against a browser figure coveri
 The check is generic rather than date-pinned, so it also catches stale-bundle drift later and goes
 quiet on its own from 2026-08-11 onward.
 
+The Language section is the **only** place in that email where `locale-active` appears as a figure.
+From 2026-08-12 the beacon is classed as instrumentation (`INSTRUMENTATION_EVENTS`) and held out of
+the headline custom-event count, the trend window, the engagement second-event test and the event
+ranking: an event every visitor emits on every page load cannot be outranked, and the 2026-08-11
+lead duly opened on it instead of on anything a visitor did. See
+`runbook-daily-traffic-email-2026-08-09.md`. Its raw count is still printed once, as prose, under
+Events triggered.
+
 The model that writes the lead paragraph gets **only the two pre-computed percentages**, never the
 counts behind them — the same withholding rule the rest of that script already follows, since
 handed both operands it divides one by the other and calls the browser ceiling usage. The payload

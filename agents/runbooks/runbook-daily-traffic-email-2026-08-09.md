@@ -58,7 +58,7 @@ inactivity. That is the "session" of ordinary analytics usage.
 | Visitors | `count(DISTINCT session_id)` over the day's events | "Visitors" |
 | Visits / sessions | `count(DISTINCT visit_id)` | "Visits" |
 | Pageviews | `count(*) WHERE event_type = 1` | "Views" |
-| Custom events | `count(*) WHERE event_type = 2` | "Events" |
+| Custom events (interactions) | `count(*) WHERE event_type = 2 AND event_name NOT IN INSTRUMENTATION_EVENTS` | "Events", minus page-load beacons |
 
 **Visits do not sum across days.** A visit spanning midnight carries one `visit_id` and is
 counted in both days. The report therefore averages per-day figures and never totals a
@@ -117,6 +117,43 @@ Own-domain referrers (`referrer_domain = hostname`) are internal navigation and 
 excluded from the acquisition table; on 2026-08-08 that row would otherwise have been the
 second largest.
 
+### Page-load beacons are not interactions (2026-08-12)
+
+`INSTRUMENTATION_EVENTS` in the script lists the custom events that fire on **every page
+load** rather than on something a visitor chose to do. `locale-active` is the whole list
+today: `LocaleBeacon` emits it once per load, English included, because the locale runbook
+needs English as the denominator.
+
+Left in the roster it distorted the report three ways, all of them visible in the live
+2026-08-11 email:
+
+1. **It headed the ranking by construction.** Ranking by distinct visitors cannot demote an
+   event that every visitor emits. The lead paragraph opened "the event mix is dominated by
+   locale-active at 75 against a prior daily mean of 2.86" — true, and about the deploy
+   rather than the day.
+2. **It broke its own 7-day comparison.** The beacon shipped 2026-08-10, so the prior window
+   partly predates it and any ratio against that mean measures the rollout.
+3. **It silently zeroed an engagement measure.** "Single-view visits (no second event)" tests
+   `pv <= 1 AND ev = 0`. Once every page load emitted a custom event, `ev = 0` became
+   unreachable and the measure would have read zero forever — as an engagement *win*.
+
+So beacons are excluded from the headline Custom events row, from **every day** of the trend
+window (excluding them from the day alone would swap one discontinuity for a worse one),
+from the engagement second-event test, from the feature-area roster, and from
+`llm_payload()`. The `events` **query itself stays unfiltered**: the split happens in
+`compute()` so the beacon's own count survives to be printed once, as a flat sentence under
+Events triggered, with no delta beside it — a beacon's day-over-day movement is pageview
+movement, which Totals already reports.
+
+Verified on live data 2026-08-12: the 2026-08-11 day re-rendered with events 305 → 230 and
+its prior mean 137.6 → 134.7, and the regenerated lead named search, player-insights-profile
+and player-history-day instead.
+
+**Adding a beacon later:** put the event name in `INSTRUMENTATION_EVENTS` and nothing else
+changes — the SQL predicate, the Totals legend and the instrumentation sentence are all
+derived from that tuple, and a test asserts the legend names every member of it. The rule of
+thumb is whether a visitor could have chosen not to emit the event.
+
 ## Timezone
 
 Everything is a whole **UTC** day, matching the rest of the project. The report defaults to
@@ -173,6 +210,11 @@ referrers and countries. `pages`, `routes`, `referrers` and `countries` rows nev
 A test pins the payload's key set to an explicit allowlist, so adding a count back is a
 deliberate act rather than an accident. The prompt additionally bans any "X of Y"
 construction, as belt and braces.
+
+The same doctrine settled the `locale-active` problem above: `top_event_names` is drawn from
+the already-split interaction roster, so the beacon is not in the model's view at all. No
+prompt rule tells it the beacon is uninteresting, because that class of instruction is the
+one that already failed here once.
 
 ## Configuration
 
@@ -286,12 +328,18 @@ ENGAGEMENT
 
 ## Tests
 
-`server/warships/tests/test_daily_traffic_email.py` — 59 tests. The script is loaded by
+`server/warships/tests/test_daily_traffic_email.py` — 92 tests. The script is loaded by
 path (it is a cron entrypoint, not a Django module); `run_queries` and `send_email` are
 both mocked. Coverage: the delta and mean arithmetic, the new/returning denominator, the
 event-family rollup, path percent-decoding, HTML escaping, the rendered legends, the SQL's
 ranking and timezone discipline, the `psql` transport's error paths, config precedence, and
 the FAILED path including its `--dry-run` suppression.
+
+The shared fixture carries a `locale-active` row **at the head of the event roster**, where
+the SQL's visitor ordering really puts it, so every existing assertion about totals,
+rankings and families now also asserts the beacon split. `InstrumentationEventTests` pins
+the rest: held out of the roster, the families, the trend SQL, the engagement SQL and the
+model payload; kept in `beacon_rows`; rendered once as prose and never as a `<td>`.
 
 ## Known gaps
 
@@ -302,6 +350,8 @@ the FAILED path including its `--dry-run` suppression.
   dashboard. It counts visits with at most one pageview **and zero custom events**
   (`pv <= 1 AND ev = 0`); Umami's bounce ignores custom events. On 2026-08-08 that is 25 of
   48, where the pageview-only test would have said 33. The stricter form is deliberate: a
-  visitor who landed once but then filtered the ship leaderboard did not bounce.
+  visitor who landed once but then filtered the ship leaderboard did not bounce. `ev` counts
+  **interactions only** — see the beacon section above for why that qualifier is what keeps
+  this measure alive at all.
 - The **`new_but_known_bs_vid`** correction has never yet fired; it is untested against real
   positive data because no such case exists yet in production.
