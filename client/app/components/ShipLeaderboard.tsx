@@ -39,7 +39,12 @@ const TIERS: Tier[] = [8, 9, 10];
 // stats (battles, avg dmg, kills/battle, WR) to the top N% of that ship's
 // players by win rate — answering "how are good/great players doing with these
 // ships?". `null` is the default realm-wide aggregate. Must match the backend's
-// SHIP_LIST_WR_PCTS (50/25). Does NOT change which ships are listed.
+// SHIP_LIST_WR_PCTS (50/25). The backend's membership gate is the same in both
+// paths (full-population battles >= SHIP_LIST_MIN_BATTLES), so switching pills
+// is not *meant* to change which ships are listed — but the all-view and the pct
+// buckets are warmed by different tasks into separate cache keys, so a pill can
+// be serving an older window and thus a genuinely different ship set. See the
+// note on dataBasisHint; the tooltip promises nothing about ship membership.
 export type WrPct = 50 | 25 | null;
 // `label` for the 50/25 pills is a plain percent literal (no translation
 // case — digits + "%" read the same in every locale); `null` ("All") is
@@ -306,13 +311,33 @@ const SortButton: React.FC<{
 const ariaSort = (active: boolean, dir: SortDir): 'ascending' | 'descending' | 'none' =>
     active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none';
 
+// The listing floor is the backend's SHIP_LIST_MIN_BATTLES (server/warships/
+// data.py, default 50; verified 2026-08-12 to have no override in the droplet's
+// /etc/battlestats-server.env, so 50 is the live value). It is hardcoded rather
+// than read from the payload deliberately: the all-view and each pct bucket
+// serve durable `:published` copies that can be weeks old, so a newly added
+// payload field would leave this sentence blank on the live site until every
+// cached bucket rotated.
+const MIN_BATTLES_TO_LIST = 50;
+
 // Derives the window length from the served payload's date bounds so the copy
 // always matches the actual standings window (30/45/60/90 as
 // SHIP_LEADERBOARD_WINDOW_DAYS advances) rather than a hardcoded number.
+//
+// Deliberately makes NO claim that the listed ship set is identical across the
+// WR pills. The backend gates membership on full-population battles in both the
+// all-path and the percentile path, but the two are warmed by different tasks
+// and cached under separate keys, so in practice they can be serving different
+// windows and therefore different ship lists (observed 2026-08-12: NA T10
+// Destroyer served All from a 2026-07-25 window and its 50/25 buckets from
+// 2026-08-12 — Fuyutsuki listed in the pct buckets, absent from All, because
+// warm_realm_top_ships_task had been dying on its 540s soft time limit and only
+// the pct half of the chain was still landing). Describe what the filter does;
+// do not promise what the cache cannot honor.
 const dataBasisHint = (windowDays: number | null): string =>
     `Stats are aggregated from battle observations recorded during the ${
         windowDays ? `rolling trailing ${windowDays}-day window` : 'rolling standings window'
-    }. The WR filter narrows each ship’s stats to its top 50% or 25% of players by win rate (the ships listed never change).`;
+    }. A ship needs at least ${MIN_BATTLES_TO_LIST} battles in that window to be listed. The WR filter narrows each ship’s stats to its top 50% or 25% of players by win rate.`;
 
 // Info affordance with a hover/focus tooltip — styled to match the circle-info
 // buttons in the Players/Clans landing sections below (FontAwesomeIcon + the

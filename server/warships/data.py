@@ -6826,7 +6826,18 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     are re-pooled over only the top ``wr_pct``% of its players by window win rate
     (answering "how are good/great players doing with these ships"). The *listed
     ship set is unchanged* — membership still gates on full-population battles ≥
-    ``min_battles`` — only the displayed numbers narrow. ``player_min_battles``
+    ``min_battles`` — only the displayed numbers narrow. That invariant holds
+    per-computation, NOT per-serve: the all-view and the pct buckets are filled
+    by different warmers into separate cache keys, so a viewer toggling the pills
+    can be handed payloads computed over **different windows** and therefore
+    different ship sets (observed 2026-08-12: NA T10 Destroyer served the all-view
+    from a 2026-07-25 window while its 50/25 buckets were on 2026-08-12, so
+    Fuyutsuki appeared under 50/25 and was absent from All — the cause was
+    ``warm_realm_top_ships_task`` dying on its 540s soft time limit before it
+    could rewrite the all-view buckets, while the pct warmer kept being triggered
+    independently by the snapshot chain). The UI copy must not promise membership
+    parity, and an all-view/pct window mismatch is a warm-chain symptom worth
+    chasing, not a quirk of the filter. ``player_min_battles``
     floors which players enter the ranking. The percentile path runs a heavier
     per-(ship,player) aggregation, derives every offered percentile from one
     query, and caches each under its own window-keyed fresh key PLUS a durable
