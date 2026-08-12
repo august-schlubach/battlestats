@@ -73,10 +73,27 @@ kept, so a realm's `ls -1t … | head` is "the last run"; older files are histor
 ## The snapshot fields
 
 Each JSON snapshot carries: `realm`, `mode` (`apply` writes + rotates; `detect`
-measures only), `band_days`, `partial`, `candidates`, `scanned`, `wg_calls`,
-`cursor_stamped`, and the yield breakdown.
+measures only), `band_days`, `partial`, `aborted`, `abort_reason`, `candidates`,
+`scanned`, `wg_calls`, `cursor_stamped`, and the yield breakdown.
 
-**Read `partial` first.** `true` means the worker's soft time limit cut the pass
+**Read `aborted` before anything else.** `true` means a run of unproductive WG
+chunks tripped the upstream-failure guard and the pass stopped early
+(`RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES`, default 10). **Such a run is
+non-informative, not zero-yield**: its outcome buckets are empty and
+`cursor_stamped` is 0 *by design*, because a failed chunk deliberately skips the
+rotation stamp so those rows retry rather than rotate past unchecked. Report it
+as "aborted — upstream", name `abort_reason`, and do **not** read its yield
+numbers as a decline. No action is needed; the same rows come back on the next
+daily run. Note that `partial` is `false` on an aborted run — the two are
+separate axes, so `aborted` cannot be inferred from `partial`.
+
+Before blaming the sweep, check the sibling realms' snapshots from the same
+morning: two clean realms rule out credentials and rate limiting immediately and
+point at the transport (2026-08-12 was ~20 min of DNS failure on
+`api.worldofwarships.asia` alone). Runbook:
+`agents/runbooks/runbook-recapture-upstream-failure-guard-2026-08-12.md`.
+
+**Then read `partial`.** `true` means the worker's soft time limit cut the pass
 short: everything reported is real and durable (writes flush incrementally), but
 it covers only `scanned` of `candidates` rows. A partial run has the *same*
 `scanned < limit` signature as a healthy pass that exhausted the pool, so without

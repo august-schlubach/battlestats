@@ -3,6 +3,7 @@
 _Created: 2026-08-12_
 _Context: the 2026-08-12 ops email reported five conditions, four of which were the same asia recapture hole reported four times; the pass had ground all 300 WG chunks against a dead endpoint and still labelled itself complete._
 _QA: reviewed 2026-08-12 — see QA Notes._
+_Status: **IMPLEMENTED 2026-08-12** — 1,177 backend tests pass; 10 new tests. One gap the plan missed is recorded under Implementation._
 
 ## QA Notes
 
@@ -140,7 +141,7 @@ The `continue` suppresses exactly the seven numeric checks downstream of it, all
 |---|---|
 | `server/warships/management/commands/recapture_lapsed_players.py` | `_max_consecutive_chunk_failures()` helper; streak counter + `break`; three new snapshot fields; return `"aborted"` |
 | `server/warships/tasks.py` | `recapture_lapsed_players_task` maps the `"aborted"` return to `{"status": "aborted"}` |
-| `server/scripts/daily_ops_email.py` | `_evaluate_recapture`: insert the aborted branch after `:635`; no reordering |
+| `server/scripts/daily_ops_email.py` | `gather_recapture.scope()`: carry `aborted` + `abort_reason` onto the node; `_evaluate_recapture`: insert the aborted branch after the `mode` check, no reordering |
 | `server/warships/tests/test_recapture_lapsed_players.py` | Guard tests (below) |
 | `server/warships/tests/test_daily_ops_email.py` | Collapse tests (below) |
 | `.claude/skills/recapture/SKILL.md` | Read `aborted` before `partial` |
@@ -148,9 +149,15 @@ The `continue` suppresses exactly the seven numeric checks downstream of it, all
 | `agents/runbooks/runbook-recapture-lapsed-players-2026-06-26.md` | Reconcile: the sweep can now abort |
 | `CLAUDE.md` | One clause on the abort |
 
+### What the plan missed
+
+`gather_recapture.scope()` (`server/scripts/daily_ops_email.py:259-270`) does **not** pass the snapshot through — it rebuilds the node from `RECAP_FIELDS` plus a hand-listed set of shape keys. A new snapshot field is therefore invisible to `evaluate()` until it is added there explicitly. The abort branch was written correctly and still did nothing; the two collapse tests caught it. Anything adding a snapshot field in future must touch `scope()` as well as the writer.
+
 ## Validation
 
-Each test watched failing first.
+Implemented 2026-08-12. Each test was watched failing first — the six guard tests failed as a group before the command changed, and the two collapse tests failed on the `scope()` gap above.
+
+**Result: 1,177 passed, 2 skipped.** New coverage: `RecaptureUpstreamFailureAbortTests` (6) + one task-mapping case in `server/warships/tests/test_recapture_lapsed_players.py`, and 3 cases in `server/warships/tests/test_daily_ops_email.py`.
 
 - Guard aborts at the threshold and stops issuing WG calls.
 - A chunk yielding ≥1 usable `info` **resets** the streak — interleaved failures below the threshold complete normally and still report `chunk_errors > 0`.

@@ -2280,8 +2280,14 @@ def recapture_lapsed_players_task(self, realm=DEFAULT_REALM):
         if os.getenv('RECAPTURE_LAPSED_APPLY', '0') == '1':
             kwargs['apply'] = True
         # The command returns "partial" when the soft time limit truncated the
-        # pass; its writes up to that point are durable (incremental flush).
+        # pass (its writes up to that point are durable via incremental flush),
+        # and "aborted" when a run of unproductive WG chunks says the upstream is
+        # down. No re-dispatch on abort: the failed chunks kept a NULL rotation
+        # cursor, so the same rows come back on the next daily Beat rather than
+        # retry-storming a still-broken upstream.
         outcome = call_command('recapture_lapsed_players', **kwargs)
+        if outcome == "aborted":
+            return {"status": "aborted", "reason": "upstream-failures"}
         return {"status": "partial" if outcome == "partial" else "completed"}
     finally:
         cache.delete(lock_key)

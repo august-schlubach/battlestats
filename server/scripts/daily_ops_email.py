@@ -267,6 +267,12 @@ def gather_recapture(bench_dir: str, now: datetime | None = None) -> dict:
         d["partial_present"] = "partial" in s
         d["status"] = s.get("status")
         d["failed_buckets"] = s.get("failed_buckets")
+        # Upstream abort. A separate axis from `partial`: partial means the soft
+        # time limit cut the scan, aborted means the upstream died and the pass
+        # accounted for nothing. Read via .get so pre-guard snapshots (no key)
+        # stay falsy and behave exactly as before.
+        d["aborted"] = s.get("aborted")
+        d["abort_reason"] = s.get("abort_reason")
         return d
 
     out = {"available": len(snaps), "unreadable": bad, "realms": {}}
@@ -633,6 +639,29 @@ def _evaluate_recapture(recap: dict) -> list[dict]:
             out.append(_cond(f"recapture_mode:{r}",
                              f"{r}: mode={mode!r} -- writes are OFF, returners are being measured, not "
                              f"recaptured (RECAPTURE_LAPSED_APPLY)"))
+
+        # ---- upstream abort, BEFORE any count ----------------------------
+        # A pass the guard stopped accounted for nothing, so every numeric check
+        # below it describes the same hole. On 2026-08-12 that hole arrived as
+        # FOUR separate conditions for one asia outage (chunk_errors, plus a
+        # cursor_stamped=0 and a zero component sum that are CORRECT BY DESIGN --
+        # a failed chunk deliberately skips the rotation stamp -- plus advanced=0
+        # following from both). Report the cause once and stop.
+        # Placed after mode/staleness/shape on purpose: those describe faults
+        # orthogonal to an outage and must survive it. In particular a sweep that
+        # aborts once and then stops running entirely still trips snapshot_stale.
+        if node.get("aborted"):
+            out.append(_cond(
+                f"recapture_aborted:{r}",
+                f"{r}: sweep ABORTED on sustained upstream failure "
+                f"({node.get('abort_reason') or 'reason not recorded'}); "
+                f"chunk_errors={node.get('chunk_errors')}, covered "
+                f"scanned={node.get('scanned')} of candidates={node.get('candidates')}. "
+                f"Its outcome buckets and cursor stamps are absent BY DESIGN, so "
+                f"treat this run as non-informative rather than as zero yield -- the "
+                f"unstamped rows retry on the next daily run. Check the transport "
+                f"(DNS vs WG status codes), not the sweep"))
+            continue
 
         def num(key):
             v = node.get(key)

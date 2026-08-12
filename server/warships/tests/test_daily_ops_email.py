@@ -292,6 +292,45 @@ class TrippedConditionTests(OpsAlertTestCase):
         self.rewrite_recapture("na", mode="detect")
         self.assert_fires("recapture_mode:na")
 
+    # -- upstream abort collapses the cluster ----------------------------
+    def test_recapture_aborted_collapses_to_one_condition(self):
+        """The 2026-08-12 asia shape: one outage reported four times.
+
+        chunk_errors is real; cursor_stamped=0 and the zero component sum are
+        CORRECT BY DESIGN (a failed chunk skips the rotation stamp), and
+        advanced=0 follows from both. The abort branch must report the cause once
+        and suppress all four.
+        """
+        self.rewrite_recapture(
+            "asia", aborted=True, abort_reason="10 consecutive unproductive WG chunks",
+            chunk_errors=10, scanned=1000, cursor_stamped=0, advanced=0,
+            still_dormant=0, hidden=0, no_data=1000, into7d=0)
+        codes = self.assert_fires("recapture_aborted:asia")
+        for suppressed in ("recapture_chunk_errors:asia",
+                           "recapture_high_no_data:asia",
+                           "recapture_cursor_stalled:asia",
+                           "recapture_component_mismatch:asia",
+                           "recapture_no_returners:asia",
+                           "recapture_scanned_zero:asia",
+                           "recapture_shape:asia"):
+            self.assertNotIn(suppressed, codes,
+                             f"{suppressed} is a consequence of the abort, not a "
+                             f"separate fault")
+
+    def test_recapture_aborted_still_reports_staleness(self):
+        """Liveness outranks the abort: a sweep that aborted AND stopped running
+        must not hide behind a permanent 'aborted'."""
+        self.rewrite_recapture("asia", aborted=True, abort_reason="x",
+                               captured_at="2026-01-01T00:00:00")
+        codes = self.codes()
+        self.assertIn("snapshot_stale:recapture-lapsed:asia", codes)
+        self.assertIn("recapture_aborted:asia", codes)
+
+    def test_recapture_aborted_false_is_quiet(self):
+        """The healthy path: an explicit aborted=False changes nothing."""
+        self.rewrite_recapture("na", aborted=False, abort_reason=None)
+        self.assertEqual(self.codes(), [])
+
     def test_recapture_chunk_errors_send(self):
         self.rewrite_recapture("eu", chunk_errors=4)
         self.assert_fires("recapture_chunk_errors:eu")

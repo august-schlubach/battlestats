@@ -36,6 +36,7 @@ A single recency-first pass would re-check the just-lapsed end forever and never
 - In apply mode the sweep stamps `last_idle_check_at = now` on **every checked row** (not just returners). Each run takes the least-recently-checked `--limit` dormant rows, so the cursor walks the whole pool and then maintains it.
 - `RECAPTURE_LAPSED_LIMIT` (30000) is sized so the largest realm's band (EU ~192k) rotates fully in ~a week of daily runs.
 - Transient WG batch failures **don't** stamp the cursor (the rows retry next run rather than rotate past unchecked).
+- **Since 2026-08-12 a *run* of unproductive chunks aborts the pass** rather than grinding the whole band against a dead upstream (`RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES`, default 10). An aborted run writes `aborted: true` + `abort_reason` to its snapshot, keeps `partial: false` (that field still means "truncated by the soft time limit" and nothing else), and reports `{'status': 'aborted'}` from the task. **`cursor_stamped=0` and empty outcome buckets on such a run are correct, not a defect** — that is the bullet above doing its job. Runbook: `runbook-recapture-upstream-failure-guard-2026-08-12.md`.
 
 No new index for v1: the candidate query is a seq-scan + top-N sort run once/realm/day (the same shape `snapshot_active_players` already runs); add `(realm, last_idle_check_at)` only if it shows up as DB cost.
 

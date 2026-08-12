@@ -292,6 +292,184 @@ def _read_snapshot(d):
         return json.load(fh)
 
 
+class RecaptureUpstreamFailureAbortTests(TestCase):
+    """A dead upstream must stop the pass, not be ground through chunk by chunk.
+
+    On 2026-08-12 every one of ASIA's 300 chunks failed name resolution and the
+    sweep still walked all of them, then wrote a snapshot carrying partial=false
+    — indistinguishable on that field from a healthy pass. See
+    agents/runbooks/runbook-recapture-upstream-failure-guard-2026-08-12.md.
+    """
+
+    def _mk_band(self, n, start_pid=7300):
+        for i in range(n):
+            days = 20 + i
+            Player.objects.create(
+                name=f"A{start_pid + i}", player_id=start_pid + i, realm="na",
+                is_hidden=False, pvp_battles=1000, pvp_wins=550,
+                last_battle_date=timezone.now().date() - timedelta(days=days),
+                days_since_last_battle=days,
+                last_fetch=timezone.now() - timedelta(days=50),
+                last_idle_check_at=None,
+            )
+
+    def _run(self, tmpdir, side, batch=10, env=None, fallback=None):
+        """Run a full apply pass against `side`, returning (outcome, snapshot)."""
+        stack_env = {"RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES": "3"}
+        stack_env.update(env or {})
+        with patch.dict("os.environ", stack_env):
+            with patch("warships.api.players._bulk_fetch_account_info",
+                       side_effect=side):
+                with patch("warships.api.players._per_player_account_fallback",
+                           side_effect=fallback or (lambda ids, realm: {})):
+                    with patch(
+                        "warships.management.commands.recapture_lapsed_players."
+                        "RECAPTURE_BENCHMARK_DIR", tmpdir
+                    ):
+                        outcome = call_command(
+                            "recapture_lapsed_players", "--realm", "na",
+                            "--delay", "0", "--batch-size", str(batch),
+                            apply=True, stdout=StringIO(), stderr=StringIO())
+        return outcome, _read_snapshot(tmpdir)
+
+    def test_sustained_chunk_errors_abort_the_pass(self):
+        import tempfile
+        self._mk_band(100)
+        calls = {"n": 0}
+
+        def side(ids, realm):
+            calls["n"] += 1
+            return (None, "REQUEST_TIMEOUT")
+
+        with tempfile.TemporaryDirectory() as d:
+            outcome, snap = self._run(d, side)
+
+        # Stopped at the threshold instead of walking all 10 chunks.
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(outcome, "aborted")
+        self.assertTrue(snap["aborted"])
+        self.assertIn("consecutive", snap["abort_reason"])
+        # `partial` keeps its own meaning: not truncated by the soft time limit.
+        self.assertFalse(snap["partial"])
+        self.assertEqual(snap["chunk_errors"], 3)
+        self.assertEqual(snap["cursor_stamped"], 0)
+        self.assertEqual(
+            Player.objects.filter(realm="na",
+                                  last_idle_check_at__isnull=True).count(), 100)
+
+    def test_a_usable_chunk_resets_the_streak(self):
+        """Interleaved failures below the threshold must NOT abort."""
+        import tempfile
+        self._mk_band(100)
+        calls = {"n": 0}
+
+        def side(ids, realm):
+            calls["n"] += 1
+            if calls["n"] % 2 == 0:          # every other chunk fails
+                return (None, "REQUEST_TIMEOUT")
+            return ({str(i): _info(i, 1) for i in ids}, None)
+
+        with tempfile.TemporaryDirectory() as d:
+            outcome, snap = self._run(d, side)
+
+        self.assertEqual(calls["n"], 10, "the pass must walk the whole band")
+        self.assertIsNone(outcome)
+        self.assertFalse(snap["aborted"])
+        self.assertIsNone(snap["abort_reason"])
+        self.assertEqual(snap["chunk_errors"], 5)
+        self.assertEqual(snap["cursor_stamped"], 50)
+
+    def test_invalid_account_id_outage_aborts(self):
+        """The failure mode that a naive reset rule cannot see.
+
+        `INVALID_ACCOUNT_ID` routes to `_per_player_account_fallback`, which under
+        a total outage returns a TRUTHY dict of Nones. Every row then takes the
+        `no_data` path, so a streak keyed on "the chunk avoided `elif err:`" would
+        reset on every chunk and the guard would never fire — while stamping the
+        cursor on rows nothing ever answered for.
+        """
+        import tempfile
+        self._mk_band(100)
+        calls = {"n": 0}
+
+        def side(ids, realm):
+            calls["n"] += 1
+            return (None, "INVALID_ACCOUNT_ID")
+
+        def dead_fallback(ids, realm):
+            return {str(i): None for i in ids}     # truthy dict, no usable rows
+
+        with tempfile.TemporaryDirectory() as d:
+            outcome, snap = self._run(d, side, fallback=dead_fallback)
+
+        self.assertEqual(calls["n"], 3, "must abort at the threshold")
+        self.assertEqual(outcome, "aborted")
+        self.assertTrue(snap["aborted"])
+        # Crucially: nothing was rotated past unchecked.
+        self.assertEqual(snap["cursor_stamped"], 0)
+        self.assertEqual(
+            Player.objects.filter(realm="na",
+                                  last_idle_check_at__isnull=True).count(), 100)
+
+    def test_partial_no_data_within_a_chunk_still_stamps_and_resets(self):
+        """Normal operation is unchanged: some no_data rows are a real answer."""
+        import tempfile
+        self._mk_band(20)
+
+        def side(ids, realm):
+            out = {str(i): _info(i, 1) for i in ids}
+            out[str(ids[0])] = None            # one genuinely missing account
+            return (out, None)
+
+        with tempfile.TemporaryDirectory() as d:
+            outcome, snap = self._run(d, side)
+
+        self.assertIsNone(outcome)
+        self.assertFalse(snap["aborted"])
+        self.assertEqual(snap["no_data"], 2)
+        self.assertEqual(snap["cursor_stamped"], 20, "no_data rows still rotate")
+
+    def test_threshold_zero_disables_the_guard(self):
+        import tempfile
+        self._mk_band(100)
+        calls = {"n": 0}
+
+        def side(ids, realm):
+            calls["n"] += 1
+            return (None, "REQUEST_TIMEOUT")
+
+        with tempfile.TemporaryDirectory() as d:
+            outcome, snap = self._run(
+                d, side, env={"RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES": "0"})
+
+        self.assertEqual(calls["n"], 10, "0 disables the abort (old behavior)")
+        self.assertIsNone(outcome)
+        self.assertFalse(snap["aborted"])
+        self.assertEqual(snap["chunk_errors"], 10)
+
+    def test_promotes_earned_before_the_outage_are_durable(self):
+        import tempfile
+        self._mk_band(100)
+        calls = {"n": 0}
+
+        def side(ids, realm):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return ({str(i): _info(i, 1) for i in ids}, None)
+            return (None, "REQUEST_TIMEOUT")
+
+        with tempfile.TemporaryDirectory() as d:
+            outcome, snap = self._run(d, side)
+
+        self.assertEqual(outcome, "aborted")
+        self.assertEqual(snap["advanced"], 10)
+        self.assertEqual(snap["cursor_stamped"], 10,
+                         "the good chunk's rows rotate; the failed ones do not")
+        self.assertEqual(
+            Player.objects.filter(realm="na",
+                                  last_idle_check_at__isnull=True).count(), 90)
+
+
 class RecaptureLapsedTaskGateTests(TestCase):
     def test_task_skips_when_disabled(self):
         from warships.tasks import recapture_lapsed_players_task
@@ -305,6 +483,13 @@ class RecaptureLapsedTaskGateTests(TestCase):
             with patch("warships.tasks.call_command", return_value="partial"):
                 res = recapture_lapsed_players_task.run(realm="na")
         self.assertEqual(res, {"status": "partial"})
+
+    def test_task_reports_aborted_when_the_upstream_died(self):
+        from warships.tasks import recapture_lapsed_players_task
+        with patch.dict("os.environ", {"RECAPTURE_LAPSED_ENABLED": "1"}):
+            with patch("warships.tasks.call_command", return_value="aborted"):
+                res = recapture_lapsed_players_task.run(realm="na")
+        self.assertEqual(res, {"status": "aborted", "reason": "upstream-failures"})
 
     def test_task_reports_completed_on_a_full_pass(self):
         from warships.tasks import recapture_lapsed_players_task

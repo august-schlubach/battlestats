@@ -70,6 +70,20 @@ RECAPTURE_BENCHMARK_DIR = os.getenv(
 logger = logging.getLogger(__name__)
 
 
+def _max_consecutive_chunk_failures() -> int:
+    """Consecutive unproductive WG chunks that abort the pass; 0 disables.
+
+    Mirrors `clan_crawl._max_consecutive_clan_failures`. 10 rather than the
+    crawl's 25 because the units differ: a chunk is 100 players to a crawl
+    failure's 1 clan. `chunk_errors` was 0 on all 113 observed runs, so there is
+    no transient-blip noise floor to clear and a tight bound is safe.
+    """
+    try:
+        return int(os.getenv("RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES", "10"))
+    except ValueError:
+        return 10
+
+
 class Command(BaseCommand):
     help = ("Detect returning lapsed players via bulk account/info and (with "
             "--apply) promote them back into the active_7d floor scope, stamping "
@@ -187,6 +201,37 @@ class Command(BaseCommand):
         # end of the scan: EU/ASIA blew the worker's soft time limit every day
         # (ASIA last completed 2026-07-20) and lost the whole pass — WG calls
         # spent, no promotes, no cursor advance, no snapshot.
+        # Upstream-failure guard. One dead chunk is noise; a run of them says the
+        # upstream is gone and every further WG call is waste. The streak resets on
+        # a chunk yielding >=1 usable `info`, NOT on "the chunk avoided `elif err:`":
+        # INVALID_ACCOUNT_ID routes to `_per_player_account_fallback`, which under a
+        # total outage returns a TRUTHY dict of Nones, so every row would take the
+        # `no_data` path, reset a naive streak, and get cursor-stamped on an answer
+        # nobody gave. See runbook-recapture-upstream-failure-guard-2026-08-12.md.
+        aborted = False
+        abort_reason = None
+        consecutive_chunk_failures = 0
+        max_consecutive_chunk_failures = _max_consecutive_chunk_failures()
+
+        def note_chunk_failure(reason):
+            """Count an unproductive chunk; True when the pass must abort."""
+            nonlocal consecutive_chunk_failures, aborted, abort_reason
+            consecutive_chunk_failures += 1
+            if (max_consecutive_chunk_failures
+                    and consecutive_chunk_failures >= max_consecutive_chunk_failures):
+                aborted = True
+                abort_reason = (
+                    f"{consecutive_chunk_failures} consecutive unproductive WG "
+                    f"chunks ({reason})")
+                logger.error(
+                    "recapture_lapsed_players: aborting realm=%s after %d "
+                    "consecutive unproductive chunks (%s) — treating this as an "
+                    "upstream outage. Rows in the failed chunks keep a NULL "
+                    "cursor and are retried on the next run.",
+                    realm, consecutive_chunk_failures, reason)
+                return True
+            return False
+
         truncated = False
         try:
             for start in range(0, len(ids), batch):
@@ -204,16 +249,23 @@ class Command(BaseCommand):
                     chunk_errors += 1
                     self.stderr.write(
                         f"recapture_lapsed_players: batch failed realm={realm} err={err}")
+                    if note_chunk_failure(f"last err={err}"):
+                        break
                     continue
 
+                # Buffered so a chunk that turns out to be wholly unusable can be
+                # discarded rather than rotated past unchecked.
+                chunk_checked = []
+                usable = 0
                 for pid in chunk:
                     info = data.get(str(pid)) if data else None
                     if not info:
                         no_data += 1
-                        checked_ids.append(by_id[pid][0])
+                        chunk_checked.append(by_id[pid][0])
                         continue
                     # We got a real answer for this row -> it counts toward rotation.
-                    checked_ids.append(by_id[pid][0])
+                    usable += 1
+                    chunk_checked.append(by_id[pid][0])
                     if info.get('hidden_profile'):
                         hidden += 1
                         continue
@@ -252,8 +304,17 @@ class Command(BaseCommand):
                         id=row_id, last_battle_date=new_date,
                         days_since_last_battle=(today - new_date).days))
 
-                if len(checked_ids) >= CURSOR_STAMP_CHUNK:
-                    flush()
+                if usable == 0:
+                    # Nothing usable for 100 real ids is the outage signature, not
+                    # natural noise (`no_data` runs 2-23 per 30,000 scanned). Do not
+                    # stamp: we have no answer for these rows.
+                    if note_chunk_failure("chunk returned no usable account data"):
+                        break
+                else:
+                    consecutive_chunk_failures = 0
+                    checked_ids.extend(chunk_checked)
+                    if len(checked_ids) >= CURSOR_STAMP_CHUNK:
+                        flush()
                 if delay:
                     time.sleep(delay)
         except SoftTimeLimitExceeded:
@@ -297,6 +358,13 @@ class Command(BaseCommand):
             # `partial` MUST be read before `scanned`: a truncated run has the same
             # scanned-below-limit signature as a healthy pass that exhausted the pool.
             "partial": truncated,
+            # `aborted` is a SEPARATE axis from `partial`: partial means the soft
+            # time limit cut the scan, aborted means the upstream died. A boolean
+            # rather than a `status` string on purpose -- the ops email's
+            # `_check_generic_shape` keys on `status` and would fire a second,
+            # redundant condition for every aborted pass.
+            "aborted": aborted,
+            "abort_reason": abort_reason,
             "candidates": len(ids),
             "scanned": scanned,
             "wg_calls": wg_calls,
@@ -323,6 +391,9 @@ class Command(BaseCommand):
                            RECAPTURE_BENCHMARK_DIR, exc_info=True)
 
         out(f"=== recapture_lapsed_players  realm={realm}  band={min_days}-{max_days}d  {mode} ===")
+        if aborted:
+            out(f"  *** ABORTED: {abort_reason} after {scanned}/{len(ids)} candidates. "
+                f"Rows in the failed chunks were NOT cursor-stamped and retry next run. ***")
         if truncated:
             out(f"  *** PARTIAL: soft time limit hit after {scanned}/{len(ids)} candidates "
                 f"(everything below is what this run actually persisted) ***")
@@ -350,5 +421,9 @@ class Command(BaseCommand):
                     f"+{adv}d  {clan[:18]:18}  {bucket}")
 
         # BaseCommand.execute() returns handle()'s value to call_command, so the
-        # Beat task can report a truncated pass honestly instead of "completed".
+        # Beat task can report a truncated or aborted pass honestly instead of
+        # "completed". `aborted` wins: it is the cause, truncation would be an
+        # effect (they are mutually exclusive by control flow anyway).
+        if aborted:
+            return "aborted"
         return "partial" if truncated else None

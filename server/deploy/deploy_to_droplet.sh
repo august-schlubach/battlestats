@@ -335,11 +335,15 @@ done
 # set at post_migrate). APPLY=1 promotes returners + stamps the last_idle_check_at
 # rotation cursor (APPLY=0 = detect-only yield logging, no writes). Reversible via
 # ENABLED=0. Runbook: runbook-recapture-lapsed-players-2026-06-26.md.
+# MAX_CONSECUTIVE_CHUNK_FAILURES pins the upstream-failure guard (0 disables) so the
+# live value has an authority here rather than a code default.
+# Runbook: runbook-recapture-upstream-failure-guard-2026-08-12.md.
 for kv in \
   'RECAPTURE_LAPSED_ENABLED=1' \
   'RECAPTURE_LAPSED_APPLY=1' \
   'RECAPTURE_LAPSED_MAX_DAYS=365' \
-  'RECAPTURE_LAPSED_LIMIT=30000'; do
+  'RECAPTURE_LAPSED_LIMIT=30000' \
+  'RECAPTURE_MAX_CONSECUTIVE_CHUNK_FAILURES=10'; do
   k="${kv%%=*}"
   if grep -q "^${k}=" /etc/battlestats-server.env; then
     sed -i "s|^${k}=.*|${kv}|" /etc/battlestats-server.env
