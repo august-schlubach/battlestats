@@ -159,6 +159,18 @@ Implemented 2026-08-12. Each test was watched failing first — the six guard te
 
 **Result: 1,177 passed, 2 skipped.** New coverage: `RecaptureUpstreamFailureAbortTests` (6) + one task-mapping case in `server/warships/tests/test_recapture_lapsed_players.py`, and 3 cases in `server/warships/tests/test_daily_ops_email.py`.
 
+**End-to-end replay against the real incident data.** Feeding `_evaluate_recapture` the verbatim `2026-08-12_1050Z_asia.json` reproduces the received email exactly:
+
+```
+BEFORE:  recapture_chunk_errors:asia
+         recapture_cursor_stalled:asia
+         recapture_component_mismatch:asia
+         recapture_no_returners:asia
+AFTER:   recapture_aborted:asia
+```
+
+WG calls spent against the dead endpoint drop from **300 to 10**. This is the change's whole purpose, confirmed against production data rather than a fixture.
+
 - Guard aborts at the threshold and stops issuing WG calls.
 - A chunk yielding ≥1 usable `info` **resets** the streak — interleaved failures below the threshold complete normally and still report `chunk_errors > 0`.
 - **The `INVALID_ACCOUNT_ID` outage path aborts.** Stub `_bulk_fetch_account_info` to return `INVALID_ACCOUNT_ID` and `_per_player_account_fallback` to return an all-`None` dict; assert the pass aborts at the threshold and that those rows are **not** cursor-stamped. Without this case the guard passes every other test and still fails in production — it is the reason the reset rule is phrased on usable rows.
