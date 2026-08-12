@@ -342,6 +342,7 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.warm_all_clan_tier_distributions_task': {'queue': 'background'},
     'warships.tasks.warm_player_ranked_wr_battles_correlation_task': {'queue': 'background'},
     'warships.tasks.warm_ships_by_pct_task': {'queue': 'background'},
+    'warships.tasks.warm_ships_bucket_task': {'queue': 'background'},
     'warships.tasks.warm_ship_combat_pop_task': {'queue': 'background'},
     'warships.tasks.warm_realm_ships_pct_task': {'queue': 'background'},
     # The ship-standings snapshot + warm chain and the battle-history damage

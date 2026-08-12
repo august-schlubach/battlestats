@@ -250,15 +250,36 @@ class RealmShipsByTierTypeWarmTests(TestCase):
         # The top-ships warm chains the per-realm all-buckets pct warmer (a
         # separate background task); stub the enqueue so this test stays scoped to
         # the all-view warm + the inline default-pct bucket.
-        with mock.patch("warships.tasks.queue_realm_ships_pct_warm") as chain:
+        #
+        # Since 2026-08-12 the orchestrator DISPATCHES one subtask per tier x type
+        # bucket instead of computing them inline (it was dying on its 540s soft
+        # limit partway through the loop and discarding the tail — see
+        # runbook-top-ships-warm-soft-limit-2026-08-12.md). The cache-filling
+        # assertions below therefore run the bucket subtask directly; what the
+        # orchestrator is now responsible for is dispatching every bucket exactly
+        # once.
+        from warships.tasks import warm_ships_bucket_task
+
+        with mock.patch("warships.tasks.queue_realm_ships_pct_warm") as chain, \
+                mock.patch("warships.tasks.warm_ships_bucket_task.apply_async") as sub:
             result = warm_realm_top_ships_task.apply(kwargs={"realm": "na"}).get()
         self.assertEqual(result["status"], "completed")
         # 1 badge tier (default {10}) x 5 ship types.
-        self.assertEqual(result["results"]["tier_type_buckets"], 5)
+        self.assertEqual(result["results"]["tier_type_buckets_dispatched"], 5)
+        self.assertEqual(sub.call_count, 5)
         # The landing default (top-50%) bucket's percentile is pre-warmed inline so
         # the primary landing view loads instant; the rest are warmed by the chain.
         self.assertEqual(result["results"]["default_pct_bucket"], "t10/Battleship")
         chain.assert_called_once_with("na")
+
+        # Run the dispatched buckets the way the worker would.
+        for tier, ship_type in (
+            (c.kwargs["kwargs"]["tier"], c.kwargs["kwargs"]["ship_type"])
+            for c in sub.call_args_list
+        ):
+            warm_ships_bucket_task.apply(kwargs={
+                "realm": "na", "tier": tier,
+                "ship_type": ship_type, "mode": "random"}).get()
 
         # The T10/Destroyer bucket is now a warm hit carrying the WR-ranked ship.
         cached = cache.get(self._bucket_key(10, "Destroyer"))

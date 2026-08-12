@@ -107,7 +107,27 @@ CORRELATION_WARM_DISPATCH_TIMEOUT = 30  # Matches landing — coalesces cold-cac
 # Coalesces the cold-cache fanout when a window-rotation gap or Redis eviction
 # leaves the treemap / tier-type fresh keys cold and the published fallback is
 # served (data.compute_realm_top_ships / _ships_by_tier_type queue a warm).
-REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT = 60
+#
+# Was 60s until 2026-08-12, which could not do its job: the task it debounces
+# ran to a 540s soft limit, so the window had always lapsed long before the run
+# ended. Combined with the `finally` clearing it unconditionally, every landing
+# visitor re-armed a task that never completed — 12 dispatches/day, all killed,
+# ~1.8h/day of a -c 3 worker burned. Must exceed the task's HARD time_limit so a
+# still-running warm can never be re-queued underneath itself, and it is now
+# cleared only on success. Runbook: runbook-top-ships-warm-soft-limit-2026-08-12.md
+REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT = 15 * 60
+# Lock must outlive the task's HARD time_limit (600) — at the previous 300s it
+# expired 240s before the task was even killed, leaving the "already running"
+# guard blind for the tail of every run. Same rationale as
+# ENRICHMENT_RECLASSIFY_LOCK_TIMEOUT.
+REALM_TOP_SHIPS_WARM_LOCK_TIMEOUT = 15 * 60
+# Per-bucket lock for the split tier x type warm. Same outlive-the-hard-limit rule.
+SHIPS_BUCKET_WARM_LOCK_TIMEOUT = 15 * 60
+# Spacing between per-bucket subtask dispatches. The buckets are real work
+# (~110-270s each) on a queue shared with enrichment and snapshots, so they are
+# staggered rather than dumped in one burst.
+SHIPS_BUCKET_WARM_SPACING_SECONDS = int(
+    os.getenv("SHIPS_BUCKET_WARM_SPACING_SECONDS", "20"))
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
 # Clan roster idle refresh: bulk account/info pass that corrects every member's
@@ -207,6 +227,36 @@ def _ship_combat_pop_warm_lock_key(realm, ship_id, window_days) -> str:
 def _ship_combat_pop_warm_dispatch_key(realm, ship_id, window_days) -> str:
     return (f"warships:tasks:warm_ship_combat_pop:{realm}"
             f":{int(ship_id)}:{window_days}:dispatch")
+
+
+def _ships_bucket_warm_lock_key(realm, tier, ship_type, mode="random") -> str:
+    return (f"warships:tasks:warm_ships_bucket:{realm}:{mode}"
+            f":t{tier}:{ship_type}:lock")
+
+
+def _rotated_ship_buckets(tiers, on_date=None):
+    """The (tier, ship_type) warm order for one day, rotated by date.
+
+    A fixed order means a fixed tail, and a fixed tail starves first whenever the
+    budget runs short — which is exactly how T9/T10 went unwarmed for weeks while
+    t8 Battleship/Cruiser stayed current. Each bucket now has its own task and its
+    own budget, so this is insurance rather than the primary fix, but it is the
+    property that makes the failure mode non-recurring: no bucket can be last
+    every day. Same remedy as the enrichment reclassify bucket-family split.
+
+    A pure rotation, not a shuffle — adjacency is preserved so per-tier locality
+    stays readable in the worker journal.
+    """
+    from warships.data import SHIP_LEADERBOARD_TYPES
+
+    buckets = [(tier, ship_type)
+               for tier in sorted(tiers)
+               for ship_type in SHIP_LEADERBOARD_TYPES]
+    if not buckets:
+        return buckets
+    on_date = on_date or django_timezone.now().date()
+    offset = on_date.toordinal() % len(buckets)
+    return buckets[offset:] + buckets[:offset]
 
 
 def _realm_ships_pct_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
@@ -1476,11 +1526,13 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
     )
 
     lock_key = _realm_top_ships_warm_lock_key(realm)
-    if not cache.add(lock_key, self.request.id, timeout=300):
+    if not cache.add(lock_key, self.request.id,
+                     timeout=REALM_TOP_SHIPS_WARM_LOCK_TIMEOUT):
         logger.info(
             "Skipping warm_realm_top_ships_task realm=%s — already running", realm)
         return {"status": "skipped", "reason": "already-running"}
 
+    succeeded = False
     try:
         results = {}
         for mode in ("random", "ranked"):
@@ -1489,14 +1541,22 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
             results[mode] = len(payload.get("ships", []))
 
         # Tier/type list buckets — only mode="random" is ever requested.
-        bucket_count = 0
-        for tier in sorted(_badge_tiers()):
-            for ship_type in SHIP_LEADERBOARD_TYPES:
-                compute_realm_ships_by_tier_type(
-                    realm, tier=tier, ship_type=ship_type,
-                    mode="random", use_cache=False)
-                bucket_count += 1
-        results["tier_type_buckets"] = bucket_count
+        #
+        # DISPATCHED, not computed inline (2026-08-12). Walking all 15 buckets on
+        # this task's single 540s budget meant a run got 2-5 of them done and was
+        # killed, discarding every bucket after the cut — so T9/T10, including the
+        # landing default, never warmed on any realm while t8's head stayed fresh.
+        # One subtask per bucket gives each the full budget (~2-5x what a bucket
+        # needs) and makes a slow bucket cost one bucket instead of the tail.
+        # Order rotates daily so no bucket can be last every day.
+        buckets = _rotated_ship_buckets(_badge_tiers())
+        for index, (tier, ship_type) in enumerate(buckets):
+            warm_ships_bucket_task.apply_async(
+                kwargs={"realm": realm, "tier": tier,
+                        "ship_type": ship_type, "mode": "random"},
+                countdown=index * SHIPS_BUCKET_WARM_SPACING_SECONDS,
+            )
+        results["tier_type_buckets_dispatched"] = len(buckets)
 
         # The landing list now defaults to the top-50% WR view, so pre-warm the
         # ONE default bucket's percentile (one heavy per-(ship,player) query that
@@ -1521,11 +1581,55 @@ def warm_realm_top_ships_task(self, realm=DEFAULT_REALM):
 
         logger.info(
             "Warmed top-ships realm=%s modes+buckets=%s", realm, results)
+        succeeded = True
         return {"status": "completed", "realm": realm, "results": results}
     finally:
+        # The lock is mutual exclusion — always release it, or one failure wedges
+        # the warm for the whole lock lifetime.
         cache.delete(lock_key)
-        # Let the next cold-read enqueue fire (mirrors the other warmers).
-        cache.delete(_realm_top_ships_warm_dispatch_key(realm))
+        # The debounce is a cooldown, and is released ONLY on success. Clearing it
+        # unconditionally is what let a doomed task be re-armed by the very next
+        # landing visitor: the task dies, the debounce vanishes, a visitor still
+        # sees a cold key and enqueues it again — 12 dispatches/day, none of which
+        # ever completed. Leaving it standing after a failure bounds the retry rate
+        # to REALM_TOP_SHIPS_WARM_DISPATCH_TIMEOUT.
+        if succeeded:
+            cache.delete(_realm_top_ships_warm_dispatch_key(realm))
+
+
+@app.task(bind=True, **TASK_OPTS)
+def warm_ships_bucket_task(self, realm=DEFAULT_REALM, tier=None,
+                           ship_type=None, mode="random"):
+    """Compute + cache ONE tier x type ship-list bucket for a realm.
+
+    The unit `warm_realm_top_ships_task` fans out to. Each bucket is a live
+    `BattleEvent` GROUP-BY costing ~110-270s; giving each its own task means the
+    540s budget covers one bucket several times over instead of falling ~5-7x
+    short of all fifteen, and a bucket that does overrun costs only itself.
+
+    Per-bucket lock so repeated dispatches for the same bucket coalesce. Runs on
+    the `background` queue. Runbook:
+    agents/runbooks/runbook-top-ships-warm-soft-limit-2026-08-12.md
+    """
+    from warships.data import compute_realm_ships_by_tier_type
+
+    lock_key = _ships_bucket_warm_lock_key(realm, tier, ship_type, mode)
+    if not cache.add(lock_key, self.request.id,
+                     timeout=SHIPS_BUCKET_WARM_LOCK_TIMEOUT):
+        logger.info(
+            "Skipping warm_ships_bucket_task realm=%s t%s/%s — already running",
+            realm, tier, ship_type)
+        return {"status": "skipped", "reason": "already-running"}
+
+    try:
+        compute_realm_ships_by_tier_type(
+            realm, tier=tier, ship_type=ship_type, mode=mode, use_cache=False)
+        logger.info(
+            "Warmed ships bucket realm=%s t%s/%s", realm, tier, ship_type)
+        return {"status": "completed", "realm": realm, "tier": tier,
+                "ship_type": ship_type, "mode": mode}
+    finally:
+        cache.delete(lock_key)
 
 
 @app.task(bind=True, **TASK_OPTS)
