@@ -2,7 +2,7 @@
 
 _Created: 2026-08-13_
 _Context: the 2026-08-13 ops email reported `recapture_partial:asia` (23,100 of 30,000 scanned). Investigation found two independent causes — asia's pass has been consuming 72–95% of its 900s soft-limit budget every day for a week, and the 2026-08-12 top-ships orchestrator fan-out newly saturated the `background` worker across the recapture window._
-_Status: **NO LEVER PULLED.** L2b's code landed 2026-08-13 (helper + 4 tests, suite green) but is **inert**: it changes nothing until `RECAPTURE_LAPSED_LIMIT_ASIA` is set, and that env var is unset. L1/L3/L4 remain proposals._
+_Status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals, and Step 0 (observe the 2026-08-14 run) has not yet run. See Execution log._
 _QA: reviewed 2026-08-13 — see QA Notes._
 
 ## QA Notes
@@ -147,7 +147,7 @@ Two implementations follow. **L2b supersedes L2a**; L2a is retained only as the 
 
 Set `RECAPTURE_LAPSED_LIMIT=24000`. No deploy, reversible instantly by restoring the value. The trade is unavoidable in this form: help asia, slow EU.
 
-#### L2b — per-realm override (small code change + deploy, no EU tax) — **preferred, CODE LANDED 2026-08-13 (inert)**
+#### L2b — per-realm override (small code change + deploy, no EU tax) — **preferred, SHIPPED v5.3.8 2026-08-13 (inert)**
 
 `RECAPTURE_LAPSED_LIMIT_{NA,EU,ASIA}` falls back to the existing global, then to the code default. The whole intervention is then `RECAPTURE_LAPSED_LIMIT_ASIA=24000`, and NA/EU keep their 4.1d/6.9d rotation untouched.
 
@@ -187,6 +187,38 @@ RECAPTURE_TASK_OPTS = {
 - **Per-realm limits are not reachable in the L2b shape.** `RECAPTURE_TASK_OPTS` is splatted into the decorator — `@app.task(bind=True, **RECAPTURE_TASK_OPTS)` (`server/warships/tasks.py:2288`) — which is evaluated once at module import, when no realm exists. Every other time-limited task in the file binds the same way (`:3099`, `:3176`, `:3230`, `:3333`); there is no per-call override anywhere in the codebase. Nor does Beat offer one: `PeriodicTask` carries `args`/`kwargs`/`queue`/`priority`/`expires`/`headers` and no time-limit field (verified against the live install). The only route is smuggling `headers={"timelimit": [soft, hard]}` through Celery's protocol-2 message properties, which couples schedule registration to the wire format — too fragile for a knob this small, and unnecessary given the self-targeting property above.
 - **It also aims the cost the wrong way.** A longer limit does not make a pass faster; it only lets it hold a slot longer. Per-realm-ing it would concentrate that on asia, which already runs in the most contended window.
 
+## Execution log
+
+What has actually been done, and what has not. **Nothing in this log changed the sweep's behaviour** — the one thing shipped is inert until an env var is set, and that var is unset.
+
+### Performed — 2026-08-13
+
+| # | Action | Evidence |
+|---|---|---|
+| 1 | Diagnosed the alert: read the three realms' snapshots, 7 days of task durations, and per-15-min `background` saturation for Aug 11/12/13 | F1–F5 above |
+| 2 | Ruled out upstream (no WG/DNS/timeout markers; NA slowed too) | F4 |
+| 3 | Wrote this runbook; QA'd it against the code — 31 assertions checked, 7 corrected | QA Notes |
+| 4 | Implemented L2b test-first: 4 tests written and watched fail (the wiring case failed `30000 != 24000`), then `_recapture_limit` + the call site | `server/warships/tasks.py:200`, `:2348`; `server/warships/tests/test_recapture_lapsed_players.py:514` |
+| 5 | Full backend suite: **1,196 passed, 2 skipped** | `pytest warships/tests/ --nomigrations` |
+| 6 | Doctrine pre-commit: all applicable items PASS; `check_env_drift.sh` checks 1 and 3 clean | — |
+| 7 | Reconciled two stale doc pointers found by that check | `.claude/skills/recapture/SKILL.md`, `CLAUDE.md` |
+| 8 | Catalogued the new var; rewrote the `RECAPTURE_LAPSED_DELAY` entry to record it stays global | `agents/runbooks/ops-env-reference.md` |
+| 9 | Released **v5.3.8** — commit `08180a1`, bump `76f52a4`, tag `v5.3.8`, `origin/main` fast-forwarded from `f565c24` | — |
+| 10 | Waited for CI green on the release commit before deploying (did not bypass the deploy script's gate) | run 31736065497, success |
+| 11 | Deployed backend + frontend; post-deploy verify and healthcheck both clean | releases `20260813153100` / `20260813153229` |
+| 12 | Confirmed on the droplet that the helper is present **and** no `RECAPTURE_LAPSED_LIMIT_*` is set | `RECAPTURE_LAPSED_LIMIT=30000`, no suffixed keys |
+
+Note on mechanics for whoever repeats this: `scripts/release.sh` was **not** used. Its final `git push` pushes the current branch, and this work was done in a worktree, so it would have pushed the worktree branch instead of main. Its steps were performed by hand — bump, `chore:` commit, `git push origin HEAD:main`, annotated tag, push tag.
+
+### Outstanding
+
+1. **Step 0 — observe the 2026-08-14 run.** Not yet run; it is the gate on everything below. Per F5 the contention is variable, so a clean asia run means no lever is needed at all.
+2. **Step 1 (L1) not applied.** `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2).
+3. **Step 2 (L2b) half-done: code shipped, lever not pulled.** Setting `RECAPTURE_LAPSED_LIMIT_ASIA=24000` in Pass → `/etc/battlestats-server.env` → restart `battlestats-celery-background` is all that remains, and only if Step 1 leaves asia above ~800s.
+4. **L3 and L4 unimplemented**, by design — they sit behind Steps 1–2.
+5. **F4 unexplained** (why EU alone was unaffected). The contention model is incomplete until answered.
+6. **No `duration_s` in the snapshot**, so Step 0's measurement still requires `journalctl`. This is the instrumentation that would let `/recapture` see the budget trend directly, and the near-miss ops-email condition depends on it.
+
 ## Remediation path — one lever at a time
 
 Doctrine: one production lever per step, explicit operator acknowledgement between steps, and a measurement gate before proceeding. Do not batch. Do not pull L4 first because it is the most direct — it is the most direct *and* the most load-additive.
@@ -197,7 +229,7 @@ Doctrine: one production lever per step, explicit operator acknowledgement betwe
 **Step 1 — L1, `RECAPTURE_LAPSED_DELAY=0.05`.** Cheapest, env-only, no deploy, instantly reversible, and it measures the rate-limiter question for free. Update Pass, regenerate `/etc/battlestats-server.env`, restart `battlestats-celery-background`.
 **Gate:** compare asia's next duration against its 647–859s baseline. The arithmetic predicts ~45s; a materially smaller saving means system-wide WG load is hitting the 9/s ceiling — record that and treat L1 as spent. **Do not proceed the same day.**
 
-**Step 2 — L2b, `RECAPTURE_LAPSED_LIMIT_ASIA=24000`.** Only if Step 1 leaves asia above ~800s. **The code half is done** (`_recapture_limit` + `RecapturePerRealmLimitTests`, landed 2026-08-13, suite green at 1,196 passed / 2 skipped) and is inert; what remains is a backend deploy and then setting the env var. Those are separable — deploying changes nothing on its own. NA and EU keep their current rotation.
+**Step 2 — L2b, `RECAPTURE_LAPSED_LIMIT_ASIA=24000`.** Only if Step 1 leaves asia above ~800s. **The code half is done and deployed** (v5.3.8, 2026-08-13; `_recapture_limit` verified present on the droplet, no `RECAPTURE_LAPSED_LIMIT_*` set). What remains is one env change: set it in Pass, regenerate `/etc/battlestats-server.env`, restart `battlestats-celery-background`. NA and EU keep their current rotation.
 **Fallback:** if a deploy is not available when this is needed, L2a (`RECAPTURE_LAPSED_LIMIT=24000`, global) buys the same headroom the same day at the cost of EU's rotation (6.9d → 8.6d), and is reverted by restoring the value.
 **Gate:** asia's `scanned` equals `candidates` with `partial: false` for three consecutive days.
 
