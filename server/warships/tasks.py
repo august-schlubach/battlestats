@@ -197,6 +197,32 @@ def _recapture_lapsed_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:recapture_lapsed_players:{realm}:lock"
 
 
+def _recapture_limit(realm: str = DEFAULT_REALM) -> int:
+    """Candidate cap for one realm's recapture sweep, env-overridable per realm.
+
+    Per-realm override -> global -> code default, mirroring
+    `_reclassify_statement_timeout`. The realm axis is load-bearing here and not
+    mere symmetry: rotation latency is (that realm's band pool / this limit), and
+    the pools differ ~2x (eu ~207k, na ~123k, asia ~112k). ASIA is simultaneously
+    the slowest realm per row -- a fixed latency cost to api.worldofwarships.asia,
+    35-46 rows/s against na's 66-85 -- and the smallest pool, so it is the realm
+    that needs a lower cap and the one that pays least rotation latency for it. A
+    single global limit could only buy asia that headroom by also taxing EU, the
+    largest pool and the realm needing no cap at all.
+
+    Deliberately NOT generalised to RECAPTURE_LAPSED_DELAY (guards only global
+    resources -- the shared PG and the global WG token bucket -- across passes
+    that never overlap) or to RECAPTURE_TASK_OPTS (decorator-bound at import, so
+    no realm exists yet; and a raised ceiling is already self-targeting, since a
+    task holds its slot only as long as it actually runs).
+    Runbook: runbook-recapture-soft-limit-budget-2026-08-13.md (L2b).
+    """
+    override = os.getenv(f"RECAPTURE_LAPSED_LIMIT_{realm.upper()}")
+    if override:
+        return int(override)
+    return int(os.getenv("RECAPTURE_LAPSED_LIMIT", "30000"))
+
+
 def _distribution_warm_lock_key(realm: str = DEFAULT_REALM) -> str:
     return f"warships:tasks:warm_player_distributions:{realm}:lock"
 
@@ -2319,7 +2345,7 @@ def recapture_lapsed_players_task(self, realm=DEFAULT_REALM):
             realm=realm,
             min_days=int(os.getenv('RECAPTURE_LAPSED_MIN_DAYS', '8')),
             max_days=int(os.getenv('RECAPTURE_LAPSED_MAX_DAYS', '365')),
-            limit=int(os.getenv('RECAPTURE_LAPSED_LIMIT', '30000')),
+            limit=_recapture_limit(realm),
             delay=float(os.getenv('RECAPTURE_LAPSED_DELAY', '0.2')),
         )
         if os.getenv('RECAPTURE_LAPSED_APPLY', '0') == '1':

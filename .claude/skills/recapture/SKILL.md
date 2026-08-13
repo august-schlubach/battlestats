@@ -100,7 +100,17 @@ it covers only `scanned` of `candidates` rows. A partial run has the *same*
 this check a truncated realm reads as "maintenance mode, steady state" — which is
 exactly how EU/ASIA went unnoticed for two weeks before 2026-08-06. Say
 "partial (N of M)" in the readout and treat repeated partials as the signal that
-the run no longer fits its budget (runbook §2026-08-06).
+the run no longer fits its budget.
+
+When that happens, **check contention before blaming the sweep**: a partial is as
+often the `background` queue being saturated by something else in the same window
+as it is the pass genuinely growing. The durations are not in the snapshot (no
+`duration_s` field yet) — reconstruct them from `journalctl` and compare against
+the realm's own baseline, since the realms differ ~2x in throughput (asia 35–46
+rows/s, na 66–85). The levers, their real costs, and a one-at-a-time order for
+applying them are in
+`agents/runbooks/runbook-recapture-soft-limit-budget-2026-08-13.md`; do not reach
+for a lever before Step 0 of that path.
 
 The yield fields:
 

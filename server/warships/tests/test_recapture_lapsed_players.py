@@ -508,3 +508,55 @@ class RecaptureLapsedTaskGateTests(TestCase):
         # Invariant: soft < hard <= lock TTL, with room for the final flush.
         self.assertLess(soft, hard)
         self.assertLessEqual(hard, PLAYER_REFRESH_LOCK_TIMEOUT)
+
+
+class RecapturePerRealmLimitTests(TestCase):
+    """Per-realm candidate cap (`RECAPTURE_LAPSED_LIMIT_<REALM>`).
+
+    ASIA is the slowest realm per row (a fixed latency cost to
+    api.worldofwarships.asia) *and* has the smallest dormant pool, so it needs a
+    lower cap and pays the least rotation latency for one. A single global limit
+    could only buy asia that headroom by taxing EU — the largest pool, and the
+    realm that needs no cap at all. Runbook:
+    runbook-recapture-soft-limit-budget-2026-08-13.md (L2b).
+    """
+
+    def _limit(self, realm, env):
+        """Resolve the limit for `realm` under exactly `env` for the recapture keys."""
+        from warships.tasks import _recapture_limit
+        with patch.dict("os.environ", env):
+            for key in ("RECAPTURE_LAPSED_LIMIT",
+                        "RECAPTURE_LAPSED_LIMIT_NA",
+                        "RECAPTURE_LAPSED_LIMIT_EU",
+                        "RECAPTURE_LAPSED_LIMIT_ASIA"):
+                if key not in env:
+                    os.environ.pop(key, None)
+            return _recapture_limit(realm)
+
+    def test_realm_override_wins_over_the_global(self):
+        self.assertEqual(
+            self._limit("asia", {"RECAPTURE_LAPSED_LIMIT": "30000",
+                                 "RECAPTURE_LAPSED_LIMIT_ASIA": "24000"}),
+            24000)
+
+    def test_realm_without_an_override_keeps_the_global(self):
+        """The whole point: capping asia must not touch EU's rotation."""
+        self.assertEqual(
+            self._limit("eu", {"RECAPTURE_LAPSED_LIMIT": "30000",
+                               "RECAPTURE_LAPSED_LIMIT_ASIA": "24000"}),
+            30000)
+
+    def test_falls_back_to_the_code_default_when_nothing_is_set(self):
+        self.assertEqual(self._limit("na", {}), 30000)
+
+    def test_task_passes_the_per_realm_limit_to_the_command(self):
+        """The helper is inert unless the call site actually uses it."""
+        from warships.tasks import recapture_lapsed_players_task
+        with patch.dict("os.environ", {"RECAPTURE_LAPSED_ENABLED": "1",
+                                       "RECAPTURE_LAPSED_LIMIT": "30000",
+                                       "RECAPTURE_LAPSED_LIMIT_ASIA": "24000"}):
+            with patch("warships.tasks.call_command") as call:
+                recapture_lapsed_players_task.run(realm="asia")
+                recapture_lapsed_players_task.run(realm="na")
+        self.assertEqual(call.call_args_list[0].kwargs["limit"], 24000)
+        self.assertEqual(call.call_args_list[1].kwargs["limit"], 30000)
