@@ -125,10 +125,11 @@ WHERE website_id = '27c0ee6a-f534-42d4-b49f-27bbadad9848'
 GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
 ```
 
-## 5. Browser-language defaulting (BUILT 2026-08-11, shipping dark)
+## 5. Browser-language defaulting (BUILT 2026-08-11, **LIVE IN PROD since 2026-08-11 21:17 UTC**)
 
-**Status: implemented and shipping behind `NEXT_PUBLIC_LOCALE_AUTODETECT`, default off.** The
-mechanism is live in the bundle; prod behaviour is unchanged until the flag flips on the droplet.
+**Status: live.** `NEXT_PUBLIC_LOCALE_AUTODETECT=1` in `/etc/battlestats-client.env` (mtime
+2026-08-11 21:17 UTC), shipped with v5.3.0. The code default is still off; **the droplet env file
+is the authority, not the default and not a doc.** First readout is section 5d.
 The four requirements below are what was built, and each names its landing place:
 
 1. `detectLocale()` in `app/i18n/index.ts` — precedence in `LocaleContext.resolveInitialLocale`.
@@ -299,6 +300,38 @@ columns. Snippet-tier evidence, upgraded before acting on it.
 not rulings — see the research doc); `common.award` and `feedback.category.languageIssue` (our own
 coinages, unattestable by any corpus); ja `総戦闘数` (search-snippet only, refused).
 
+## 5d. First post-flip readout (2026-08-13)
+
+The before/after section 5 was sequenced for. Boundary is **2026-08-11 21:17 UTC**, the env file's
+mtime; ~1.5 days of beacon before it, ~1.9 days after. Beacon-reporting visitors:
+
+| window | en | ja | ko | CJK share |
+|---|---|---|---|---|
+| pre-flip | 43 | 2 | 0 | **4%** |
+| post-flip | 23 | 3 | 4 | **23%** |
+
+**Detection routes correctly.** Cross-tabulating `session.language` against the beacon's served
+locale, post-flip, gives a clean diagonal: every ja-browser visitor served `ja` (3), every
+ko-browser visitor served `ko` (3), every other language served `en` (cs/de/pl/ru, 1 each; en, 14).
+No misroute in either direction.
+
+**The over-reach tell has not fired.** Section 5 named it in advance: `locale-switch` → `en` from
+ko/ja browsers. Post-flip there is exactly **one** switch event of any kind, an `en`-browser US
+visitor selecting `en`. Zero CJK visitors switched away from what they were served.
+
+Three cautions on quoting these numbers:
+
+- **N is seven.** Directionally strong, not significant. 23% against the ~37% CJK-browser arrival
+  rate is consistent with detection working, and equally consistent with noise.
+- **Beacon coverage is ~60%** of in-window session rows (24 of 40 visitors fired `locale-active`).
+  It is uniform across languages, so the *share* is unbiased and the *counts* are a floor.
+- **"Not switching away" is weak evidence of satisfaction.** A visitor who finds the Korean UI
+  unhelpful and simply leaves emits no switch event either. Bounce rate for ko/ja visits is the
+  falsifying measure, and it is not instrumented.
+
+Readout SQL is section 4, plus the cross-tab (join the beacon rows to `session` and group by
+`lower(split_part(s.language,'-',1))`, `ed.string_value`).
+
 ## 6. The daily traffic email carries this readout
 
 `server/scripts/daily_traffic_email.py` (timer `battlestats-traffic-digest`, 10:30 UTC) grew a
@@ -385,3 +418,12 @@ Added 2026-08-11 with the native audits (section 5c):
 | ja `直近N日` is corpus-attested | first-party ja scrape line 50: `\| 全期間 \| 最近 \| 直近７日 \| …` — the old "no corpus hit" claim was false |
 | the browser-locale leak in the window label | `shipSeason.test.ts` (5 cases, incl. one asserting no CJK month can reach the English branch) |
 | the new values render without CJK wrapping | Playwright, ko + ja at 1280px and 390px, after the change |
+
+Added 2026-08-13 with the first post-flip readout (section 5d):
+
+| assertion | how verified |
+|---|---|
+| autodetect is on in prod, and since when | `ssh root@battlestats.online 'grep -i LOCALE /etc/battlestats-client.env'` → `NEXT_PUBLIC_LOCALE_AUTODETECT=1`; `stat -c %y` → 2026-08-11 21:17:52 UTC |
+| pre/post CJK share 4% → 23% | prod Umami, section 4 query split on the mtime boundary |
+| detection routes correctly (clean diagonal) | prod Umami, beacon rows joined to `session.language`, post-flip |
+| zero CJK switch-aways | prod Umami, `locale-switch` joined to `session.language`, `created_at >= 2026-08-11 21:00` — one row, `en`-browser → `en` |
