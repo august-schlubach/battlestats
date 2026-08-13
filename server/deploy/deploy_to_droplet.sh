@@ -6,6 +6,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${SERVER_DIR}/.." && pwd)"
 
+# Untracked prerequisites. These three are gitignored, so a linked worktree never
+# receives them and SERVER_DIR-relative lookups fail at scp time — one file per
+# invocation, each after the gates and rsync below have already run. Resolve them
+# from the main checkout (they are machine-level config for one production
+# target, not branch content) and validate all three BEFORE any expensive work.
+# Runbook: agents/runbooks/runbook-worktree-local-prereqs-2026-08-13.md
+# shellcheck source=../../scripts/lib/local_prereqs.sh
+source "${REPO_ROOT}/scripts/lib/local_prereqs.sh"
+
+MAIN_CHECKOUT="$(bs_main_checkout || echo "${REPO_ROOT}")"
+
+# Resolve first (empty when neither location has it), then report every miss at
+# once. An unresolved entry falls back to its main-checkout path purely so the
+# error names the place you should put the file.
+DEPLOY_ENV_CLOUD="$(bs_resolve_prereq "${SERVER_DIR}/.env.cloud" "${MAIN_CHECKOUT}/server/.env.cloud" || true)"
+DEPLOY_ENV_SECRETS="$(bs_resolve_prereq "${SERVER_DIR}/.env.secrets.cloud" "${MAIN_CHECKOUT}/server/.env.secrets.cloud" || true)"
+DEPLOY_CA_CERT="$(bs_resolve_prereq "${SERVER_DIR}/ca-certificate.crt" "${MAIN_CHECKOUT}/server/ca-certificate.crt" || true)"
+
+bs_require_prereqs "backend deploy" \
+  "${DEPLOY_ENV_CLOUD:-${MAIN_CHECKOUT}/server/.env.cloud}|regenerate from Pass — see agents/runbooks/ops-env-reference.md" \
+  "${DEPLOY_ENV_SECRETS:-${MAIN_CHECKOUT}/server/.env.secrets.cloud}|regenerate from Pass — see agents/runbooks/ops-env-reference.md" \
+  "${DEPLOY_CA_CERT:-${MAIN_CHECKOUT}/server/ca-certificate.crt}|scp root@battlestats.online:/etc/ssl/certs/battlestats-do-ca-certificate.crt ${MAIN_CHECKOUT}/server/ca-certificate.crt"
+
 # Hard gate: local tree must be at or ahead of origin/main. Prevents a
 # stale worktree from rsync'ing older code over production and silently
 # reverting already-shipped fixes (see scripts/check_local_tree.sh).
@@ -84,9 +107,9 @@ rm -rf "${REMOTE_RELEASE}/server/logs"
 ln -sfn "${APP_ROOT}/shared/logs" "${REMOTE_RELEASE}/server/logs"
 REMOTE
 
-scp "${SERVER_DIR}/.env.cloud" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_ENV}"
-scp "${SERVER_DIR}/.env.secrets.cloud" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_SECRETS}"
-scp "${SERVER_DIR}/ca-certificate.crt" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_CERT}"
+scp "${DEPLOY_ENV_CLOUD}" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_ENV}"
+scp "${DEPLOY_ENV_SECRETS}" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_SECRETS}"
+scp "${DEPLOY_CA_CERT}" "${DEPLOY_USER}@${HOST}:${REMOTE_TMP_CERT}"
 
 rsync -az --delete \
   --exclude '.env' \

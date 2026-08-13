@@ -2993,6 +2993,31 @@
                 "recapture-lapsed-players-removed"
             ]
         },
+        "agents/runbooks/runbook-worktree-local-prereqs-2026-08-13.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "deploy",
+            "owner": "platform",
+            "aliases": [
+                "worktree local prereqs",
+                "worktree missing env files",
+                "deploy from worktree",
+                "main checkout resolution"
+            ],
+            "tags": [
+                "worktree",
+                "deploy",
+                "release-gate",
+                "env-files",
+                "ca-certificate",
+                "preflight",
+                "developer-experience"
+            ],
+            "archive_on": [
+                "worktrees-no-longer-used"
+            ]
+        },
         "agents/runbooks/runbook-recapture-upstream-failure-guard-2026-08-12.md": {
             "kind": "runbook",
             "status": "active",

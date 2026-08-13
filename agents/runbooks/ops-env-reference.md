@@ -36,10 +36,17 @@ points `DB_SSLROOTCERT` there. It is the DigitalOcean **project** CA (self-signe
 the project, so it does not rotate per-cluster.
 
 **Canonical local copy: `server/ca-certificate.crt` in the main checkout.** It is
-gitignored (`.gitignore:17`), so it does not travel with a clone, a fresh dev box, or
-a **git worktree** — each needs its own copy, exactly like the `.cloud` env files. A
-missing copy fails the deploy at the scp with `stat local: No such file or directory`,
-after the CI check has already passed, so it looks later in the run than it is.
+gitignored (`.gitignore:17`), so it does not travel with a clone or a fresh dev box.
+
+**Worktrees no longer need their own copy (2026-08-13).** This paragraph used to say
+each worktree needed one, and that guidance cost a repeat failure on 2026-08-12: a doc
+cannot stop `scp` from failing. The backend deploy now resolves this file — and both
+`.cloud` env files — from the **main checkout** when the invoking tree lacks them, and
+validates all three *before* the CI gate and the rsync, reporting every miss at once.
+So a missing copy is now a single up-front message naming all of them, not a
+`stat local: No such file or directory` after the CI check has already passed. Only a
+genuinely fresh dev box (no populated main checkout) still needs the recovery below.
+Runbook: `runbook-worktree-local-prereqs-2026-08-13.md`.
 
 Recover it from the droplet rather than from Pass, where it is not stored:
 

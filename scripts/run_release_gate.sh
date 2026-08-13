@@ -2,14 +2,30 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_PYTHON_BIN="python"
+
+# shellcheck source=lib/local_prereqs.sh
+source "${ROOT_DIR}/scripts/lib/local_prereqs.sh"
+MAIN_CHECKOUT="$(bs_main_checkout || echo "${ROOT_DIR}")"
 
 # This project's venv lives at server/.venv (see CLAUDE.md), not the repo root, so
 # the root-only lookup never matched and the gate silently fell back to whatever
-# `python` the shell resolved — here a pyenv 3.14.6 with no pytest, which failed
-# the release at step 4 of 4, after the client build had already run. Root stays
-# first for any checkout that does place a venv there.
-for candidate in "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/server/.venv/bin/python"; do
+# `python` the shell resolved — a pyenv with no pytest, which failed the release
+# at step 4 of 4, after the client build had already run. Root stays first for any
+# checkout that does place a venv there.
+#
+# Both candidates were ROOT_DIR-relative, which fixed only the main checkout: a
+# linked worktree has no venv at all, so the original failure reproduced there
+# unchanged. The main checkout is now the last resort — a venv's bin/python is an
+# absolute interpreter path and runs fine against another tree's source.
+# THERE IS NO BARE `python` FALLBACK. Silently choosing an interpreter means the
+# gate can report on an environment nobody asked about, which is worse than
+# failing. Runbook: agents/runbooks/runbook-worktree-local-prereqs-2026-08-13.md
+DEFAULT_PYTHON_BIN=""
+for candidate in \
+    "${ROOT_DIR}/.venv/bin/python" \
+    "${ROOT_DIR}/server/.venv/bin/python" \
+    "${MAIN_CHECKOUT}/.venv/bin/python" \
+    "${MAIN_CHECKOUT}/server/.venv/bin/python"; do
   if [[ -x "${candidate}" ]]; then
     DEFAULT_PYTHON_BIN="${candidate}"
     break
@@ -17,6 +33,17 @@ for candidate in "${ROOT_DIR}/.venv/bin/python" "${ROOT_DIR}/server/.venv/bin/py
 done
 
 PYTHON_BIN="${PYTHON_BIN:-${DEFAULT_PYTHON_BIN}}"
+
+# Preflight BEFORE step 1. A worktree previously discovered node_modules at step
+# 1 and, once that was fixed, the interpreter at step 4 — the serial rediscovery
+# this exists to end. node_modules is preflight-only: npm resolves it from its own
+# working directory and the gate must lint THIS tree's source, so the main
+# checkout's copy cannot be borrowed.
+bs_require_prereqs "release gate" \
+  "${ROOT_DIR}/client/node_modules|(cd ${ROOT_DIR}/client && npm ci)" \
+  "${PYTHON_BIN:-${MAIN_CHECKOUT}/server/.venv/bin/python}|python -m venv ${MAIN_CHECKOUT}/server/.venv \&\& ${MAIN_CHECKOUT}/server/.venv/bin/pip install -r ${MAIN_CHECKOUT}/server/requirements.txt"
+
+echo "Release gate interpreter: ${PYTHON_BIN}"
 
 # The FULL backend suite, not a curated subset. It ran as a hand-picked 3-file
 # slice (142 tests) back when the suite took ~17 minutes locally — a cost that

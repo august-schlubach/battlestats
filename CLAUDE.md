@@ -61,6 +61,8 @@ npm test -- app/components/__tests__/PlayerDetail.test.tsx  # Single file
 ./scripts/release.sh patch|minor|major                    # Bump VERSION, commit, tag, push
 ```
 
+**Deploys and the release gate run from any worktree.** The gitignored material they need (`server/.env.cloud`, `.env.secrets.cloud`, `ca-certificate.crt`, the venv) resolves from the **main checkout** when the invoking tree lacks it, and every prerequisite is validated up front — one message listing all misses with recovery commands, before the CI gate and rsync. So a worktree deploy writes prod's env from the *main checkout's* `.cloud` files; drop a tree-local copy to override. `client/node_modules` is the exception (npm resolves it from its own cwd): the gate reports it, you run `npm ci`. Helper `scripts/lib/local_prereqs.sh`; runbook `agents/runbooks/runbook-worktree-local-prereqs-2026-08-13.md`.
+
 ### Operations
 
 ```bash
