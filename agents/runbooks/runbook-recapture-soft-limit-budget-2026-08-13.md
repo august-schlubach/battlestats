@@ -2,7 +2,7 @@
 
 _Created: 2026-08-13_
 _Context: the 2026-08-13 ops email reported `recapture_partial:asia` (23,100 of 30,000 scanned). Investigation found two independent causes — asia's pass has been consuming 72–95% of its 900s soft-limit budget every day for a week, and the 2026-08-12 top-ships orchestrator fan-out newly saturated the `background` worker across the recapture window._
-_Status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals, and Step 0 (observe the 2026-08-14 run) has not yet run. See Execution log._
+_Status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals. **Step 0 ran on 2026-08-14 and its gate is met** — asia went partial a second time (912s, `scanned` 28,800 of 30,000), so Step 1 is authorized and unapplied. See Execution log._
 _QA: reviewed 2026-08-13 — see QA Notes._
 
 ## QA Notes
@@ -208,12 +208,31 @@ What has actually been done, and what has not. **Nothing in this log changed the
 | 11 | Deployed backend + frontend; post-deploy verify and healthcheck both clean | releases `20260813153100` / `20260813153229` |
 | 12 | Confirmed on the droplet that the helper is present **and** no `RECAPTURE_LAPSED_LIMIT_*` is set | `RECAPTURE_LAPSED_LIMIT=30000`, no suffixed keys |
 
+### Performed — 2026-08-14 (Step 0)
+
+Figures below were read live from the droplet during the 2026-08-14 session — `/opt/battlestats-server/shared/benchmarks/recapture-lapsed/` and `journalctl -u battlestats-celery-background` — and, like the Aug 13 numbers above, **cannot be re-derived from a checkout**.
+
+| # | Action | Result |
+|---|---|---|
+| 1 | Observed the 2026-08-14 recapture run per Step 0 | asia `partial: true`, `scanned` **28,800** of 30,000, duration **912s** |
+| 2 | Compared asia against **its own** 35–46 rows/s baseline (not against NA — asia is structurally slower per row, so a cross-realm comparison is invalid) | Aug 13 **25.3** rows/s, Aug 14 **31.6** rows/s, both below baseline |
+| 3 | Re-measured `background` saturation for the 09:50–11:30 window | Aug 11 35% → Aug 12 43% → Aug 13 90% → **Aug 14 100%** |
+| 4 | Verified the top-ships fan-out fix on its own terms (`runbook-top-ships-warm-soft-limit-2026-08-12.md` §Validation) | coverage **fixed** (45/45 buckets fresh, 0 soft-limit kills on the orchestrator); queue cost **worse** — judge it on both axes |
+
+**Gate arithmetic.** The Step 0 gate is "asia goes partial a second time, **or** exceeds ~860s." Both limbs are satisfied: partial on 08-13 *and* 08-14, and 912s > 860s. Step 1 is therefore authorized — **to Step 1, not to Step 4**.
+
+**Corollary that survives the gate:** at asia's own 35–46 rows/s baseline a 30,000-row pass takes 652–857s and *fits* inside 900s. So "15 minutes cannot fit asia" is false; the budget is adequate on an uncontended day, which is precisely why L4 stays last.
+
+**Two observations recorded, not chased:**
+- rows/s *improved* 25.3 → 31.6 while saturation went 90% → 100%. Pure contention does not predict that. Same neighbourhood as the open F4 question; it does not change the gate verdict.
+- `warm_player_ranked_wr_battles_correlation_task` logged **46 soft-limit kills in 48h** — the journal-wide leader, burning slot-seconds in this very window and completing nothing. **No step in L1–L4 touches it.** It is the strongest evidence yet for Step 4's own note that the real fix is capacity or fan-out scheduling; whether it belongs in the lever order is an operator decision, not a reordering to make unilaterally.
+
 Note on mechanics for whoever repeats this: `scripts/release.sh` was **not** used. Its final `git push` pushes the current branch, and this work was done in a worktree, so it would have pushed the worktree branch instead of main. Its steps were performed by hand — bump, `chore:` commit, `git push origin HEAD:main`, annotated tag, push tag.
 
 ### Outstanding
 
-1. **Step 0 — observe the 2026-08-14 run.** Not yet run; it is the gate on everything below. Per F5 the contention is variable, so a clean asia run means no lever is needed at all.
-2. **Step 1 (L1) not applied.** `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2).
+1. ~~**Step 0 — observe the 2026-08-14 run.**~~ **DONE 2026-08-14, gate met** — see Performed — 2026-08-14. The contention did recur; a lever is warranted.
+2. **Step 1 (L1) not applied — this is the live next action.** `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2). Env-only, no deploy, instantly reversible. Note what it is and is not: it buys ~45s of recapture's own wall-clock and measures the WG-limiter question for free — it is ordered first because it is the cheapest and most reversible, **not** because it is the most likely to close a contention deficit. The stripe runs ~10:10–11:30 UTC, so a change applied in the evening reads back on the *next* day's run.
 3. **Step 2 (L2b) half-done: code shipped, lever not pulled.** Setting `RECAPTURE_LAPSED_LIMIT_ASIA=24000` in Pass → `/etc/battlestats-server.env` → restart `battlestats-celery-background` is all that remains, and only if Step 1 leaves asia above ~800s.
 4. **L3 and L4 unimplemented**, by design — they sit behind Steps 1–2.
 5. **F4 unexplained** (why EU alone was unaffected). The contention model is incomplete until answered.
