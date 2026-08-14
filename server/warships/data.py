@@ -6848,7 +6848,8 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
     every tier×type percentile bucket per realm (skip-if-warm), so even the
     published fallback is a rotation-gap/restart exception, not the norm.
     """
-    from warships.models import BattleEvent, ShipTopPlayerSnapshot
+    from warships.models import (BattleEvent, ShipPopDailyAgg,
+                                 ShipTopPlayerSnapshot)
 
     realm = (realm or DEFAULT_REALM).lower().strip()
     mode = (str(mode) if mode is not None else "random").lower().strip()
@@ -7006,13 +7007,36 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
         Ship.objects.filter(tier=tier, ship_type=ship_type)
         .values_list('ship_id', flat=True)
     )
+    # F9.2 extension: sum the pre-aggregated daily rollup instead of re-scanning
+    # raw per-event rows over the whole window on every warm. Identical numbers
+    # (see `ship_pop_rollup_covers_window`), ~45 tiny rows per ship instead of
+    # every BattleEvent in the window. Falls back to the raw scan when the
+    # rollup is incomplete, so a gap costs latency, never correctness.
+    use_rollup = ship_pop_rollup_covers_window(
+        realm, mode, window_start_d, window_end_d)
+    if not use_rollup:
+        logger.warning(
+            "ships_by_tier_type: ShipPopDailyAgg incomplete for realm=%s "
+            "mode=%s window=%s..%s — falling back to the BattleEvent scan. "
+            "Run rollup_ship_pop_daily_catchup(%r).",
+            realm, mode, window_start_d, window_end_d, realm)
+
     if bucket_ids:
-        payload["total_battles"] = int(
-            BattleEvent.objects
-            .filter(detected_at__gte=window_start, detected_at__lt=window_end,
-                    player__realm=realm, mode=mode, ship_id__in=bucket_ids)
-            .aggregate(t=Sum("battles_delta"))["t"] or 0
-        )
+        if use_rollup:
+            payload["total_battles"] = int(
+                ShipPopDailyAgg.objects
+                .filter(realm=realm, mode=mode,
+                        date__gte=window_start_d, date__lt=window_end_d,
+                        ship_id__in=bucket_ids)
+                .aggregate(t=Sum("battles"))["t"] or 0
+            )
+        else:
+            payload["total_battles"] = int(
+                BattleEvent.objects
+                .filter(detected_at__gte=window_start, detected_at__lt=window_end,
+                        player__realm=realm, mode=mode, ship_id__in=bucket_ids)
+                .aggregate(t=Sum("battles_delta"))["t"] or 0
+            )
 
     def _ship_meta(ship_id, ship):
         """Static identity fields shared by the all-path and percentile rows."""
@@ -7081,29 +7105,51 @@ def compute_realm_ships_by_tier_type(realm, tier, ship_type, mode="random",
 
     # ship_id is a plain BigIntegerField (no FK), so there is no ORM join to
     # Ship — aggregate the candidate ids directly, then attach metadata in Python.
-    rows = (
-        BattleEvent.objects
-        .filter(detected_at__gte=window_start, detected_at__lt=window_end,
-                player__realm=realm, mode=mode, ship_id__in=ships.keys())
-        .values("ship_id")
-        .annotate(
-            battles=Sum("battles_delta"),
-            wins=Sum("wins_delta"),
-            # damage_delta is nullable — Sum can return None; coalesced below.
-            damage=Sum("damage_delta"),
-            frags=Sum("frags_delta"),
+    # Both branches emit the same keys (ship_id/battles/wins/damage/frags) so the
+    # row loop below is source-agnostic; only the grain differs.
+    # NOTE on the alias prefix: ShipPopDailyAgg's own columns are `battles`,
+    # `wins`, `frags`, so annotating `battles=Sum("battles")` would collide with
+    # a concrete field and Django raises. Both branches therefore emit the same
+    # `w_`-prefixed aliases, which also keeps the row loop below source-agnostic.
+    if use_rollup:
+        rows = (
+            ShipPopDailyAgg.objects
+            .filter(realm=realm, mode=mode,
+                    date__gte=window_start_d, date__lt=window_end_d,
+                    ship_id__in=ships.keys())
+            .values("ship_id")
+            .annotate(
+                w_battles=Sum("battles"),
+                w_wins=Sum("wins"),
+                w_damage=Sum("damage_sum"),
+                w_frags=Sum("frags"),
+            )
+            .filter(w_battles__gte=min_battles)
         )
-        .filter(battles__gte=min_battles)
-    )
+    else:
+        rows = (
+            BattleEvent.objects
+            .filter(detected_at__gte=window_start, detected_at__lt=window_end,
+                    player__realm=realm, mode=mode, ship_id__in=ships.keys())
+            .values("ship_id")
+            .annotate(
+                w_battles=Sum("battles_delta"),
+                w_wins=Sum("wins_delta"),
+                # damage_delta is nullable — Sum can return None; coalesced below.
+                w_damage=Sum("damage_delta"),
+                w_frags=Sum("frags_delta"),
+            )
+            .filter(w_battles__gte=min_battles)
+        )
 
     payload_ships = []
     for r in rows:
-        battles = int(r["battles"] or 0)
+        battles = int(r["w_battles"] or 0)
         if battles <= 0:
             continue
-        wins = int(r["wins"] or 0)
-        damage = int(r["damage"] or 0)
-        frags = int(r["frags"] or 0)
+        wins = int(r["w_wins"] or 0)
+        damage = int(r["w_damage"] or 0)
+        frags = int(r["w_frags"] or 0)
         row = _ship_meta(r["ship_id"], ships.get(r["ship_id"]))
         row.update({
             "battles": battles,
@@ -7236,8 +7282,31 @@ _SHIP_POP_AVG_CACHE_TTL = 26 * 3600  # day-scoped key; TTL is just a backstop
 # SHIP_POP_ROLLUP_REFRESH_DAYS: the current UTC day is still accruing, and a
 # commit straddling midnight can land its detected-yesterday rows just after
 # the day flips.
-SHIP_POP_ROLLUP_RETENTION_DAYS = 100  # self-bounding; pruned inside the rollup
 SHIP_POP_ROLLUP_REFRESH_DAYS = 2      # today + yesterday always re-rolled
+
+# The rollup must span the WIDEST window any consumer reads, not merely the
+# ship-combat population window (30d) it was originally built for. The inline
+# ship leaderboard reads SHIP_LEADERBOARD_WINDOW_DAYS — prod 45 (pinned in
+# server/deploy/deploy_to_droplet.sh:787, observed 2026-08-14), with 60 and
+# then 90 on the roadmap.
+#
+# This is load-bearing, not tidiness. Gap repair only reaches dates inside the
+# catch-up span: `rollup_ship_pop_daily_catchup` iterates `cutoff .. today` and
+# re-rolls a date only if it has no rows yet. A date that ages out of that span
+# with rows missing is **never repaired**, so any window sum over it silently
+# understates every ship's battles — no error, no empty payload, just quietly
+# wrong numbers on a ranked leaderboard. Widening the span costs nothing on a
+# healthy table (already-rolled days are skipped).
+SHIP_POP_ROLLUP_WINDOW_DAYS = max(
+    SHIP_COMBAT_WINDOW_DAYS, SHIP_LEADERBOARD_WINDOW_DAYS)
+
+# Retention must clear the widest window by enough margin that a gap surviving
+# a few days of failed rollups is still repairable. Derived rather than fixed
+# so the 45 -> 60 -> 90 window transitions cannot outrun it: at a 90d window a
+# flat 100 would have left only 10 days of slack.
+SHIP_POP_ROLLUP_RETENTION_MARGIN_DAYS = 15
+SHIP_POP_ROLLUP_RETENTION_DAYS = max(
+    100, SHIP_POP_ROLLUP_WINDOW_DAYS + SHIP_POP_ROLLUP_RETENTION_MARGIN_DAYS)
 
 # (PDSS source column, ShipPopDailyAgg column) — the sums the ship-population
 # consumers need: avg-damage baseline (battles, damage_sum) + the ship-combat
@@ -7255,6 +7324,38 @@ _SHIP_POP_ROLLUP_FIELDS = (
     ('torpedo_shots', 'torpedo_shots'),
     ('torpedo_hits', 'torpedo_hits'),
 )
+
+
+def ship_pop_rollup_covers_window(realm, mode, window_start_d, window_end_d):
+    """True when ShipPopDailyAgg holds rows for EVERY date in [start, end).
+
+    `ShipPopDailyAgg` is a derived read-model rebuilt from `PlayerDailyShipStats`,
+    which is itself rebuilt from `BattleEvent` (`incremental_battles.py:1421`),
+    so per-day sums compose associatively into exactly the window totals a
+    direct `BattleEvent` scan produces. The one way the two can disagree is a
+    **missing day**: the rollup does not raise on a gap, it simply sums to less.
+
+    That makes coverage a precondition, not a detail. A consumer swapping the
+    raw scan for this table must prove the window is complete and fall back
+    otherwise — serving a 40-day sum labelled as a 45-day window is precisely
+    the silent-staleness failure this codebase keeps rediscovering. A realm-day
+    with genuinely zero battles would also read as a gap; that is accepted,
+    because the fallback is merely slower, never wrong.
+    """
+    from warships.models import ShipPopDailyAgg
+
+    span = (window_end_d - window_start_d).days
+    if span <= 0:
+        return False
+    have = (
+        ShipPopDailyAgg.objects
+        .filter(realm=realm, mode=mode,
+                date__gte=window_start_d, date__lt=window_end_d)
+        .values_list('date', flat=True)
+        .distinct()
+        .count()
+    )
+    return have >= span
 
 
 def rollup_ship_pop_daily(realm: str, on_date) -> int:
@@ -7293,16 +7394,23 @@ def rollup_ship_pop_daily(realm: str, on_date) -> int:
 
 
 def rollup_ship_pop_daily_catchup(
-        realm: str, window_days: int = SHIP_COMBAT_WINDOW_DAYS) -> int:
+        realm: str, window_days: int = None) -> int:
     """Bring the trailing window's ShipPopDailyAgg up to date for a realm.
 
     Rolls up (a) every window date with no agg rows yet — on first deploy
     this backfills the whole window, afterwards only genuine gaps — and
     (b) always the trailing SHIP_POP_ROLLUP_REFRESH_DAYS (still accruing).
     A frozen day already rolled up is skipped, which is what makes the
-    nightly warm cheap after day one. Returns the number of days rolled."""
+    nightly warm cheap after day one. Returns the number of days rolled.
+
+    ``window_days`` defaults to SHIP_POP_ROLLUP_WINDOW_DAYS — the widest
+    consumer window, not the ship-combat 30d this was first written for.
+    Repair is only possible inside this span, so it must cover the ship
+    leaderboard's window or that consumer silently sums missing days."""
     from warships.models import ShipPopDailyAgg
 
+    if window_days is None:
+        window_days = SHIP_POP_ROLLUP_WINDOW_DAYS
     today = django_timezone.now().date()
     cutoff = today - timedelta(days=window_days)
     rolled_dates = set(

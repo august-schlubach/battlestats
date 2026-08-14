@@ -3942,6 +3942,38 @@
                 "clan-crawl-decommissioned",
                 "crawl-yield-instrument-removed"
             ]
+        },
+        "agents/runbooks/runbook-ship-list-rollup-source-2026-08-14.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "performance",
+            "owner": "platform",
+            "aliases": [
+                "ship list rollup source",
+                "ship list off BattleEvent",
+                "ShipPopDailyAgg ship leaderboard",
+                "ship list daily rollup",
+                "ShipPopDailyAgg incomplete fallback",
+                "ship pop rollup window days",
+                "why is the ship list slow"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "ShipPopDailyAgg",
+                "PlayerDailyShipStats",
+                "BattleEvent",
+                "daily-rollup",
+                "incremental-aggregate",
+                "background-queue",
+                "warmers",
+                "coverage-guard",
+                "window-retention"
+            ],
+            "archive_on": [
+                "ship-list-decommissioned",
+                "rollup-source-superseded"
+            ]
         }
     }
 }
