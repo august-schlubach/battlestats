@@ -2,7 +2,7 @@
 
 _Created: 2026-08-10_
 _Context: The locale selector shipped visible in v5.0.0 (2026-08-05). Asked "how many people are using a language other than English", the existing instrumentation could not answer it: `locale-switch` counts the act of switching, and `bs-locale` is sticky, so sustained usage emits nothing._
-_Status: **`locale-active` beacon implemented** on `worktree-locale-beacon` (2026-08-10). Browser-language defaulting is analysed in section 5 and **not implemented** — it is a separate decision._
+_Status: **`locale-active` beacon live; browser-language autodetect LIVE in prod since 2026-08-11 21:17 UTC** (`NEXT_PUBLIC_LOCALE_AUTODETECT=1` in `/etc/battlestats-client.env` — that file is the authority, not the code default). Readouts: 5d (2026-08-13, first), **5e (2026-08-14, current)**. Section 5's original "not implemented" framing is historical._
 
 ## Purpose
 
@@ -325,12 +325,103 @@ Three cautions on quoting these numbers:
   rate is consistent with detection working, and equally consistent with noise.
 - **Beacon coverage is ~60%** of in-window session rows (24 of 40 visitors fired `locale-active`).
   It is uniform across languages, so the *share* is unbiased and the *counts* are a floor.
+  **Superseded by 5e:** the uniformity claim could not be reproduced at a larger N, and the
+  beacon/pageview populations overlap only partially. Read 5e before quoting a coverage figure.
 - **"Not switching away" is weak evidence of satisfaction.** A visitor who finds the Korean UI
   unhelpful and simply leaves emits no switch event either. Bounce rate for ko/ja visits is the
-  falsifying measure, and it is not instrumented.
+  falsifying measure, and it is not instrumented. **Superseded by 5e:** it is derivable from
+  `website_event` after all, and it was measured on 2026-08-14. It clears.
 
 Readout SQL is section 4, plus the cross-tab (join the beacon rows to `session` and group by
 `lower(split_part(s.language,'-',1))`, `ed.string_value`).
+
+## 5e. Second post-flip readout (2026-08-14) — and the denominator that must not be got wrong
+
+One day after 5d, same boundary (2026-08-11 21:17 UTC), ~2.9 days of beacon after it. The 5d
+pre-flip row reproduced **exactly** (43 en / 2 ja / 0 ko), which is the check that the window split
+and the query are right; treat a mismatch there as a query bug before believing any post-flip number.
+
+| window | en | ja | ko | CJK share |
+|---|---|---|---|---|
+| pre-flip | 43 | 2 | 0 | **4%** |
+| post-flip (5d, 08-13) | 23 | 3 | 4 | 23% |
+| post-flip (5e, 08-14) | 43 | 6 | 6 | **22%** |
+
+The share held at ~22% while N nearly doubled (7 → 12 CJK visitors). ko and ja have both appeared
+every UTC day since the flip.
+
+### The comparison 5d could not make: same-window arrival vs service
+
+5d contrasted 23% served against the **~37% CJK-browser arrival rate** and called the gap
+"consistent with detection working, and equally consistent with noise." That contrast was never
+sound: the arrival figure is a *30-day new-visitor* rate and the beacon figure is a *3-day* one —
+different populations over different spans, exactly the trap section 6 warns about for the email.
+
+Computed over the same post-flip window, on visitors active in it:
+
+- CJK share of **active visitors** (by `session.language`): **23.3%** (20 of 86)
+- CJK share of **beacon-reporting visitors** (by served locale): **21.8%** (12 of 55)
+
+Those are the same population, and they match. **Autodetect is serving essentially everyone it
+should.** The 34–37% figure is a 30-day rate and must not be set beside a 3-day beacon share.
+
+### Routing and the over-reach tell, at N=55
+
+Clean diagonal, no misroute either way: ja browser → `ja` (6), ko browser → `ko` (6), every other
+language → `en` (43: de 8, cs/fr/pl/ru 1 each, en 31). Post-flip `locale-switch` is still exactly
+**one** event — an `en`-browser visitor selecting `en`. Zero CJK switch-aways across 12 CJK visitors.
+
+`?lang=` arrivals all-time: still **0**.
+
+### Bounce: the falsifying measure, measured
+
+5d called this uninstrumented. It is derivable from `website_event`, and it clears — **but the first
+attempt produced a false alarm that anyone repeating this will also hit.**
+
+**The trap.** Counting `visits` as `count(DISTINCT visit_id)` over *all* events makes the beacon
+inflate its own denominator: post-flip nearly every visit carries a `locale-active` row, and 20
+beacon-firing visitors have **no pageview row at all** (below), so they enter as visits with zero
+pageviews. The pre-flip comparison window mostly predates the beacon and has no such visits. That
+alone produced an apparent CJK collapse from **1.45 to 1.02 pageviews/visit** — an artifact
+entirely, pointing the wrong way, and large enough to look like a product failure.
+
+**The fix:** restrict to visits containing ≥1 pageview (`HAVING count(*) FILTER (WHERE event_type=1) > 0`).
+Corrected, comparing the 14 days before the flip against the ~3 days after:
+
+| cohort | pv/visit before | after | single-pageview before | after |
+|---|---|---|---|---|
+| CJK (ja+ko browsers) | 1.41 | **1.46** | 79% | **77%** |
+| other | 1.52 | 1.91 | 75% | 69% |
+
+CJK engagement is flat-to-slightly-better after being served its own language: it did not degrade,
+which is what the measure was for. Two honest limits: CJK engagement remains *below* non-CJK, and
+non-CJK improved more over the same span — but the windows differ in length (14d vs ~3d), so that
+gap should not be attributed to anything here.
+
+### Coverage is messier than 5d recorded
+
+5d: "~60% of in-window session rows … uniform across languages, so the share is unbiased." At the
+larger N the population overlap is not that simple. Post-flip: 86 visitors with a pageview, 55 with
+a beacon, **but only 35 with both.**
+
+- **20 visitors fired `locale-active` with no pageview row in the window**, and **13 of those have
+  never had a pageview recorded at all.** None are missing `session` rows, so this is not an
+  orphaned join. Cause unknown — route prefetch, a JS-executing bot, and a tracker race are all
+  candidates; none has been checked.
+- Consequently **any per-language coverage percentage computed against a pageview denominator is
+  unreliable**, and 5d's "uniform across languages" is not currently verifiable. A per-language cut
+  attempted here (ja 20%, ko 40%, en 46%) used that bad denominator and is **not** evidence of
+  non-uniformity; it is reported only so nobody re-derives it and believes it.
+
+This does not threaten the share figures above — a bias would have to correlate with language, and
+the arrival-vs-service match (23.3% vs 21.8%) is independent evidence that it does not. It does mean
+the *counts* are a floor and the coverage story needs work before it is quoted.
+
+### Still true after this readout
+
+N is twelve CJK visitors over three days. Directionally strong, not statistically settled. Nothing
+here justifies dropping the selector, and the discoverability finding of section 2 is untouched:
+the selector is still how a visitor overrides, and one click still outranks detection forever.
 
 ## 6. The daily traffic email carries this readout
 
@@ -427,3 +518,17 @@ Added 2026-08-13 with the first post-flip readout (section 5d):
 | pre/post CJK share 4% → 23% | prod Umami, section 4 query split on the mtime boundary |
 | detection routes correctly (clean diagonal) | prod Umami, beacon rows joined to `session.language`, post-flip |
 | zero CJK switch-aways | prod Umami, `locale-switch` joined to `session.language`, `created_at >= 2026-08-11 21:00` — one row, `en`-browser → `en` |
+
+Added 2026-08-14 with the second post-flip readout (section 5e):
+
+| assertion | how verified |
+|---|---|
+| the 5d pre-flip row is reproducible | prod Umami, same query and boundary re-run 24h later — 43 en / 2 ja / 0 ko, byte-identical. This is the control for the window split |
+| CJK share held at 22% as N doubled | prod Umami, section 4 query, post-flip: en 43 / ja 6 / ko 6 = 12 of 55 |
+| arrival and service match **in the same window** | prod Umami: CJK 23.3% of 86 active visitors (`session.language`) vs 21.8% of 55 beacon-reporting (served locale). Replaces 5d's unsound 23%-vs-37% contrast, which compared a 3-day share to a 30-day rate |
+| clean diagonal holds at N=55 | prod Umami cross-tab, post-flip: ja→ja 6, ko→ko 6, all other languages→en 43 (de 8, cs/fr/pl/ru 1 each, en 31) |
+| still exactly one switch event | prod Umami, `locale-switch` post-flip — one row, `en`-browser → `en` |
+| CJK bounce did **not** worsen | prod Umami, visits filtered to ≥1 pageview: CJK 1.41→1.46 pv/visit, single-pv 79%→77%, against the 14 days pre-flip |
+| the 1.02 figure is an artifact, not a finding | same query without the ≥1-pageview filter yields CJK 1.45→1.02; the gap is beacon-only visits entering a denominator the pre-flip window has none of |
+| 20 beacon-firers have no in-window pageview, 13 none ever | prod Umami, `locale-active` session_ids anti-joined to `event_type=1`; `session` rows present for all 20, so not an orphan join |
+| 5d's "coverage is uniform across languages" is not currently verifiable | the only available per-language cut uses the pageview denominator the row above invalidates |
