@@ -69,7 +69,7 @@ Production deploy scripts create four dedicated workers:
 
 Production also runs a dedicated Beat process.
 
-The `crawls` carve-out exists because `crawl_all_clans_task` runs for ~14 days end-to-end at steady state and was previously camping a `background` slot for its entire duration, blocking incremental refreshes and letting warmer-fanout duplicates pile up in the queue. The dedicated worker uses `--max-tasks-per-child=1` so the long-running fork is recycled between crawls. See `runbook-clan-crawl-blocker-2026-04-30.md` for the incident chain that motivated this split.
+The `crawls` carve-out exists because `crawl_all_clans_task` runs for ~14 days end-to-end at steady state and was previously camping a `background` slot for its entire duration, blocking incremental refreshes and letting warmer-fanout duplicates pile up in the queue. The dedicated worker uses `--max-tasks-per-child=1` so the long-running fork is recycled between crawls. See `archive/runbook-clan-crawl-blocker-2026-04-30.md` for the incident chain that motivated this split.
 
 The intended production mapping is visible in:
 
