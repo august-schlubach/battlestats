@@ -73,16 +73,22 @@ runs the floor restarts — task code reads `os.getenv` but the process env is f
 at process start. So a snapshot can show `LIMIT=12000` in its config while its
 entire 24h data window was captured by a worker still running the old value.
 
-**The floor runs on the `default` queue / `battlestats-celery` worker** (per
-`settings.CELERY_TASK_ROUTES`; confirmed live 2026-06-19 — **NOT** `background`,
-which runs enrichment / the snapshot engine / warmers). So a floor-config change
-takes effect when **`battlestats-celery`** restarts. Check *that* worker — a
-stale-doc trap this step exists to prevent: an earlier version checked
-`battlestats-celery-background`, the wrong worker, which is what sent the 2026-06-19
-investigation down a "slot-starvation" dead end.
+**The floor runs on its own `floor` queue / `battlestats-celery-floor` worker**
+(`settings.CELERY_TASK_ROUTES` routes `ensure_daily_battle_observations_task` to
+`floor`; the unit is defined in `server/deploy/deploy_to_droplet.sh` with
+`-Q floor -c "${CELERY_FLOOR_CONCURRENCY:-2}"`). So a floor-config change takes
+effect when **`battlestats-celery-floor`** restarts. Check *that* worker.
+
+This step exists because checking the wrong worker has burned two
+investigations. The first checked `battlestats-celery-background` and produced a
+"slot-starvation" dead end (2026-06-19). This skill then named
+`battlestats-celery` (the `default` worker) — correct at the time, but the floor
+moved to a dedicated queue and worker shortly afterwards and **this text was not
+updated until 2026-08-15**. Reading a live floor against a `default` worker's
+restart time makes a current config look stale, or a stale one look live.
 
 ```bash
-ssh root@battlestats.online 'stat -c "env mtime: %y" /etc/battlestats-server.env; systemctl show battlestats-celery -p ActiveEnterTimestamp'
+ssh root@battlestats.online 'stat -c "env mtime: %y" /etc/battlestats-server.env; systemctl show battlestats-celery-floor -p ActiveEnterTimestamp'
 ```
 
 If `ActiveEnterTimestamp` is **before** the env mtime, the config-block value is
@@ -99,9 +105,9 @@ on for a realm, expect `gated_skipped` to fall cycle-over-cycle as the cooldown
 drains the non-mover wall, and the floor to self-chain within a Beat cycle instead
 of idling.
 
-**Optional live cross-check — the floor's own instrumentation, on `battlestats-celery`:**
+**Optional live cross-check — the floor's own instrumentation, on `battlestats-celery-floor`:**
 ```bash
-ssh root@battlestats.online 'journalctl -u battlestats-celery --since "6 hours ago" --no-pager | grep -E "bulk floor done|Floor self-chain" | tail'
+ssh root@battlestats.online 'journalctl -u battlestats-celery-floor --since "6 hours ago" --no-pager | grep -E "bulk floor done|Floor self-chain" | tail'
 ```
 `bulk floor done realm=… movers=… battles_json_total_ms=… cycle_ms=…` gives per-cycle
 wall-time and the per-mover `battles_json`-rebuild share; `Floor self-chain stop` vs a
@@ -138,7 +144,7 @@ For **totals** and **each realm** (na / eu / asia), compute L and the Δ vs D-1 
 ```
 Observation-floor benchmark — battlestats.online
 Latest: <L captured_at>   vs   <D-1 captured_at> (Δ24h)   [trend vs <D-7> over 7d]
-Config: LIMIT=<…> HOURS=<…> cooldown=<…h> self_chain=<on:realms|off>  <flag if not-yet-live per step 3 — check battlestats-celery (default), not background>
+Config: LIMIT=<…> HOURS=<…> cooldown=<…h> self_chain=<on:realms|off>  <flag if not-yet-live per step 3 — check battlestats-celery-floor, not default or background>
 
                 active7d   productive    cov/7d   (% of ceil)   prodRate   fresh<24h   stale>24h
   na            …          …  (Δ…)        …%       …%            …%         …           …

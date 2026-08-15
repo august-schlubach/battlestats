@@ -99,10 +99,14 @@ cat > /etc/logrotate.d/battlestats <<'LOGROTATE'
     su battlestats battlestats
 }
 LOGROTATE
-# Per-run recapture yield snapshots (the /recapture skill reads these). The
-# benchmarks/ parent is root-owned, so the worker (battlestats) can't makedirs the
-# subdir itself — pre-create it owned by the app user.
+# Per-run benchmark snapshots (the /recapture and /crawl-yield skills read
+# these). The benchmarks/ parent is root-owned, so the worker (battlestats)
+# can't makedirs a subdir itself — pre-create each one owned by the app user.
+# crawl-yield was missing here until 2026-08-15: the directory existed only
+# because it was created by hand on the live host, so a droplet rebuild would
+# have reproduced the original PermissionError with no trace in the repo.
 install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/benchmarks/recapture-lapsed"
+install -d -o "${APP_USER}" -g "${APP_USER}" "${APP_ROOT}/shared/benchmarks/crawl-yield"
 rm -rf "${REMOTE_RELEASE}/server/logs"
 ln -sfn "${APP_ROOT}/shared/logs" "${REMOTE_RELEASE}/server/logs"
 REMOTE
