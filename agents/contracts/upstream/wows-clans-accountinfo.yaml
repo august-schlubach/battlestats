@@ -84,9 +84,9 @@ repo_usage:
     - Used to hydrate clan membership for a player account.
     - Feeds follow-on clan detail fetches when a clan_id is present.
     - Relevant to the player-page hydration path because clan data may arrive later than initial player data.
+  # views.py removed 2026-08-15: no accountinfo/membership reference there.
   code_refs:
     - server/warships/api/clans.py
-    - server/warships/views.py
     - server/warships/data.py
 
 evidence_refs:

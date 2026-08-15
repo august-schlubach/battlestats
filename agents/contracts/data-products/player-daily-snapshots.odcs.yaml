@@ -46,7 +46,13 @@ schema:
     logicalType: object
     physicalType: table
     description: One player's cumulative PvP totals for a given date plus derived interval metrics.
-    dataGranularityDescription: One row per player per date.
+    dataGranularityDescription: >-
+      At most one row per player per date, and rows are SPARSE BY DESIGN.
+      Since 2026-07-20 (SNAPSHOT_DELTA_GATE_ENABLED, default on) a row is
+      written only when the player's cumulative PvP stats moved; a date with no
+      row means "no battles that day", NOT missing data. Readers must synthesize
+      zeros for absent dates rather than treating a gap as data loss. The
+      uniqueness guarantee below still holds; completeness does not.
     properties:
       - id: player_id_prop
         name: player_id
@@ -96,13 +102,13 @@ schema:
         required: false
         description: Difference in cumulative wins from the previous snapshot date. First snapshot in a window may be zero.
         classification: public
-      - id: last_fetch_prop
-        name: last_fetch
-        businessName: refresh timestamp
-        logicalType: timestamp
-        physicalType: datetime
+      - id: survived_battles_prop
+        name: survived_battles
+        businessName: survived battles
+        logicalType: integer
+        physicalType: integer
         required: false
-        description: Application timestamp when the snapshot row was last refreshed.
+        description: Cumulative count of battles the player survived, as of this date.
         classification: public
 
 quality:
@@ -114,4 +120,8 @@ quality:
 slaProperties:
   - property: freshness
     value: daily
-    description: Snapshot data is intended to refresh on a daily cadence or on-demand player lookup.
+    description: >-
+      The snapshot engine evaluates every active player daily (or on an on-demand
+      lookup). It does not follow that every player has a row for every day — see
+      the delta gate in dataGranularityDescription. "Daily" here is the cadence of
+      the check, not a guarantee of row presence.

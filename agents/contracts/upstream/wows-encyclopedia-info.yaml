@@ -66,8 +66,8 @@ observed_behavior:
     - This endpoint behaves like a lightweight encyclopedia metadata dictionary rather than a catalog listing.
   live_notes:
     - Verified live response returned `meta.count = 8` and populated the expected dictionary fields.
-    - `ships_updated_at` appears to be a coarse ship-catalog freshness marker.
-    - `ship_type_images` exposes standard, premium, and elite icon URLs by ship class.
+    - "`ships_updated_at` appears to be a coarse ship-catalog freshness marker."
+    - "`ship_type_images` exposes standard, premium, and elite icon URLs by ship class."
     - Current smoke coverage uses this endpoint as the low-cost reachability check for WG API availability.
 
 trust:

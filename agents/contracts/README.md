@@ -40,7 +40,9 @@ Use `agents/knowledge/` instead when the main value is narrative investigation, 
 - `upstream/wows-encyclopedia-modules.yaml`
 - `upstream/wows-ships-badges.yaml`
 
-The current contract set now covers the main derived player activity dataset, the player summary/detail payload, the explorer row payload, and the most relied-on upstream account and clan-membership endpoints.
+The current contract set covers the main derived player activity dataset, the player summary/detail payload, and the most relied-on upstream account and clan-membership endpoints. (The explorer row payload was dropped in `e932215` when the `players_explorer` browse endpoint was removed; this sentence still named it until 2026-08-15.)
+
+**Known coverage gap (2026-08-15):** the upstream profiles document 7 of the 15 Wargaming surfaces the backend actually calls. Undocumented: `ships/stats/` — the backbone of the whole battle-history pipeline — plus `seasons/accountinfo/`, `seasons/info/`, `seasons/shipstats/`, `clans/info/`, `clans/season/`, `clans/seasonstats/` and `clans/list/`. `seasons/info/` and `clans/season/` are the sole upstream sources for the durable `RankedSeason` / `ClanBattleSeason` models behind the current-season icon semantics.
 
 For upstream endpoints, the YAML profile should capture:
 

@@ -97,9 +97,12 @@ repo_usage:
   current_state:
     - The repo does not treat this endpoint as authoritative for player activity.
     - Snapshot-based activity is derived from cumulative account info instead.
-  code_refs:
-    - server/warships/api/players.py
-    - server/warships/data.py
+  # Verified 2026-08-15: there is NO call site for this endpoint. The two
+  # data.py hits are prose comments explaining why it is not trusted; the
+  # previously listed api/players.py ref had no occurrence at all.
+  code_refs: []
+  non_call_mentions:
+    - server/warships/data.py  # comments only, ~:2451 and ~:2499
     - agents/knowledge/wows-statsbydate-status.md
 
 evidence_refs:

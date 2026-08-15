@@ -89,8 +89,9 @@ repo_usage:
   current_state:
     - Not yet used directly in current product code.
     - Verified as the next natural companion surface for any future ship-module or build features.
-  code_refs:
-    - server/warships/api/ships.py
+  # Verified 2026-08-15: not called. `modules` has zero occurrences in
+  # server/warships/api/ships.py, the file this previously cited.
+  code_refs: []
 
 evidence_refs:
   knowledge_notes:
