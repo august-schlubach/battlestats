@@ -227,6 +227,8 @@ Figures below were read live from the droplet during the 2026-08-14 session — 
 - rows/s *improved* 25.3 → 31.6 while saturation went 90% → 100%. Pure contention does not predict that. Same neighbourhood as the open F4 question; it does not change the gate verdict.
 - `warm_player_ranked_wr_battles_correlation_task` logged **46 soft-limit kills in 48h** — the journal-wide leader, burning slot-seconds in this very window and completing nothing. **No step in L1–L4 touches it.** It is the strongest evidence yet for Step 4's own note that the real fix is capacity or fan-out scheduling; whether it belongs in the lever order is an operator decision, not a reordering to make unilaterally.
 
+Note on mechanics for whoever repeats this: `scripts/release.sh` was **not** used. Its final `git push` pushes the current branch, and this work was done in a worktree, so it would have pushed the worktree branch instead of main. Its steps were performed by hand — bump, `chore:` commit, `git push origin HEAD:main`, annotated tag, push tag.
+
 ### Confound introduced after Step 0 — v5.3.9 (recorded 2026-08-15)
 
 **v5.3.9 deployed 2026-08-14 22:02 UTC** — after that day's recapture stripe and after Step 0's observation. It moved the ship-list all-view off a full `BattleEvent` rescan onto the `ShipPopDailyAgg` daily rollup (`runbook-ship-list-rollup-source-2026-08-14.md`), which **removes work from one of the five families oversubscribing the 09:50–11:30 `background` window** — the top-ships fan-out, measured at 22% of that window's slot-seconds. It was shipped for query cost, not as a recapture lever, and nobody chose it as one.
@@ -238,8 +240,6 @@ Consequence for the lever order, which is a sequencing constraint, not a new fin
 - The reverse case matters as much — if 08-15 is still partial with one contributor already trimmed, that is a *stronger* mandate for L1 than Step 0 produced, and the operator ack is better informed for it.
 
 **Therefore: read the 2026-08-15 run before pulling L1.** This does not reopen Step 0's gate — that gate is met and stays met. It inserts one free observation ahead of the first lever, at the cost of one day, and it is free precisely because L1 was never going to be applied without an operator ack anyway. The pct warmer (`warm_realm_ships_pct_task`) still walks the grid on `BattleEvent` and was **not** touched by v5.3.9, so the window is trimmed, not cleared.
-
-Note on mechanics for whoever repeats this: `scripts/release.sh` was **not** used. Its final `git push` pushes the current branch, and this work was done in a worktree, so it would have pushed the worktree branch instead of main. Its steps were performed by hand — bump, `chore:` commit, `git push origin HEAD:main`, annotated tag, push tag.
 
 ### Outstanding
 

@@ -3018,6 +3018,33 @@
                 "worktrees-no-longer-used"
             ]
         },
+        "agents/runbooks/runbook-recapture-soft-limit-budget-2026-08-13.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "recapture soft limit budget",
+                "recapture partial asia",
+                "recapture lever order",
+                "background queue contention"
+            ],
+            "tags": [
+                "recapture",
+                "soft-limit",
+                "partial",
+                "background-queue",
+                "contention",
+                "celery",
+                "levers",
+                "benchmark-snapshots"
+            ],
+            "archive_on": [
+                "recapture-lapsed-players-removed",
+                "recapture-soft-limit-resolved"
+            ]
+        },
         "agents/runbooks/runbook-recapture-upstream-failure-guard-2026-08-12.md": {
             "kind": "runbook",
             "status": "active",
