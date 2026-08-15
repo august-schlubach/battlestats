@@ -1256,7 +1256,12 @@
             "lifecycle": "dated-active",
             "section": "feature-recovery",
             "owner": "backend",
-            "aliases": [],
+            "aliases": [
+                "flower",
+                "flower observability",
+                "celery monitoring",
+                "task dashboard"
+            ],
             "tags": [
                 "flower",
                 "celery",
@@ -2434,7 +2439,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "platform",
             "aliases": [
                 "live update cooldown",
@@ -2659,7 +2664,7 @@
             "status": "active",
             "lifecycle": "dated-active",
             "section": "operations",
-            "owner": "ops",
+            "owner": "operations",
             "aliases": [
                 "crawls queue depth",
                 "queue:crawls alarm",
@@ -2684,7 +2689,7 @@
             "kind": "runbook",
             "status": "archived",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "backend",
             "aliases": [
                 "ship award ledger",
@@ -2753,7 +2758,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "backend",
             "aliases": [
                 "enriched data features",
@@ -3125,7 +3130,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "backend",
             "aliases": [
                 "stale ship badge",
@@ -3149,7 +3154,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "backend",
             "aliases": [
                 "rolling ship badges",
@@ -3174,7 +3179,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "backend",
             "aliases": [
                 "landing medals filter",
@@ -3198,7 +3203,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "features",
+            "section": "feature",
             "owner": "backend",
             "aliases": [
                 "ship top player badges",
@@ -3491,7 +3496,7 @@
             "kind": "runbook",
             "status": "active",
             "lifecycle": "dated-active",
-            "section": "runbook",
+            "section": "feature-recovery",
             "owner": "platform",
             "aliases": [
                 "hidden profile chart warming",
@@ -3880,11 +3885,10 @@
             "section": "operations",
             "owner": "platform",
             "aliases": [
-                "outbound mail",
-                "droplet email",
-                "feedback notifications",
-                "purelymail smtp",
-                "ops digest"
+                "outbound mail spec",
+                "droplet email design",
+                "ops digest spec",
+                "smtp relay design"
             ],
             "tags": [
                 "mail",
@@ -4000,6 +4004,75 @@
             "archive_on": [
                 "ship-list-decommissioned",
                 "rollup-source-superseded"
+            ]
+        },
+        "agents/knowledge/agentic-team-doctrine.json": {
+            "kind": "knowledge",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "agentic",
+            "owner": "platform",
+            "aliases": [
+                "team doctrine",
+                "agentic team doctrine",
+                "decision rules",
+                "pre-commit requirements"
+            ],
+            "tags": [
+                "doctrine",
+                "decision-rules",
+                "pre-commit",
+                "quality-gates",
+                "claude-md-rules",
+                "authoritative"
+            ],
+            "archive_on": [
+                "agentic-doctrine-superseded"
+            ]
+        },
+        "agents/runbooks/runbook-cross-realm-player-fallback-2026-07-20.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "cross realm player fallback",
+                "player not found other realm",
+                "realm fallback"
+            ],
+            "tags": [
+                "realm",
+                "player-lookup",
+                "fallback",
+                "kill-switch"
+            ],
+            "archive_on": [
+                "cross-realm-fallback-removed"
+            ]
+        },
+        "agents/runbooks/runbook-top-ships-warm-soft-limit-2026-08-12.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "top ships warm soft limit",
+                "ship warm orchestrator",
+                "warm_realm_top_ships_task",
+                "ship bucket fan-out"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "warmers",
+                "soft-limit",
+                "celery",
+                "background-queue",
+                "fan-out"
+            ],
+            "archive_on": [
+                "top-ships-warm-orchestrator-replaced"
             ]
         }
     }

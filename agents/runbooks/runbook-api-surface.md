@@ -134,7 +134,7 @@ _Removed in 3.0 (landing featured-boards decommission): `/api/landing/clans/` (`
 - Player detail now publishes and renders a Battlestats efficiency-rank header marker from the player payload fields `efficiency_rank_tier`, `efficiency_rank_percentile`, `efficiency_rank_population_size`, and `efficiency_rank_updated_at` when the published snapshot is fresh.
 - API read paths should not be used as a ranked-data repair mechanism.
 - Contract-backed surfaces for this API area currently include `player_summary`; see the contracts runbook and ODCS artifacts when fields change.
-- For deeper behavior and QA acceptance criteria around player-detail reads, ranked league semantics, ranked correlation, and ranked maintenance reconciliation, see [agents/runbooks/archive/runbook-player-detail-ranked-hardening.md](/home/august/code/archive/battlestats/agents/runbooks/archive/runbook-player-detail-ranked-hardening.md).
+- For deeper behavior and QA acceptance criteria around player-detail reads, ranked league semantics, ranked correlation, and ranked maintenance reconciliation, see [agents/runbooks/archive/runbook-player-detail-ranked-hardening.md](archive/runbook-player-detail-ranked-hardening.md).
 
 ## Changelog
 
