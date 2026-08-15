@@ -5046,7 +5046,7 @@ def update_clan_data(clan_id: str, realm: str = DEFAULT_REALM) -> None:
         'members_count', 'tag', 'name', 'description', 'leader_id',
         'leader_name', 'last_fetch'])
     _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
-    cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
+    invalidate_clan_members_cache(clan_id, realm=realm)
     invalidate_clan_detail_cache(int(clan_id), realm=realm)
     logging.info(
         f"Updated clan data: {clan.name} [{clan.tag}]: {clan.members_count} members")
@@ -5099,7 +5099,11 @@ def refresh_clan_cached_aggregates(clan_id: str, realm: str = DEFAULT_REALM) -> 
     ])
 
     _invalidate_clan_battle_summary_cache(clan_id, realm=realm)
-    cache.delete(realm_cache_key(realm, f'clan:members:{clan_id}'))
+    # Members payload, not the aggregates: this runs at the tail of
+    # update_clan_members, and it is the ONLY delete covering a roster that
+    # gained a member — reconcile_clan_departures is gated on `if cleared:`
+    # and does nothing when nobody left.
+    invalidate_clan_members_cache(clan_id, realm=realm)
 
 
 def reconcile_clan_departures(clan, live_member_ids, realm: str = DEFAULT_REALM) -> int:
@@ -5122,9 +5126,11 @@ def reconcile_clan_departures(clan, live_member_ids, realm: str = DEFAULT_REALM)
     live_ids = {int(m) for m in live_member_ids}
     cleared = clan.player_set.exclude(player_id__in=live_ids).update(clan=None)
     if cleared:
-        # Delete the *served* members key (v3 — see clan_members view); the
-        # bare 'clan:members:{id}' key other call sites delete is a stale no-op.
-        cache.delete(realm_cache_key(realm, f'clan:members:v3:{clan.clan_id}'))
+        # Drop the served members payload so the departure shows on the next
+        # load instead of after the 5-min TTL. Key via the shared builder —
+        # inline construction is what let the read drift to v4 while every
+        # delete stayed on v3 (clan-members-cache-invalidation-plan-2026-08-15).
+        invalidate_clan_members_cache(clan.clan_id, realm=realm)
         invalidate_clan_detail_cache(int(clan.clan_id), realm=realm)
         logging.info(
             "Reconciled %d departed member(s) out of clan %s [%s]",
@@ -5550,6 +5556,37 @@ def invalidate_player_detail_cache(player_id: int, realm: str = DEFAULT_REALM) -
 
 def invalidate_clan_detail_cache(clan_id: int, realm: str = DEFAULT_REALM) -> None:
     cache.delete(_bulk_cache_key_clan(clan_id, realm=realm))
+
+
+CLAN_MEMBERS_CACHE_VERSION = 'v4'
+
+
+def clan_members_cache_key(clan_id, realm: str = DEFAULT_REALM) -> str:
+    """The served clan-members response key (see ``clan_members``, views.py).
+
+    SINGLE SOURCE OF TRUTH. The read in views.py and every invalidation site
+    must go through this function. Bumping the version above is the ONLY
+    supported way to change the key — a bump there reaches all five call sites
+    at once.
+
+    History: bumped v1->v2 (7a3b7b0), v2->v3 (31d7cc5), v3->v4 (7701b10, rows
+    carry ``is_active_pvp``). Each bump was applied to the read only, because
+    every other site built the string inline: the first two orphaned the two
+    bare-key deletes, the third orphaned the remaining two. For four months
+    every clan-members invalidation in the codebase was a silent no-op and the
+    roster self-healed only on the 300s TTL. That is what this function exists
+    to prevent; do not reintroduce an inline `clan:members:` literal anywhere.
+
+    ``clan_id`` is deliberately untyped — callers pass str, int, and a model
+    attribute, and the f-string normalises all three. Do not add int()
+    coercion: ``update_clan_data`` forwards its raw argument.
+    """
+    return realm_cache_key(
+        realm, f'clan:members:{CLAN_MEMBERS_CACHE_VERSION}:{clan_id}')
+
+
+def invalidate_clan_members_cache(clan_id, realm: str = DEFAULT_REALM) -> None:
+    cache.delete(clan_members_cache_key(clan_id, realm=realm))
 
 
 # ---------------------------------------------------------------------------

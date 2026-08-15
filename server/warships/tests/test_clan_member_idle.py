@@ -5,7 +5,8 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 
-from warships.models import Clan, Player, realm_cache_key
+from warships.data import clan_members_cache_key
+from warships.models import Clan, Player
 from warships.tasks import refresh_clan_member_idle_task
 
 
@@ -41,7 +42,7 @@ class RefreshClanMemberIdleTaskTests(TestCase):
             {"5001": {"last_battle_time": int(five_days_ago.timestamp())}}, None)
         # Pre-populate the clan_members cache to verify it gets invalidated so
         # the next poll re-derives idle from the fresh last_battle_date.
-        cache.set(realm_cache_key("na", "clan:members:v3:900"), [{"stale": True}])
+        cache.set(clan_members_cache_key(900, realm="na"), [{"stale": True}])
 
         result = refresh_clan_member_idle_task.apply(
             kwargs={"clan_id": 900, "realm": "na"}).get()
@@ -50,7 +51,7 @@ class RefreshClanMemberIdleTaskTests(TestCase):
         self.assertEqual(member.last_battle_date, five_days_ago.date())
         self.assertEqual(member.days_since_last_battle, 5)
         self.assertEqual(member.last_fetch, fetch_before)
-        self.assertIsNone(cache.get(realm_cache_key("na", "clan:members:v3:900")))
+        self.assertIsNone(cache.get(clan_members_cache_key(900, realm="na")))
         self.assertEqual(result["updated"], 1)
 
     @patch("warships.api.players._bulk_fetch_account_info")

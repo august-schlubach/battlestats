@@ -132,16 +132,59 @@ class ClanDepartureReconcileTests(TestCase):
         self.assertIsNone(go.clan_id)             # departed → cleared
 
     def test_reconcile_invalidates_served_members_cache(self):
-        from warships.models import realm_cache_key
+        from warships.data import clan_members_cache_key
         clan = Clan.objects.create(clan_id=6102, realm='na', name='Z', tag='Z')
         Player.objects.create(player_id=3, realm='na', name='Gone', clan=clan)
-        key = realm_cache_key('na', 'clan:members:v3:6102')
+        key = clan_members_cache_key(6102, realm='na')
         cache.set(key, ['stale-roster'], timeout=300)
 
         reconcile_clan_departures(clan, [99], realm='na')
 
-        # The served (v3) members cache is dropped so the clan page reflects the
-        # departure immediately instead of waiting out the 5-min TTL.
+        # The served members cache is dropped so the clan page reflects the
+        # departure immediately instead of waiting out the 5-min TTL. Keyed via
+        # the shared builder — never a literal, which is how the read drifted to
+        # v4 while every delete stayed behind.
+        self.assertIsNone(cache.get(key))
+
+    def test_update_clan_data_invalidates_served_members_cache(self):
+        """`update_clan_data` (data.py) must drop the members payload.
+
+        Isolated from reconcile deliberately: `update_clan_data` deletes the
+        key and *then* calls `reconcile_clan_departures`, which deletes the
+        same key. With a non-empty roster this test would pass even with the
+        invalidation removed. Mocking the member fetch to [] makes reconcile
+        return at its `if not live_member_ids` guard without touching the
+        cache, so a green here proves the delete in update_clan_data fired.
+        """
+        from warships.data import clan_members_cache_key, update_clan_data
+
+        clan = Clan.objects.create(
+            clan_id=6200, realm='na', name='Q', tag='Q', last_fetch=None)
+        key = clan_members_cache_key(6200, realm='na')
+        cache.set(key, ['stale-roster'], timeout=300)
+
+        with patch('warships.data._fetch_clan_data',
+                   return_value={'members_count': 1, 'tag': 'Q', 'name': 'Q'}), \
+             patch('warships.data._fetch_clan_member_ids', return_value=[]):
+            update_clan_data('6200', realm='na')
+
+        self.assertIsNone(cache.get(key))
+        self.assertEqual(clan.clan_id, 6200)
+
+    def test_refresh_clan_cached_aggregates_invalidates_members_cache(self):
+        """The aggregates refresh is the ONLY invalidation covering a roster
+        that gained a member — reconcile is gated on `if cleared:` and does
+        nothing when nobody left. No WG calls here, so no mocking is needed.
+        """
+        from warships.data import (
+            clan_members_cache_key, refresh_clan_cached_aggregates)
+
+        Clan.objects.create(clan_id=6201, realm='na', name='R', tag='R')
+        key = clan_members_cache_key(6201, realm='na')
+        cache.set(key, ['stale-roster'], timeout=300)
+
+        refresh_clan_cached_aggregates('6201', realm='na')
+
         self.assertIsNone(cache.get(key))
 
     def test_reconcile_empty_roster_does_not_orphan_members(self):

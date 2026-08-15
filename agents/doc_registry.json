@@ -4125,6 +4125,31 @@
             "archive_on": [
                 "realm-architecture-replaced"
             ]
+        },
+        "agents/work-items/clan-members-cache-invalidation-plan-2026-08-15.md": {
+            "kind": "spec",
+            "status": "active",
+            "lifecycle": "active-spec",
+            "section": "spec",
+            "owner": "backend",
+            "aliases": [
+                "clan members cache invalidation",
+                "clan roster stale",
+                "clan:members cache key",
+                "clan members v4"
+            ],
+            "tags": [
+                "cache",
+                "invalidation",
+                "clan-members",
+                "redis",
+                "cache-key",
+                "regression",
+                "defect"
+            ],
+            "archive_on": [
+                "clan-members-invalidation-shipped-and-verified"
+            ]
         }
     }
 }

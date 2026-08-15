@@ -22,6 +22,7 @@ from warships.serializers import PlayerSerializer, ClanSerializer, ShipSerialize
     PlayerTierTypeCorrelationSerializer, EntityVisitIngestSerializer, EntityVisitIngestResponseSerializer
 from warships.data import (
     clan_detail_needs_refresh,
+    clan_members_cache_key,
     clan_members_missing_or_incomplete,
     compute_player_verdict,
     explorer_summary_needs_refresh,
@@ -1513,14 +1514,11 @@ def clan_members(request, clan_id: str) -> Response:
         )
 
     # B1: Check response cache before doing expensive member serialization.
-    # v3 of the cache key: `days_since_last_battle` is now derived from
-    # `last_battle_date` at response-build time rather than read from the
-    # stored snapshot column (which goes stale by 1 day/day between
-    # refreshes). v2 entries served the stored, drifting value, so they
-    # are bypassed. v4: rows carry `is_active_pvp` (random/ranked battles in
-    # the trailing 30d window); v3 entries lack the field.
+    # Key + version live in warships.data.clan_members_cache_key — see its
+    # docstring for the version history and why nothing may build this string
+    # inline.
     CLAN_MEMBERS_CACHE_TTL = 300  # 5 minutes
-    cache_key = realm_cache_key(realm, f'clan:members:v4:{clan_id}')
+    cache_key = clan_members_cache_key(clan_id, realm=realm)
     cached = cache.get(cache_key)
     if cached is not None:
         response = Response(cached)
