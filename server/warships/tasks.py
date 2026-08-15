@@ -1266,7 +1266,8 @@ def refresh_clan_member_idle_task(self, clan_id, realm=DEFAULT_REALM):
         _bulk_fetch_account_info,
         _per_player_account_fallback,
     )
-    from warships.models import Clan, Player, realm_cache_key
+    from warships.data import invalidate_clan_members_cache
+    from warships.models import Clan, Player
 
     def _refresh():
         try:
@@ -1319,7 +1320,7 @@ def refresh_clan_member_idle_task(self, clan_id, realm=DEFAULT_REALM):
                 updated, ["last_battle_date", "days_since_last_battle"])
             # Drop the cached clan_members payload so the next poll re-derives
             # idle from the fresh last_battle_date.
-            cache.delete(realm_cache_key(realm, f'clan:members:v3:{clan_id}'))
+            invalidate_clan_members_cache(clan_id, realm=realm)
         return {"status": "completed", "updated": len(updated)}
 
     try:

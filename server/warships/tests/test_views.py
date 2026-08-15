@@ -1124,6 +1124,53 @@ class ClanMembersEndpointTests(TestCase):
         self.queue_clan_ranked_hydration_patcher.stop()
         super().tearDown()
 
+    @patch("warships.tasks.is_clan_member_idle_refresh_pending", return_value=False)
+    @patch("warships.tasks.queue_clan_member_idle_refresh",
+           return_value={"status": "skipped", "reason": "cooldown"})
+    @patch("warships.data.update_clan_members")
+    @patch("warships.data.update_clan_data")
+    def test_clan_members_cache_is_dropped_by_departure_reconciliation(
+        self,
+        mock_update_clan_data,
+        mock_update_clan_members,
+        mock_queue_idle,
+        mock_idle_pending,
+    ):
+        """End-to-end proof of the invalidation fix, at the endpoint.
+
+        Two fixture traps make the obvious version of this test vacuous:
+        the X-Clan-Members-Cache header is set on EVERY branch (so
+        assertNotIn never fires — assert the value), and a cold GET queues
+        the idle refresh, which makes idle_pending true and suppresses the
+        cache.set entirely (so nothing would ever be cached to invalidate).
+        Both helpers are imported inside the view body, hence patching them
+        at warships.tasks rather than warships.views.
+
+        Names no version literal, so it survives a v5 bump.
+        """
+        from warships.data import reconcile_clan_departures
+
+        clan = Clan.objects.create(
+            clan_id=7300, name="Cache Clan", members_count=2)
+        Player.objects.create(name="Stays", player_id=7301, clan=clan)
+        Player.objects.create(name="Leaves", player_id=7302, clan=clan)
+
+        # Cold read populates the cache.
+        first = self.client.get("/api/fetch/clan_members/7300/")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first["X-Clan-Members-Cache"], "miss")
+
+        # Second read must be served from cache — proves the fixture cached.
+        second = self.client.get("/api/fetch/clan_members/7300/")
+        self.assertEqual(second["X-Clan-Members-Cache"], "hit")
+
+        # A departure must drop the served payload.
+        cleared = reconcile_clan_departures(clan, [7301], realm="na")
+        self.assertEqual(cleared, 1)
+
+        third = self.client.get("/api/fetch/clan_members/7300/")
+        self.assertEqual(third["X-Clan-Members-Cache"], "miss")
+
     def test_clan_members_null_returns_empty_list(self):
         response = self.client.get("/api/fetch/clan_members/null/")
 

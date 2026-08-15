@@ -1,7 +1,9 @@
 # Clan-members cache invalidation: read key `v4`, every delete stale
 
 **Date:** 2026-08-15
-**Status:** Plan — not implemented. QA this before writing code.
+**Status:** **IMPLEMENTED 2026-08-15.** Plan written, QA'd (see QA Notes), then executed in
+TDD order — the two literal-pinned tests were converted first and confirmed RED against the unfixed
+code, which is the proof they had been pinning the bug. Full suite 1204 passed / 2 skipped.
 **Type:** Production defect, backend only. `fix:` → patch bump.
 **Worktree:** `.claude/worktrees/clan-members-invalidation`
 **Slice:** the `clan:members` key family only. Three adjacent findings are reported with citations and explicitly deferred (§4).
