@@ -4074,6 +4074,57 @@
             "archive_on": [
                 "top-ships-warm-orchestrator-replaced"
             ]
+        },
+        "agents/runbooks/runbook-player-page-charts-and-roster-2026-08-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "frontend",
+            "owner": "frontend",
+            "aliases": [
+                "player page charts",
+                "tier diet figure",
+                "random battles by tier",
+                "clan activity roster",
+                "activity icon"
+            ],
+            "tags": [
+                "frontend",
+                "charts",
+                "d3",
+                "tier-type",
+                "drill-down",
+                "roster",
+                "classification-icons",
+                "player-page"
+            ],
+            "archive_on": [
+                "player-page-charts-replaced"
+            ]
+        },
+        "agents/runbooks/runbook-realm-schedule-striping-2026-08-15.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "realm striping",
+                "schedule striping",
+                "REALM_INTERVAL_OFFSETS",
+                "per-realm cadence"
+            ],
+            "tags": [
+                "celery",
+                "beat",
+                "striping",
+                "scheduling",
+                "realms",
+                "periodic-tasks"
+            ],
+            "archive_on": [
+                "realm-striping-removed"
+            ]
         }
     }
 }
