@@ -615,4 +615,4 @@ FROM warships_player TABLESAMPLE SYSTEM (1) GROUP BY 1 ORDER BY 1;
 - `agents/runbooks/runbook-data-lifecycle-architecture-2026-06-21.md` — the per-table lifecycle matrix; `KEEP=1` is correct there, but §3's "coverage-bound, decelerating" claim for `battleobservation` needs G2's decomposition.
 - `agents/work-items/snapshot-delta-gated-writes-spec.md` — the delta gate verified in G1.
 - `agents/work-items/ship-pop-daily-rollup-spec.md` — the F9.2 pattern G8b wants replicated.
-- `agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md` — the incident that created the compaction job G2 finds broken.
+- `agents/runbooks/archive/runbook-db-cpu-saturation-2026-05-24.md` — the incident that created the compaction job G2 finds broken.

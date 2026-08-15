@@ -3,7 +3,7 @@
 **Created**: 2026-03-31
 **Updated**: 2026-04-05 — Phase 7 (Asia) implemented; see `archive/runbook-asia-realm-data-load-2026-04-05.md` for the operative plan
 **Status**: Phases 1-7 complete; Phase 8 (i18n) deferred
-**Depends on**: `spec-multi-realm-eu-support.md` (Phases 1-6 complete)
+**Depends on**: `archive/spec-multi-realm-eu-support.md` (Phases 1-6 complete)
 **Goal**: Fix realm propagation gaps discovered post-EU launch, add comprehensive test coverage, and prepare infrastructure for Asia — but **do not add Asia data or activate Asia crawls yet**.
 
 ---

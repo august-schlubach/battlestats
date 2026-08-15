@@ -9,7 +9,7 @@ inline ship leaderboard**. Task functions, DRF endpoints, and routes are **kept 
 can be revived from git + a registration revert.
 
 Related: `runbook-player-fetch-orchestration-2026-06-21.md` (landing fetch layer),
-`runbook-db-cpu-saturation-2026-05-24.md` (the republish-debounce these warmers fed),
+`archive/runbook-db-cpu-saturation-2026-05-24.md` (the republish-debounce these warmers fed),
 `ops-env-reference.md` (the now-inert env vars).
 
 ## Why

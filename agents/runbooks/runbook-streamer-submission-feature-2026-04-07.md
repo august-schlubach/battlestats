@@ -137,5 +137,5 @@ Should return 400 (validation). A real submission via the modal should appear in
 
 ## Related
 
-- `runbook-incident-bulk-enrichment-poison-batch-2026-04-07.md` — unrelated, same week
+- `archive/runbook-incident-bulk-enrichment-poison-batch-2026-04-07.md` — unrelated, same week
 - `agents/knowledge/agentic-team-doctrine.json` — pre-commit doctrine governing this change

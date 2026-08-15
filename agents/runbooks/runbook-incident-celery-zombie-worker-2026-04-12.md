@@ -211,5 +211,5 @@ All should return HTTP 200 in <500ms.
 - `runbook-droplet-hardening-2026-04-09.md` — SSH, TLS, EPMD, and Umami hardening. The EPMD binding attempt on 2026-04-09 caused the same cascading failure pattern (gunicorn + Celery down when RabbitMQ restarted), which was the first occurrence of this exact bug.
 - `runbook-celery-queue-strategy.md` — Queue topology and routing decisions
 - `archive/runbook-incident-rabbitmq-compromise-2026-04-04.md` — Prior RabbitMQ incident (crypto miner via exposed AMQP port)
-- `runbook-landing-random-cold-queue-2026-04-07.md` — Root cause analysis of slow random landing strip (namespace bump issue, separate from the OOM addressed here)
+- `archive/runbook-landing-random-cold-queue-2026-04-07.md` — Root cause analysis of slow random landing strip (namespace bump issue, separate from the OOM addressed here)
 - `runbook-backend-droplet-deploy.md` — Deploy procedures and post-deploy verification

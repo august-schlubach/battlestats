@@ -2,7 +2,7 @@
 
 **Created**: 2026-04-03
 **Status**: Active - initial implementation slice landed
-**Depends on**: `runbook-backend-droplet-deploy.md`, `runbook-cache-audit.md`, `spec-multi-realm-eu-support.md`
+**Depends on**: `runbook-backend-droplet-deploy.md`, `runbook-cache-audit.md`, `archive/spec-multi-realm-eu-support.md`
 
 ## Question
 

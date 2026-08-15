@@ -36,7 +36,7 @@ This directory is the shortest useful path for agents that are told to review pr
 - Battle-observation floor, capture coverage/freshness, daily snapshots, or capture throughput:
   Read `runbooks/runbook-floor-throughput-tuning-2026-06-13.md` (canonical current state) and the diagram `diagrams/be-observation-floor-data-flow.md`; branch to the supporting family from the floor entry in `runbooks/README.md`.
 - Multi-realm behavior, crawl/warmup, or EU migration:
-  Read `runbooks/spec-multi-realm-eu-support.md` and then the related operational runbooks from the active index.
+  Read `runbooks/archive/spec-multi-realm-eu-support.md` and then the related operational runbooks from the active index.
 - Deploy, droplet runtime, or memory tuning:
   Read `runbooks/runbook-backend-droplet-deploy.md` or `runbooks/runbook-client-droplet-deploy.md`.
 - Verified upstream behavior or expensive rediscovery:

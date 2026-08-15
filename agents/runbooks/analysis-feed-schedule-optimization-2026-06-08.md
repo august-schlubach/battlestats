@@ -230,5 +230,5 @@ Prod config: `server/.env.cloud`, `server/deploy/deploy_to_droplet.sh`. Code:
 + activity sampled from prod 2026-06-08. Related:
 `analysis-update-process-cost-map-2026-06-06.md`,
 `archive/runbook-battle-observation-floor-2026-05-02.md`,
-`runbook-db-cpu-saturation-2026-05-24.md`,
+`archive/runbook-db-cpu-saturation-2026-05-24.md`,
 `archive/runbook-periodic-task-topology-2026-04-11.md`.

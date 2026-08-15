@@ -11,7 +11,7 @@ badges on player profiles. **Nothing is aggregated live at request time.**
 Related docs: `runbook-ship-top-player-badges-2026-06-05.md` (original badge
 build), `runbook-ship-badges-rolling-2026-06-14.md` (rolling-nightly decision +
 Ship Honors removal), `runbook-ship-leaderboard-window-30d-2026-06-29.md`
-(14→30-day window widen), `runbook-ship-banner-ux-pass-2026-06-05.md`,
+(14→30-day window widen), `archive/runbook-ship-banner-ux-pass-2026-06-05.md`,
 `runbook-ship-leaderboard-submarine-easter-egg-2026-06-11.md` (empty-ship UI),
 `agents/work-items/ship-leaderboard-ux-refresh-spec.md` (`/ship` page UX).
 

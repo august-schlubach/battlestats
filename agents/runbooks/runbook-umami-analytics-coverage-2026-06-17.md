@@ -106,5 +106,5 @@ These legacy event names appear in old `website_event` rows but were renamed/rem
 
 - `reference_umami_event_query_recipe` — DB query recipe (memory)
 - `agents/runbooks/runbook-umami-hardening-2026-06-02.md` — Umami infra/security
-- `agents/runbooks/runbook-audience-device-optimization-2026-06-06.md` — device/OS/browser Umami pull
+- `agents/runbooks/archive/runbook-audience-device-optimization-2026-06-06.md` — device/OS/browser Umami pull
 - `feedback_prioritize_random_over_ranked`, `reference_august_home_ip` (memories)

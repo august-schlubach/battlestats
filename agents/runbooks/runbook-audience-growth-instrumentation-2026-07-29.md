@@ -503,4 +503,4 @@ Verified 2026-07-29 against the working tree at `203f34e` and the live tracker.
 - `agents/runbooks/runbook-hot-players-engagement-queue-2026-06-10.md`: the server-side
   durable-visitor-interest machinery (`EntityVisitDaily`, `HotPlayer.active_days_window`) retained
   as the alternative to Workstream A.
-- `agents/runbooks/runbook-audience-device-optimization-2026-06-06.md`: device and viewport mix.
+- `agents/runbooks/archive/runbook-audience-device-optimization-2026-06-06.md`: device and viewport mix.

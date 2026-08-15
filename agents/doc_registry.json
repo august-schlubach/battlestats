@@ -178,30 +178,6 @@
                 "doc-system-replaced"
             ]
         },
-        "agents/runbooks/runbook-audience-device-optimization-2026-06-06.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "operations",
-            "owner": "product",
-            "aliases": [
-                "audience device optimization",
-                "device os browser tuning",
-                "responsive support matrix",
-                "touch target 44px",
-                "ultrawide treemap"
-            ],
-            "tags": [
-                "umami",
-                "ux",
-                "responsive",
-                "accessibility",
-                "frontend"
-            ],
-            "archive_on": [
-                "heatmap-ultrawide-tranche-closed"
-            ]
-        },
         "agents/runbooks/runbook-umami-hardening-2026-06-02.md": {
             "kind": "runbook",
             "status": "active",
@@ -680,27 +656,6 @@
                 "celery"
             ],
             "archive_on": []
-        },
-        "agents/runbooks/runbook-best-clan-eligibility.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
-            "section": "architecture",
-            "owner": "data",
-            "aliases": [
-                "best clan ranking",
-                "best clan eligibility"
-            ],
-            "tags": [
-                "best clan",
-                "ranking",
-                "landing",
-                "eligibility",
-                "scoring"
-            ],
-            "archive_on": [
-                "ranking-model-replaced"
-            ]
         },
         "agents/runbooks/runbook-celery-queue-strategy.md": {
             "kind": "runbook",
@@ -1512,28 +1467,6 @@
                 "badge-shipped"
             ]
         },
-        "agents/runbooks/spec-landing-best-by-class.md": {
-            "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
-            "section": "spec",
-            "owner": "data",
-            "aliases": [
-                "landing best by class",
-                "best by ship class"
-            ],
-            "tags": [
-                "landing",
-                "best players",
-                "class",
-                "ranking",
-                "spec"
-            ],
-            "archive_on": [
-                "feature-shipped",
-                "spec-superseded"
-            ]
-        },
         "agents/runbooks/archive/spec-langmem-agentic-memory-pilot-2026-03-26.md": {
             "kind": "spec",
             "status": "archived",
@@ -1577,27 +1510,6 @@
             "archive_on": [
                 "ux-shipped",
                 "spec-superseded"
-            ]
-        },
-        "agents/runbooks/spec-multi-realm-eu-support.md": {
-            "kind": "spec",
-            "status": "active",
-            "lifecycle": "evergreen",
-            "section": "architecture",
-            "owner": "platform",
-            "aliases": [
-                "multi realm support",
-                "eu support spec"
-            ],
-            "tags": [
-                "realms",
-                "eu",
-                "na",
-                "routing",
-                "architecture"
-            ],
-            "archive_on": [
-                "realm-architecture-replaced"
             ]
         },
         "agents/runbooks/spec-player-route-follow-up-improvements-2026-03-19.md": {
@@ -1885,30 +1797,6 @@
                 "sort-replaced"
             ]
         },
-        "agents/runbooks/runbook-daily-data-refresh-schedule-2026-04-05.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "evergreen",
-            "section": "operations",
-            "owner": "data",
-            "aliases": [
-                "daily refresh schedule",
-                "data refresh cadence",
-                "refresh schedule"
-            ],
-            "tags": [
-                "refresh",
-                "schedule",
-                "enrichment",
-                "do functions",
-                "periodic tasks",
-                "multi realm"
-            ],
-            "archive_on": [
-                "schedule-replaced",
-                "refresh-strategy-replaced"
-            ]
-        },
         "agents/runbooks/runbook-enrichment-crawler-2026-04-03.md": {
             "kind": "runbook",
             "status": "active",
@@ -2056,30 +1944,6 @@
                 "source-side-empty-handling-shipped"
             ]
         },
-        "agents/runbooks/runbook-landing-best-player-subsort-materialization-2026-04-05.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "feature-recovery",
-            "owner": "data",
-            "aliases": [
-                "best player subsort materialization",
-                "landing best player snapshot",
-                "best player daily snapshot"
-            ],
-            "tags": [
-                "landing",
-                "best players",
-                "subsort",
-                "materialization",
-                "cache",
-                "snapshot"
-            ],
-            "archive_on": [
-                "materialization-stable",
-                "subsort-system-replaced"
-            ]
-        },
         "agents/runbooks/runbook-security-audit-2026-04-05.md": {
             "kind": "runbook",
             "status": "active",
@@ -2126,52 +1990,6 @@
             "archive_on": [
                 "feature-shipped",
                 "approval-side-promoted"
-            ]
-        },
-        "agents/runbooks/spec-best-clan-subfilters.md": {
-            "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
-            "section": "spec",
-            "owner": "data",
-            "aliases": [
-                "best clan subfilters",
-                "best clan sub sorts",
-                "best clan modes"
-            ],
-            "tags": [
-                "landing",
-                "best clans",
-                "subfilters",
-                "ranking",
-                "spec"
-            ],
-            "archive_on": [
-                "feature-shipped",
-                "spec-superseded"
-            ]
-        },
-        "agents/runbooks/spec-best-player-subfilters.md": {
-            "kind": "spec",
-            "status": "active",
-            "lifecycle": "active-spec",
-            "section": "spec",
-            "owner": "data",
-            "aliases": [
-                "best player subfilters",
-                "best player sub sorts",
-                "best player modes"
-            ],
-            "tags": [
-                "landing",
-                "best players",
-                "subfilters",
-                "ranking",
-                "spec"
-            ],
-            "archive_on": [
-                "feature-shipped",
-                "spec-superseded"
             ]
         },
         "agents/runbooks/spec-cb-seasons-chart-redesign-2026-04-05.md": {
@@ -2267,31 +2085,6 @@
             "archive_on": [
                 "endpoint-retired",
                 "contract-replaced"
-            ]
-        },
-        "agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "operations",
-            "owner": "platform",
-            "aliases": [
-                "db cpu alerts",
-                "postgres cpu saturation",
-                "digitalocean cpu high",
-                "db-postgresql-nyc3-11231"
-            ],
-            "tags": [
-                "postgres",
-                "cpu",
-                "digitalocean",
-                "monitoring",
-                "celery",
-                "incident",
-                "performance"
-            ],
-            "archive_on": [
-                "cpu-saturation-root-caused-and-resolved"
             ]
         },
         "agents/runbooks/runbook-data-lifecycle-architecture-2026-06-21.md": {
@@ -2587,30 +2380,6 @@
                 "ship-warm-before-evict-superseded"
             ]
         },
-        "agents/runbooks/runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "feature-recovery",
-            "owner": "data",
-            "aliases": [
-                "treemap blank on refresh",
-                "ship leaderboard offline diagnosis",
-                "landing treemap blank diagnosis",
-                "blank on refresh"
-            ],
-            "tags": [
-                "ship-leaderboard",
-                "treemap",
-                "diagnosis",
-                "caching",
-                "frontend",
-                "landing-page"
-            ],
-            "archive_on": [
-                "ship-warm-before-evict-superseded"
-            ]
-        },
         "agents/runbooks/runbook-ship-leaderboard-submarine-easter-egg-2026-06-11.md": {
             "kind": "runbook",
             "status": "active",
@@ -2774,28 +2543,6 @@
             ],
             "archive_on": [
                 "all-queued-features-shipped-or-dropped"
-            ]
-        },
-        "agents/runbooks/runbook-ship-banner-ux-pass-2026-06-05.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "frontend",
-            "owner": "frontend",
-            "aliases": [
-                "ship banner UX",
-                "ship honors UX",
-                "ShipTopPlayerBanner design"
-            ],
-            "tags": [
-                "frontend",
-                "ux",
-                "ShipTopPlayerBanner",
-                "ShipHonors",
-                "design-tokens"
-            ],
-            "archive_on": [
-                "ship-award-surfaces-redesigned"
             ]
         },
         "agents/runbooks/runbook-leaderboard-updates.md": {
@@ -3173,30 +2920,6 @@
             "archive_on": [
                 "ship-standings-feature-removed",
                 "ship-badges-rolling-superseded"
-            ]
-        },
-        "agents/runbooks/runbook-landing-medals-filter-2026-06-17.md": {
-            "kind": "runbook",
-            "status": "active",
-            "lifecycle": "dated-active",
-            "section": "feature",
-            "owner": "backend",
-            "aliases": [
-                "landing medals filter",
-                "medals sub-sort",
-                "top players by medals",
-                "landing best medals"
-            ],
-            "tags": [
-                "landing-medals",
-                "ship_badges",
-                "LANDING_PLAYER_BEST_SORTS",
-                "ShipTopPlayerSnapshot",
-                "landing-best-player"
-            ],
-            "archive_on": [
-                "landing-medals-superseded",
-                "ship-standings-feature-removed"
             ]
         },
         "agents/runbooks/runbook-ship-top-player-badges-2026-06-05.md": {
@@ -4124,6 +3847,283 @@
             ],
             "archive_on": [
                 "realm-striping-removed"
+            ]
+        },
+        "agents/runbooks/archive/spec-landing-best-by-class.md": {
+            "kind": "spec",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "landing best by class",
+                "best by ship class"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "class",
+                "ranking",
+                "spec"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/archive/spec-best-player-subfilters.md": {
+            "kind": "spec",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "best player subfilters",
+                "best player sub sorts",
+                "best player modes"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "subfilters",
+                "ranking",
+                "spec"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/archive/spec-best-clan-subfilters.md": {
+            "kind": "spec",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "spec",
+            "owner": "data",
+            "aliases": [
+                "best clan subfilters",
+                "best clan sub sorts",
+                "best clan modes"
+            ],
+            "tags": [
+                "landing",
+                "best clans",
+                "subfilters",
+                "ranking",
+                "spec"
+            ],
+            "archive_on": [
+                "feature-shipped",
+                "spec-superseded"
+            ]
+        },
+        "agents/runbooks/archive/runbook-landing-best-player-subsort-materialization-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "best player subsort materialization",
+                "landing best player snapshot",
+                "best player daily snapshot"
+            ],
+            "tags": [
+                "landing",
+                "best players",
+                "subsort",
+                "materialization",
+                "cache",
+                "snapshot"
+            ],
+            "archive_on": [
+                "materialization-stable",
+                "subsort-system-replaced"
+            ]
+        },
+        "agents/runbooks/archive/runbook-best-clan-eligibility.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "architecture",
+            "owner": "data",
+            "aliases": [
+                "best clan ranking",
+                "best clan eligibility"
+            ],
+            "tags": [
+                "best clan",
+                "ranking",
+                "landing",
+                "eligibility",
+                "scoring"
+            ],
+            "archive_on": [
+                "ranking-model-replaced"
+            ]
+        },
+        "agents/runbooks/archive/runbook-landing-medals-filter-2026-06-17.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "landing medals filter",
+                "medals sub-sort",
+                "top players by medals",
+                "landing best medals"
+            ],
+            "tags": [
+                "landing-medals",
+                "ship_badges",
+                "LANDING_PLAYER_BEST_SORTS",
+                "ShipTopPlayerSnapshot",
+                "landing-best-player"
+            ],
+            "archive_on": [
+                "landing-medals-superseded",
+                "ship-standings-feature-removed"
+            ]
+        },
+        "agents/runbooks/archive/runbook-db-cpu-saturation-2026-05-24.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "db cpu alerts",
+                "postgres cpu saturation",
+                "digitalocean cpu high",
+                "db-postgresql-nyc3-11231"
+            ],
+            "tags": [
+                "postgres",
+                "cpu",
+                "digitalocean",
+                "monitoring",
+                "celery",
+                "incident",
+                "performance"
+            ],
+            "archive_on": [
+                "cpu-saturation-root-caused-and-resolved"
+            ]
+        },
+        "agents/runbooks/archive/runbook-daily-data-refresh-schedule-2026-04-05.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "operations",
+            "owner": "data",
+            "aliases": [
+                "daily refresh schedule",
+                "data refresh cadence",
+                "refresh schedule"
+            ],
+            "tags": [
+                "refresh",
+                "schedule",
+                "enrichment",
+                "do functions",
+                "periodic tasks",
+                "multi realm"
+            ],
+            "archive_on": [
+                "schedule-replaced",
+                "refresh-strategy-replaced"
+            ]
+        },
+        "agents/runbooks/archive/runbook-ship-banner-ux-pass-2026-06-05.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "frontend",
+            "owner": "frontend",
+            "aliases": [
+                "ship banner UX",
+                "ship honors UX",
+                "ShipTopPlayerBanner design"
+            ],
+            "tags": [
+                "frontend",
+                "ux",
+                "ShipTopPlayerBanner",
+                "ShipHonors",
+                "design-tokens"
+            ],
+            "archive_on": [
+                "ship-award-surfaces-redesigned"
+            ]
+        },
+        "agents/runbooks/archive/runbook-audience-device-optimization-2026-06-06.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "operations",
+            "owner": "product",
+            "aliases": [
+                "audience device optimization",
+                "device os browser tuning",
+                "responsive support matrix",
+                "touch target 44px",
+                "ultrawide treemap"
+            ],
+            "tags": [
+                "umami",
+                "ux",
+                "responsive",
+                "accessibility",
+                "frontend"
+            ],
+            "archive_on": [
+                "heatmap-ultrawide-tranche-closed"
+            ]
+        },
+        "agents/runbooks/archive/runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md": {
+            "kind": "runbook",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "feature-recovery",
+            "owner": "data",
+            "aliases": [
+                "treemap blank on refresh",
+                "ship leaderboard offline diagnosis",
+                "landing treemap blank diagnosis",
+                "blank on refresh"
+            ],
+            "tags": [
+                "ship-leaderboard",
+                "treemap",
+                "diagnosis",
+                "caching",
+                "frontend",
+                "landing-page"
+            ],
+            "archive_on": [
+                "ship-warm-before-evict-superseded"
+            ]
+        },
+        "agents/runbooks/archive/spec-multi-realm-eu-support.md": {
+            "kind": "spec",
+            "status": "archived",
+            "lifecycle": "archived",
+            "section": "architecture",
+            "owner": "platform",
+            "aliases": [
+                "multi realm support",
+                "eu support spec"
+            ],
+            "tags": [
+                "realms",
+                "eu",
+                "na",
+                "routing",
+                "architecture"
+            ],
+            "archive_on": [
+                "realm-architecture-replaced"
             ]
         }
     }

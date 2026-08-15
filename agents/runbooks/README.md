@@ -37,7 +37,6 @@ Do not start in `archive/`, `../archive/`, or `../work-items/` unless an active 
 - `runbook-deleted-account-purge.md`: purge flow and safety notes for deleted accounts.
 - `runbook-dependency-audit.md`: dependency hygiene policy and current audit posture.
 - `runbook-post-deploy-post-bounce-operations-2026-04-05.md`: required post-redeploy verification, post-bounce behavior, and bounded warm sequencing.
-- `runbook-daily-data-refresh-schedule-2026-04-05.md`: daily refresh cadences and periodic task windows (note: the DO Functions enrichment schedule referenced inside was reverted 2026-04-08 — see the status banner at the top of that runbook).
 - `runbook-daily-active-snapshots-2026-06-09.md`: daily `Snapshot` engine for every active player (`snapshot_active_players_task`, coexists with crawls; kill switch `SNAPSHOT_ACTIVE_PLAYERS_ENABLED`).
 - `runbook-leaderboard-updates.md`: ship-leaderboard / standings freshness and snapshot cadence ("is the leaderboard stale?").
 - `runbook-floor-throughput-tuning-2026-06-13.md`: **canonical current-state entry for the battle-observation floor** (see its "CURRENT STATE" header) — dedicated `floor` worker (`-c2`, self-chaining, recency-first, random-only), DB-as-binding-constraint, coverage levers. Start here for "how does the observation floor work / why is coverage where it is", then branch to the supporting family: `runbook-bulk-battle-observation-capture-2026-06-06.md` (bulk account/info + change-gate capture path), `runbook-floor-battles-json-refresh-2026-06-14.md` (the `battles_json` rebuild seam — **`FLOOR_REFRESH_BATTLES_JSON_ENABLED=1` in prod, re-enabled 2026-07-08**, pinned in `server/deploy/deploy_to_droplet.sh`; this index said `=0` until 2026-08-15, contradicting the runbook it describes), `runbook-hot-players-engagement-queue-2026-06-10.md` (visitor-interest capture queue, **disabled in prod**), and the diagram `../diagrams/be-observation-floor-data-flow.md`.
@@ -48,10 +47,8 @@ Do not start in `archive/`, `../archive/`, or `../work-items/` unless an active 
 
 - `runbook-player-fetch-orchestration-2026-06-21.md`: **canonical client request layer for the player page** (frontend) — the single `sharedJsonFetch` entry point, the priority concurrency queue + 429/Retry-After backoff, the degradation monitor (cap 6→2 + poll backoff), the whole-page `PlayerRequestScopeContext` cancellation, and the de-waterfalled clan rail (`NEXT_PUBLIC_PLAYER_DEWATERFALL=1`). Shipped v2.6.0/2.7.0/2.8.0; supersedes `archive/runbook-player-page-load-priority.md`. Start here for any player-page fetch/hydration/loading/latency work.
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`: cache-first and lazy-refresh contract.
-- `spec-multi-realm-eu-support.md`: multi-realm architecture, rollout status, and migration behavior.
 - `spec-production-data-refresh-strategy.md`: data refresh and maintenance intent (partially implemented; enrichment runs on the droplet's Celery `background` worker).
 - `runbook-contract-strategy-implementation.md`: payload and contract maintenance expectations.
-- `runbook-best-clan-eligibility.md`: composite best-clan ranking rules and exclusions.
 - `runbook-seo.md`: metadata, sitemap, structured data, and analytics notes.
 - `runbook-recently-viewed-player-warming.md`: recent-visit warming strategy and tuning knobs.
 - `runbook-battle-history-rollout-2026-04-28.md`: battle-history pipeline rollout (`BattleObservation`/`BattleEvent`, per-day/period rollups).
@@ -83,7 +80,6 @@ Current agent workflows run through Claude Code itself:
 Open these only when the task matches them directly:
 
 - `runbook-enrichment-crawler-2026-04-03.md`: progress log for the active enrichment crawl pass (batches, disruptions, check-ins)
-- `runbook-landing-best-player-subsort-materialization-2026-04-05.md`: current Best-player snapshot materialization and cache behavior
 - `runbook-streamer-twitch-icon-2026-04-07.md`: static streamer flag and Twitch badge rollout plan
 - `runbook-streamer-submission-feature-2026-04-07.md`: streamer submission queue (footer modal + admin moderation), with deferred approval-side promotion
 - `runbook-security-audit-2026-04-05.md`: Wapiti production audit findings and remediation plan (nginx headers, input validation)
@@ -94,20 +90,15 @@ Open these only when the task matches them directly:
 - `runbook-multi-realm-hardening.md`
 - `runbook-search-toggle.md`: header search toggle between player and clan search, with new clan suggestions endpoint
 - `runbook-ship-top-player-badges-2026-06-05.md`: `/ship` standings leaderboard + profile ship badges (`ShipTopPlayerSnapshot`, `SHIP_BADGE_SNAPSHOT_ENABLED`).
-- `runbook-ship-banner-ux-pass-2026-06-05.md`: ship-award surfaces UX pass (`ShipTopPlayerBanner` / `ShipHonors` type hierarchy + tokens).
 - `runbook-enriched-data-features-2026-04-12.md`: enrichment-backed feature surfaces (distributions, correlations, explorer summaries).
 
 ## Active Specs And Open Design Docs
 
 These stay active only while they still shape implementation or operations:
 
-- `spec-landing-best-by-class.md`
 - `spec-clan-battle-seasons-chart.md`: D3 multi-series chart for clan CB performance vs realm averages
-- `spec-best-clan-subfilters.md`: Best clan sub-filters (Overall, WR) on the landing page
-- `spec-best-player-subfilters.md`: Best player sub-sorts (Overall, Ranked, Efficiency, WR, CB) on the landing page
 - `spec-clan-battles-by-tier.md`
 - `spec-cache-first-lazy-refresh-policy-2026-03-19.md`
-- `spec-multi-realm-eu-support.md`
 - `spec-player-route-follow-up-improvements-2026-03-19.md`
 - `spec-cb-seasons-chart-redesign-2026-04-05.md`: CB seasons chart layered redesign spec
 

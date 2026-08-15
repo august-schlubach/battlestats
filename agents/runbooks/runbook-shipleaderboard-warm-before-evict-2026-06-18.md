@@ -8,10 +8,10 @@ After the nightly ship snapshot recomputes leaders, the landing **most-played-sh
 the new numbers and keep the previous numbers served until the new ones are ready** — instead of
 blanking on a cold synchronous aggregation during the window-rotation gap. This is the backend half
 of the "treemap + list go offline on refresh" symptom diagnosed in
-`runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md`.
+`archive/runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md`.
 
 Related: `runbook-ship-leaderboard-architecture-2026-06-18.md` (feature end-to-end),
-`runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md` (diagnosis),
+`archive/runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md` (diagnosis),
 `runbook-leaderboard-updates.md` (the warmer), `landing.py` published-cache idiom.
 
 ## The problem (what blanked)
@@ -87,7 +87,7 @@ fresh key still carries the window date and still self-heals alignment in steady
   *is* "serve old until new ready." No durable key added.
 - **FE mount blank** (hard reload / back-from-profile → empty `<svg>`, no skeleton) — **excluded**.
   A separate FE concern (loading skeleton / seed-last-good) the backend cannot eliminate; tracked in
-  `runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md` (options 1–2).
+  `archive/runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md` (options 1–2).
 
 ## Cost / ops
 

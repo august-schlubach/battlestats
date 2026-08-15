@@ -95,7 +95,21 @@ An agent reading these concludes there is work to do that is already done.
 
 ---
 
-## 4. Archive candidates — **operator decision, nothing moved**
+## 4. Archive candidates — **DONE 2026-08-15, all 12 archived**
+
+> **Executed.** The operator approved the full 12 (4a + 4b) on 2026-08-15. All are
+> now under `agents/runbooks/archive/`, registry entries rekeyed to the archive
+> path with `status`/`lifecycle` = `archived`, removed from the active README
+> index, and 35 in-body references across 17 active files rewritten to the archive
+> path. Active runbooks: 113 → 104 (plus 2 written this pass). **§4c was NOT
+> archived and remains active, by recommendation.**
+>
+> Successor banners (`> Superseded by …`) were **not** added — the `runbook-archive`
+> skill requires explicit confirmation for those, which was not given. Candidates
+> if wanted: the six 4a docs → `runbook-landing-featured-boards-decommission-2026-06-22.md`;
+> `runbook-landing-shipleaderboard-refresh-blank-2026-06-18.md` →
+> `runbook-shipleaderboard-warm-before-evict-2026-06-18.md`;
+> `spec-multi-realm-eu-support.md` → `runbook-multi-realm-hardening.md`.
 
 Archiving is `git mv` + registry rekey + README update (skill: `runbook-archive`).
 Twelve of 113. Grouped by confidence.
@@ -136,7 +150,14 @@ The registry would say archive; the retrieval path says otherwise.
 
 ## 5. Retrieval-path gaps
 
-### 5.1 `agents/runbooks/README.md` indexes 48 of 113 runbooks
+### 5.1 `agents/runbooks/README.md` indexes 39 of 104 runbooks
+
+> **Updated 2026-08-15 after the §4 archival.** Nine now-archived entries were
+> removed from the index, so the count moved from 48/113 to **39/104**. The gap is
+> unchanged in substance: 65 active runbooks are still absent, still concentrated
+> in 2026-07/08 work. The blocker named below is now cleared — the archive set is
+> settled, so the index can be rebuilt against a stable list.
+
 
 `agents/README.md` tells agents to use it "to select the few runbooks relevant to
 the task instead of scanning the whole directory". 65 are unreachable that way,

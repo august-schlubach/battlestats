@@ -197,7 +197,7 @@ FROM pgstattuple('warships_playerexplorersummary');   -- free_pct >>10 => repack
 
 - `archive/runbook-db-growth-analysis-2026-06-15.md` — growth attribution + the ~105 MB/day slope isolation.
 - `runbook-battle-history-archive-prune-2026-06-17.md` — the 32d archive+prune mechanism (implements the BattleEvent/PDSS rows of §2).
-- `runbook-db-cpu-saturation-2026-05-24.md` — origin of keep=1 compaction + the disk-full read-only incident.
+- `archive/runbook-db-cpu-saturation-2026-05-24.md` — origin of keep=1 compaction + the disk-full read-only incident.
 - `runbook-battle-history-data-operationalization-2026-06-16.md` — the keep-30d-and-operationalize decision for battle history.
 - `runbook-daily-active-snapshots-2026-06-09.md` — the Snapshot engine this runbook adds a retention policy to.
 - `archive/runbook-db-size-optimization-2026-05-26.md` — superseded by this consolidation (candidate to archive).

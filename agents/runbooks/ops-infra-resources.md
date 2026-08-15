@@ -47,7 +47,7 @@ Co-hosts everything except the DB: nginx, gunicorn (Django), Next.js (3001), Uma
 
 `shared_buffers` / `max_connections` are not operator-configurable on DO managed PG —
 plan within these. History: the May 2026 disk/CPU incidents
-(`runbook-db-cpu-saturation-2026-05-24.md`) were on the old 1-vCPU / 2-GB plan; the
+(`archive/runbook-db-cpu-saturation-2026-05-24.md`) were on the old 1-vCPU / 2-GB plan; the
 resize + a disk bump to 60 GB followed; a further bump to 80 GiB (2026-07-20)
 accompanied the battle-history retention raise 32→92d.
 
@@ -74,6 +74,6 @@ ssh root@battlestats.online 'nproc; free -h; df -h /'
 
 Live DB load: scrape the DO Prometheus endpoint (watch `system_load15` vs **2**) —
 see `reference_do_db_cpu_metrics_endpoint` (auto-memory) /
-`runbook-db-cpu-saturation-2026-05-24.md`.
+`archive/runbook-db-cpu-saturation-2026-05-24.md`.
 
 **Never commit the DB connection-string password** to any file in this repo.

@@ -431,4 +431,4 @@ displayed-stats + landing-ranking freshness for free off the floor's existing `s
 
 - `runbook-bulk-battle-observation-capture-2026-06-06.md` — floor design, knobs, benchmarks.
 - `runbook-hot-players-engagement-queue-2026-06-10.md` — the other `background`-pool sweep family.
-- `runbook-db-cpu-saturation-2026-05-24.md` — prior enrichment fan-out (the 2026-05-27 ~1,190/hr churn); this runbook is a sibling capacity fix.
+- `archive/runbook-db-cpu-saturation-2026-05-24.md` — prior enrichment fan-out (the 2026-05-27 ~1,190/hr churn); this runbook is a sibling capacity fix.

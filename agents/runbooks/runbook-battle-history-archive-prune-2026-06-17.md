@@ -209,5 +209,5 @@ Automated coverage (shipped): `warships/tests/test_archive_battle_history.py` se
 ## Related runbooks
 
 - `archive/runbook-db-growth-analysis-2026-06-15.md` — the growth attribution + runway analysis this implements the lead remediation for.
-- `runbook-db-cpu-saturation-2026-05-24.md` — the read-only outage this prevents recurrence of.
+- `archive/runbook-db-cpu-saturation-2026-05-24.md` — the read-only outage this prevents recurrence of.
 - `runbook-battle-history-rollup-durability-2026-06-06.md` — the rollup/`BattleEvent` pipeline whose read paths bound the safety argument.

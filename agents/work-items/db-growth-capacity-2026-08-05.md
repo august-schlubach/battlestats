@@ -523,4 +523,4 @@ curl -sk -u "USER:PASS" "https://$HOST:9273/metrics" | grep -E '^(disk_used|disk
 - `agents/runbooks/runbook-db-table-audit-2026-07-19.md`: the 38 GB topline this diffs against, and the Applied log the 07-21 baseline is reconstructed from. Its F5 (observation row retention) is the mechanism F2 extends; its F6 needs the correction noted above.
 - `agents/runbooks/runbook-battle-history-archive-prune-2026-06-17.md`: the retention mechanism, and the forecast plus retention figure this document corrects.
 - `agents/runbooks/ops-infra-resources.md`: instance sizing.
-- `agents/runbooks/runbook-db-cpu-saturation-2026-05-24.md`: the read-only outage the disk ceiling exists to prevent.
+- `agents/runbooks/archive/runbook-db-cpu-saturation-2026-05-24.md`: the read-only outage the disk ceiling exists to prevent.
