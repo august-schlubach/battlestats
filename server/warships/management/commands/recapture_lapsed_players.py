@@ -50,6 +50,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 
 from celery.exceptions import SoftTimeLimitExceeded
 from django.core.management.base import BaseCommand
+from django.db import connection
 from django.db.models import F
 from django.utils import timezone
 
@@ -181,11 +182,19 @@ class Command(BaseCommand):
             loss strictly worse than the truncation this guards against.
             """
             nonlocal advanced, cursor_stamped
+            # Tally AFTER the write it describes, and clear in the same breath.
+            # SoftTimeLimitExceeded arrives as a signal and lands on an arbitrary
+            # bytecode boundary: counting first left the buffer full when it
+            # landed mid-flush, and the finalizing flush() below then counted the
+            # same rows twice. Re-running an interrupted write is safe (both
+            # bulk_update and the cursor stamp are idempotent), so
+            # write -> count -> clear is correct under every interleaving.
+            if apply and promote:
+                Player.objects.bulk_update(
+                    promote, ['last_battle_date', 'days_since_last_battle'])
             advanced += len(promote)
+            promote.clear()
             if apply:
-                if promote:
-                    Player.objects.bulk_update(
-                        promote, ['last_battle_date', 'days_since_last_battle'])
                 # Advance the rotation cursor for every row we actually checked
                 # (never last_fetch — that would suppress the floor's real refresh).
                 for i in range(0, len(checked_ids), CURSOR_STAMP_CHUNK):
@@ -193,7 +202,6 @@ class Command(BaseCommand):
                         id__in=checked_ids[i:i + CURSOR_STAMP_CHUNK]
                     ).update(last_idle_check_at=now_dt)
                 cursor_stamped += len(checked_ids)
-            promote.clear()
             checked_ids.clear()
 
         # Writes flush incrementally so a truncated run keeps everything it
@@ -322,8 +330,38 @@ class Command(BaseCommand):
             # is durable; finalize the tail and report a PARTIAL run rather than
             # discarding the whole pass. The hard limit is the finalizer's budget.
             truncated = True
+            # The signal can land INSIDE a write's transaction handling, which
+            # leaves the psycopg connection with an open server-side transaction
+            # while Django's own state says autocommit. The next atomic() entry
+            # then dies on `can't change 'autocommit' now: connection in
+            # transaction status ACTIVE` — 2026-08-15 asia lost its whole
+            # snapshot that way, 117ms into the finalizer. Drop the connection so
+            # the finalizing flush() (and the sample read below) reconnect clean.
+            # Guarded on `in_atomic_block`: that flag being False is precisely
+            # the desync (Django thinks autocommit, the server has a live
+            # transaction), and closing while it is True would mark the
+            # connection `closed_in_transaction` and break the caller's
+            # transaction — which is what a Django TestCase always is.
+            try:
+                if connection.connection is not None and not connection.in_atomic_block:
+                    connection.close()
+            except Exception:  # pragma: no cover - defensive
+                logger.warning("recapture: connection reset failed realm=%s",
+                               realm, exc_info=True)
 
-        flush()
+        # NEVER let the finalizer's failure suppress the snapshot. Before this,
+        # `flush()` sat bare and the snapshot write was downstream of it, so any
+        # exception here erased the whole run's record — the identical shape to
+        # the pre-v5.1.6 bug (output gated behind a write that can fail), just
+        # displaced by one frame. It surfaced only as staleness, a day late.
+        flush_failed = False
+        try:
+            flush()
+        except Exception:
+            flush_failed = True
+            logger.exception(
+                "recapture_lapsed_players realm=%s: finalizing flush failed; "
+                "earlier incremental flushes are still durable", realm)
 
         into7d = into7d_clanned + into7d_clanless
         still_lapsed = lapsed_clanned + lapsed_clanless
@@ -380,6 +418,20 @@ class Command(BaseCommand):
             "still_lapsed": still_lapsed,
             "still_lapsed_clanless": lapsed_clanless,
             "cursor_stamped": cursor_stamped,
+            # A THIRD axis, independent of `partial` and `aborted`: the scan's
+            # own numbers are honest, but the tail write did not land, so
+            # `cursor_stamped` is short of `scanned` and those rows retry next
+            # run. A boolean rather than a `status` string for the same reason
+            # `aborted` is — the ops email's `_check_generic_shape` keys on
+            # `status` and would fire a second, redundant condition.
+            "flush_failed": flush_failed,
+            # Wall-clock for the pass. `captured_at` is stamped at task RECEIPT,
+            # not completion, so duration was previously reconstructible only
+            # from `journalctl "succeeded in Ns"` — which is why every budget
+            # question so far has needed a droplet login. This is what a
+            # near-miss detector (duration > 85% of the soft limit) keys on: it
+            # would have flagged asia days before either failure mode bit.
+            "duration_s": round((timezone.now() - now_dt).total_seconds(), 1),
         }
         try:
             os.makedirs(RECAPTURE_BENCHMARK_DIR, exist_ok=True)
@@ -397,6 +449,10 @@ class Command(BaseCommand):
         if truncated:
             out(f"  *** PARTIAL: soft time limit hit after {scanned}/{len(ids)} candidates "
                 f"(everything below is what this run actually persisted) ***")
+        if flush_failed:
+            out("  *** TAIL FLUSH FAILED: the buffered slice did not land. Earlier "
+                "incremental flushes are durable; those rows keep a NULL cursor "
+                "and retry next run. ***")
         out(f"  scanned={scanned}  WG_calls={wg_calls}  chunk_errors={chunk_errors}  "
             f"no_data={no_data}  hidden={hidden}")
         out(f"  still_dormant={still_dormant}  advanced(returned)={advanced}  "
@@ -410,10 +466,17 @@ class Command(BaseCommand):
         else:
             out(f"  (detect-only: {wg_calls} WG calls made, {advanced} reactivations detected, 0 writes)")
         if samples:
-            clan_names = dict(
-                Clan.objects.filter(
-                    id__in={cid for *_, cid, _ in samples if cid is not None})
-                .values_list('id', 'name'))
+            # Cosmetic read, and it runs after the snapshot is already durable —
+            # never let it be the thing that fails the task.
+            try:
+                clan_names = dict(
+                    Clan.objects.filter(
+                        id__in={cid for *_, cid, _ in samples if cid is not None})
+                    .values_list('id', 'name'))
+            except Exception:
+                logger.warning("recapture: sample clan-name lookup failed realm=%s",
+                               realm, exc_info=True)
+                clan_names = {}
             out("  sample reactivations (name | stored -> new | +days | clan | bucket):")
             for name, stored, new_date, adv, clan_id, bucket in samples:
                 clan = 'clanless' if clan_id is None else (clan_names.get(clan_id) or '?')

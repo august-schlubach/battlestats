@@ -2797,6 +2797,35 @@
                 "recapture-soft-limit-resolved"
             ]
         },
+        "agents/runbooks/runbook-recapture-truncation-handler-crash-2026-08-16.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "operations",
+            "aliases": [
+                "recapture truncation handler crash",
+                "recapture snapshot missing",
+                "can't change autocommit connection in transaction status active",
+                "soft time limit dirty connection",
+                "recapture flush_failed"
+            ],
+            "tags": [
+                "recapture",
+                "soft-limit",
+                "partial",
+                "celery",
+                "psycopg",
+                "transactions",
+                "benchmark-snapshots",
+                "ops-email",
+                "detector-gap"
+            ],
+            "archive_on": [
+                "recapture-lapsed-players-removed",
+                "soft-limit-connection-reset-generalised"
+            ]
+        },
         "agents/runbooks/runbook-recapture-upstream-failure-guard-2026-08-12.md": {
             "kind": "runbook",
             "status": "active",

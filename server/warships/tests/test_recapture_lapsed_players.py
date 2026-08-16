@@ -268,6 +268,112 @@ class RecaptureSoftTimeLimitTests(TestCase):
             Player.objects.filter(realm="na",
                                   last_idle_check_at__isnull=True).count(), 10)
 
+    def test_snapshot_lands_even_when_the_finalizing_flush_raises(self):
+        """The snapshot must NOT be gated behind the tail write.
+
+        2026-08-15 asia: the soft limit landed inside a write's transaction
+        handling, leaving the connection in `transaction status ACTIVE` while
+        Django believed it was in autocommit. The finalizing `flush()` died
+        117ms later on `can't change 'autocommit' now`, and because the
+        snapshot write sat downstream of that bare `flush()`, the entire run's
+        record vanished — ~26,000 rows scanned, nothing recorded. The alert
+        surfaced it a day late as staleness, mislabelled by a `partial`
+        condition that was reading the PREVIOUS day's file.
+
+        The invariant is not "truncation is handled"; the existing tests cover
+        that. It is that no failure of the tail write can erase the record of
+        the run. `_run_interrupted` raises SoftTimeLimitExceeded synchronously
+        at a controlled point, so it can never reproduce the real interleaving:
+        the tail flush has to be failed directly.
+        """
+        import tempfile
+        self._mk_band(40)
+        real_bulk_update = Player.objects.bulk_update
+        state = {"n": 0}
+
+        def exploding_bulk_update(*a, **kw):
+            state["n"] += 1
+            if state["n"] >= 2:      # the finalizing flush, after one in-loop one
+                raise Exception(
+                    "can't change 'autocommit' now: "
+                    "connection in transaction status ACTIVE")
+            return real_bulk_update(*a, **kw)
+
+        with tempfile.TemporaryDirectory() as d:
+            # chunk 15 vs batch 10: calls 1+2 buffer to 20 and flush in-loop,
+            # call 3 buffers 10 and does NOT, so the finalizer has real work.
+            with patch("warships.management.commands.recapture_lapsed_players."
+                       "CURSOR_STAMP_CHUNK", 15):
+                with patch.object(Player.objects, "bulk_update",
+                                  side_effect=exploding_bulk_update):
+                    seen, outcome = self._run_interrupted(d, fail_on_call=4)
+            snap = _read_snapshot(d)
+
+        # The run is still reported, and reported honestly.
+        self.assertIsNotNone(snap, "a failed tail flush must not erase the run")
+        self.assertTrue(snap["partial"])
+        self.assertTrue(snap["flush_failed"])
+        self.assertEqual(snap["scanned"], 30)
+        self.assertEqual(snap["candidates"], 40)
+        self.assertEqual(outcome, "partial")
+        # What the in-loop flush earned before the failure is durable, and the
+        # tail's rows keep a NULL cursor so they retry rather than rotate past.
+        self.assertEqual(snap["cursor_stamped"], 20)
+        self.assertEqual(
+            Player.objects.filter(realm="na",
+                                  last_idle_check_at__isnull=False).count(), 20)
+
+    def test_interrupted_flush_does_not_double_count_advanced(self):
+        """A signal landing mid-flush must not tally the same buffer twice.
+
+        `flush()` counted `advanced += len(promote)` BEFORE the write and
+        cleared the buffer after, so an abort in between left the buffer full
+        and the finalizing flush() counted those rows a second time —
+        overstating the headline returner figure on exactly the truncated runs
+        the ops mail scrutinises.
+        """
+        import tempfile
+        self._mk_band(30)
+        real_bulk_update = Player.objects.bulk_update
+        state = {"n": 0}
+
+        def interrupt_once(*a, **kw):
+            state["n"] += 1
+            if state["n"] == 2:      # abort the 2nd in-loop flush mid-write
+                raise SoftTimeLimitExceeded()
+            return real_bulk_update(*a, **kw)
+
+        with tempfile.TemporaryDirectory() as d:
+            with patch("warships.management.commands.recapture_lapsed_players."
+                       "CURSOR_STAMP_CHUNK", 10):
+                with patch.object(Player.objects, "bulk_update",
+                                  side_effect=interrupt_once):
+                    self._run_interrupted(d, fail_on_call=99)
+            snap = _read_snapshot(d)
+
+        # 20 rows were buffered across the two flushes; the interrupted one is
+        # retried by the finalizer, so each row counts exactly once.
+        self.assertEqual(snap["advanced"], 20,
+                         "the retried buffer must not be counted twice")
+        self.assertEqual(snap["advanced"], snap["into7d"])
+        self.assertLessEqual(snap["advanced"], snap["scanned"])
+
+    def test_snapshot_carries_duration(self):
+        """`captured_at` is stamped at receipt, so duration needed journalctl.
+
+        Every budget question about this task so far has required a droplet
+        login to reconstruct `succeeded in Ns`. It is also the input a near-miss
+        detector (duration > 85% of the soft limit) needs.
+        """
+        import tempfile
+        self._mk_band(20)
+        with tempfile.TemporaryDirectory() as d:
+            self._run_interrupted(d, fail_on_call=99)
+            snap = _read_snapshot(d)
+        self.assertIn("duration_s", snap)
+        self.assertIsInstance(snap["duration_s"], float)
+        self.assertGreaterEqual(snap["duration_s"], 0.0)
+
     def test_incremental_flush_lands_before_the_end_of_the_scan(self):
         """Writes must not all sit past the scan — that was the original defect."""
         import tempfile
