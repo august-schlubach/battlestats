@@ -73,8 +73,31 @@ kept, so a realm's `ls -1t … | head` is "the last run"; older files are histor
 ## The snapshot fields
 
 Each JSON snapshot carries: `realm`, `mode` (`apply` writes + rotates; `detect`
-measures only), `band_days`, `partial`, `aborted`, `abort_reason`, `candidates`,
-`scanned`, `wg_calls`, `cursor_stamped`, and the yield breakdown.
+measures only), `band_days`, `partial`, `aborted`, `abort_reason`, `flush_failed`, `duration_s`,
+`candidates`, `scanned`, `wg_calls`, `cursor_stamped`, and the yield breakdown.
+
+`duration_s` (added 2026-08-16) is wall-clock for the pass; older snapshots lack
+it. Read it against the realm's soft limit — `RECAPTURE_TASK_OPTS` is 900s
+(`server/warships/tasks.py`) — and treat anything above ~85% of that as a
+near-miss worth reporting even when `partial` is false. Rates differ ~2x by
+realm (asia 35–46 rows/s, na 66–85), so compare a realm against **itself**.
+
+**A missing snapshot is a finding in its own right, and the loudest one.** If a
+realm's newest file predates a sibling's by a whole day, do not reach for the
+`partial` field to explain it — that field belongs to the *previous* run's file
+and describes a different pass. On 2026-08-15 asia's run hit its soft limit and
+then **crashed in the truncation handler**, writing nothing; the ops email
+reported staleness alongside a `recapture_partial` condition whose operands were
+the day-old file, and the two read as one story when they were two. Confirm what
+the last run actually did before interpreting any number:
+
+```bash
+ssh root@battlestats.online 'journalctl -u battlestats-celery-background \
+  --since "3 days ago" --no-pager | grep -E "recapture.*(received|succeeded|raised|Soft time)"'
+```
+
+`raised` with no matching snapshot = a crash, not a truncation.
+Runbook: `agents/runbooks/runbook-recapture-truncation-handler-crash-2026-08-16.md`.
 
 **Read `aborted` before anything else.** `true` means a run of unproductive WG
 chunks tripped the upstream-failure guard and the pass stopped early
@@ -111,6 +134,13 @@ rows/s, na 66–85). The levers, their real costs, and a one-at-a-time order for
 applying them are in
 `agents/runbooks/runbook-recapture-soft-limit-budget-2026-08-13.md`; do not reach
 for a lever before Step 0 of that path.
+
+**Then read `flush_failed`** — a THIRD axis, independent of both. `true` means the
+scan's own counters are honest but the finalizing write did not land, so
+`cursor_stamped` is short of `scanned` and that tail keeps a NULL cursor and
+retries next run. Yield figures are still real; rotation progress is what was
+lost. Report it as "tail flush failed" and check the worker journal for the
+cause.
 
 The yield fields:
 

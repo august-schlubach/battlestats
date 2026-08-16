@@ -2,7 +2,7 @@
 
 _Created: 2026-08-13_
 _Context: the 2026-08-13 ops email reported `recapture_partial:asia` (23,100 of 30,000 scanned). Investigation found two independent causes — asia's pass has been consuming 72–95% of its 900s soft-limit budget every day for a week, and the 2026-08-12 top-ships orchestrator fan-out newly saturated the `background` worker across the recapture window._
-_Status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals. **Step 0 ran on 2026-08-14 and its gate is met** — asia went partial a second time (912s, `scanned` 28,800 of 30,000), so Step 1 is authorized and unapplied. **One precondition since 2026-08-15:** v5.3.9 shipped after that observation and trimmed one contributor to the same contention window, so read the 2026-08-15 run before pulling L1 or its effect cannot be attributed. See Execution log._
+_Status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals. **Step 0 ran on 2026-08-14 and its gate is met** — asia went partial a second time (912s, `scanned` 28,800 of 30,000), so Step 1 is authorized and unapplied. **The precondition observation was lost and then partly reconstructed (2026-08-16):** the 2026-08-15 asia run **crashed in its truncation handler** and wrote no snapshot, so the file-based read that precondition asked for does not exist. Journal reconstruction recovers the number that mattered — **28.9 rows/s, still under asia's 35–46 baseline**, so v5.3.9 did **not** clear the contention and L1's mandate stands. See Execution log — 2026-08-15 and `runbook-recapture-truncation-handler-crash-2026-08-16.md`._
 _QA: reviewed 2026-08-13 — see QA Notes._
 
 ## QA Notes
@@ -241,10 +241,29 @@ Consequence for the lever order, which is a sequencing constraint, not a new fin
 
 **Therefore: read the 2026-08-15 run before pulling L1.** This does not reopen Step 0's gate — that gate is met and stays met. It inserts one free observation ahead of the first lever, at the cost of one day, and it is free precisely because L1 was never going to be applied without an operator ack anyway. The pct warmer (`warm_realm_ships_pct_task`) still walks the grid on `BattleEvent` and was **not** touched by v5.3.9, so the window is trimmed, not cleared.
 
+### Performed — 2026-08-15 (the precondition observation, lost and reconstructed)
+
+**The run crashed; there is no snapshot.** asia's `recapture_lapsed_players_task` was received on time at 10:50:00, hit its 900s soft limit at 11:05:00, and then died **117ms later** inside the finalizing `flush()` with `ProgrammingError: can't change 'autocommit' now: connection in transaction status ACTIVE`. The truncation handler never reached the snapshot write, so the pass left no file at all. Full diagnosis and the fix: `runbook-recapture-truncation-handler-crash-2026-08-16.md`.
+
+**What the 2026-08-15 ops alert actually said, and why it misread this.** It fired two conditions: `snapshot_stale:recapture-lapsed:asia` (24.48h) and `recapture_partial:asia` (`scanned` 28,800 of 30,000). Those are **two different passes** — the partial condition was reading the **2026-08-14** file verbatim, because that was still the newest one on disk. Only staleness caught the crash, and a day late. There is no detector for "the task raised."
+
+**Reconstruction from `journalctl` (the evidence the precondition needed):**
+
+| day | rows scanned | duration | rows/s | verdict |
+|---|---|---|---|---|
+| Aug 08–11 | 30,000 | 647–859s | 35–46 | baseline |
+| Aug 13 | 23,100 | 912s | 25.3 | contended |
+| Aug 14 | 28,800 | 912s | 31.6 | contended |
+| **Aug 15** | **~26,000** (260 chunks × 100) | **900s** | **28.9** | **still contended** |
+
+Aug 15 is the first pass with v5.3.9's rollup swap already in place, and it is **still below baseline** — it did not even match Aug 14. So the confound resolves in the direction that *strengthens* the mandate, exactly the case anticipated in Confound introduced after Step 0: "if 08-15 is still partial with one contributor already trimmed, that is a *stronger* mandate for L1 than Step 0 produced."
+
+**Read this bound honestly.** The chunk count is a floor, not an exact figure: it counts `Bulk fetching account/info` log lines in the window, and the last chunk was in flight when the limit landed. The durability claim is also weaker than a clean partial's — the tail flush did not land, so an unknown slice of the final buffer went unstamped and retries next run. What the number is good enough for is the one question the precondition asked: *did v5.3.9 clear the contention?* It did not.
+
 ### Outstanding
 
 1. ~~**Step 0 — observe the 2026-08-14 run.**~~ **DONE 2026-08-14, gate met** — see Performed — 2026-08-14. The contention did recur; a lever is warranted.
-2. **Step 1 (L1) not applied — this is the live next action, with one precondition: read the 2026-08-15 run first** (see Confound introduced after Step 0 — v5.3.9; the observation is free and protects L1's attribution). `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2). Env-only, no deploy, instantly reversible. Note what it is and is not: it buys ~45s of recapture's own wall-clock and measures the WG-limiter question for free — it is ordered first because it is the cheapest and most reversible, **not** because it is the most likely to close a contention deficit. The stripe runs ~10:10–11:30 UTC, so a change applied in the evening reads back on the *next* day's run.
+2. **Step 1 (L1) not applied — this is the live next action. Its precondition is now MET** (see Performed — 2026-08-15): the 08-15 snapshot was lost to the truncation-handler crash, but journal reconstruction puts asia at **28.9 rows/s against a 35–46 baseline**, so v5.3.9 did not clear the contention and L1's attribution is protected. Do not wait for another observation on that account. **Land the truncation-handler fix before or with L1** — otherwise the next partial can lose its snapshot the same way and take L1's own measurement with it. `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2). Env-only, no deploy, instantly reversible. Note what it is and is not: it buys ~45s of recapture's own wall-clock and measures the WG-limiter question for free — it is ordered first because it is the cheapest and most reversible, **not** because it is the most likely to close a contention deficit. The stripe runs ~10:10–11:30 UTC, so a change applied in the evening reads back on the *next* day's run.
 3. **Step 2 (L2b) half-done: code shipped, lever not pulled.** Setting `RECAPTURE_LAPSED_LIMIT_ASIA=24000` in Pass → `/etc/battlestats-server.env` → restart `battlestats-celery-background` is all that remains, and only if Step 1 leaves asia above ~800s.
 4. **L3 and L4 unimplemented**, by design — they sit behind Steps 1–2.
 5. **F4 unexplained** (why EU alone was unaffected). The contention model is incomplete until answered.
@@ -258,7 +277,7 @@ Doctrine: one production lever per step, explicit operator acknowledgement betwe
 **Gate:** proceed only if asia goes partial a second time, or exceeds ~860s.
 
 **Step 1 — L1, `RECAPTURE_LAPSED_DELAY=0.05`.** Cheapest, env-only, no deploy, instantly reversible, and it measures the rate-limiter question for free. Update Pass, regenerate `/etc/battlestats-server.env`, restart `battlestats-celery-background`.
-**Precondition (added 2026-08-15):** read the 2026-08-15 run before applying. v5.3.9 trimmed one contributor to the contention window after Step 0 observed it, so 08-15 is the first uncontaminated read of the new baseline and applying L1 blind would make the two indistinguishable. If 08-15 comes in clean and non-partial, hold L1 and observe again — the same logic that made Step 0 an observation rather than a lever.
+**Precondition (added 2026-08-15) — SATISFIED 2026-08-16.** The requirement was to read the 2026-08-15 run before applying, because v5.3.9 trimmed one contributor to the contention window after Step 0 observed it. That run crashed and wrote no snapshot, but the journal reconstruction in Performed — 2026-08-15 answers the question anyway: **28.9 rows/s, still under the 35–46 baseline and below even Aug 14's contended 31.6.** The "hold L1 and observe again" branch was conditioned on 08-15 coming in clean; it did not. L1 is clear to apply on operator ack.
 **Gate:** compare asia's next duration against its 647–859s baseline. The arithmetic predicts ~45s; a materially smaller saving means system-wide WG load is hitting the 9/s ceiling — record that and treat L1 as spent. **Do not proceed the same day.**
 
 **Step 2 — L2b, `RECAPTURE_LAPSED_LIMIT_ASIA=24000`.** Only if Step 1 leaves asia above ~800s. **The code half is done and deployed** (v5.3.8, 2026-08-13; `_recapture_limit` verified present on the droplet, no `RECAPTURE_LAPSED_LIMIT_*` set). What remains is one env change: set it in Pass, regenerate `/etc/battlestats-server.env`, restart `battlestats-celery-background`. NA and EU keep their current rotation.
