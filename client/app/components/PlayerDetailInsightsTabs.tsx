@@ -35,6 +35,12 @@ interface PlayerDetailInsightsTabsProps {
     pvpRatio: number;
     pvpSurvivalRate: number;
     pvpBattles: number;
+    // Career random wins. Threaded to the Activity tab's battle-history strip so
+    // its overall-WR line anchors to the exact integers the header's WR is
+    // computed from, rather than the payload's 1-decimal lifetime_win_rate.
+    // Optional: absent, the strip falls back to that payload figure and reads
+    // up to 0.05% off the header — correct, just coarser.
+    pvpWins?: number | null;
     hasKnownRankedGames: boolean;
     hasClan: boolean;
     hasClanBattleData: boolean;
@@ -201,6 +207,7 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
     pvpRatio,
     pvpSurvivalRate,
     pvpBattles,
+    pvpWins = null,
     hasKnownRankedGames,
     hasClan,
     hasClanBattleData,
@@ -699,6 +706,8 @@ const PlayerDetailInsightsTabs: React.FC<PlayerDetailInsightsTabsProps> = ({
                             mode="random"
                             playerName={playerName}
                             realm={realm}
+                            overallBattles={pvpBattles}
+                            overallWins={pvpWins}
                             refreshNonce={refreshNonce}
                             onAvailabilityChange={handleActivityAvailability}
                             onSparklineAnimationEnd={() => setGlowArmed(true)}

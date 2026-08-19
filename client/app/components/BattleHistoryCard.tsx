@@ -219,6 +219,16 @@ interface BattleHistoryCardProps {
     // itself (the Random|Ranked|All pill was removed 2026-07-13; the Ranked
     // tab hosts its own mode="ranked" instance).
     mode?: BattleHistoryMode;
+    // Exact career random-battle counts, when the host has them. The payload's
+    // `totals.lifetime_win_rate` is rounded to ONE decimal by the backend
+    // (views.py: round(100.0 * wins / battles, 1)), so a strip anchored to it
+    // lands up to 0.05% off the career WR the page header shows — 63.50 against
+    // 63.53 for nekonomae/na. These override that anchor with the integers the
+    // header itself is computed from, so the newest day's readout equals the
+    // header exactly. Random mode only; the ranked baseline is a different
+    // aggregate and still comes from the payload.
+    overallBattles?: number | null;
+    overallWins?: number | null;
     // Reports whether the card has any activity worth surfacing, so the parent
     // can pick the default tab and dark-out the Activity tab when there's
     // nothing to show. The second arg surfaces the payload's available modes so
@@ -607,9 +617,12 @@ const InlineSparkline: React.FC<{
     domainDays: number;
     ariaLabel: string;
     lifetimeBattles?: number | null;
+    /** Exact career wins, when the host has them. Preferred over deriving a win
+     *  count from `lifetimeWinRate`, which the backend has already rounded. */
+    lifetimeWins?: number | null;
     lifetimeWinRate?: number | null;
 }> = ({
-    days, domainDays, ariaLabel, lifetimeBattles, lifetimeWinRate,
+    days, domainDays, ariaLabel, lifetimeBattles, lifetimeWins, lifetimeWinRate,
 }) => {
     // Stable per-instance ids for the WR-line draw-reveal clipPath and the
     // hovered bar's inner-halo clip (colons from useId aren't valid in a
@@ -680,10 +693,15 @@ const InlineSparkline: React.FC<{
     const wrPts: { x: number; y: number }[] = [];
     if (
         lifetimeBattles != null && lifetimeBattles > 0
-        && lifetimeWinRate != null
+        && (lifetimeWins != null || lifetimeWinRate != null)
     ) {
         let cumBattles = lifetimeBattles;
-        let cumWins = Math.round(lifetimeBattles * (lifetimeWinRate / 100));
+        // Exact wins when the host has them. Otherwise derive from the rate —
+        // but do NOT round to a whole win: at 14k career battles a half-win of
+        // rounding is 0.003% of WR, and the anchor is a figure the page header
+        // states to two decimals. The derived path is already lossy (the rate
+        // arrives at one decimal); rounding on top of it compounds.
+        let cumWins = lifetimeWins ?? lifetimeBattles * (lifetimeWinRate! / 100);
         for (let i = visible.length - 1; i >= 0; i -= 1) {
             wrSeries[i] = cumBattles > 0 ? (cumWins / cumBattles) * 100 : null;
             cumBattles -= visible[i].battles;
@@ -1103,6 +1121,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     embedded = false,
     fillHeight = false,
     mode = 'random',
+    overallBattles = null,
+    overallWins = null,
     onAvailabilityChange,
     onSparklineAnimationEnd,
     captionLeading,
@@ -1505,7 +1525,18 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 days={stripDays}
                 domainDays={stripDomain}
                 ariaLabel={`${stripDomain}-day battle activity`}
-                lifetimeBattles={stripLifetime.battles}
+                // Guarded on > 0 rather than nullish-coalesced: a 0 would win the
+                // ?? and silently suppress the WR line. The two sources are the
+                // same DB field by construction (views.py reads player.pvp_battles
+                // for the random lifetime), so this only ever matters if that
+                // stops being true.
+                lifetimeBattles={
+                    overallBattles != null && overallBattles > 0
+                        ? overallBattles : stripLifetime.battles
+                }
+                lifetimeWins={
+                    overallBattles != null && overallBattles > 0 ? overallWins : null
+                }
                 lifetimeWinRate={stripLifetime.winRate}
             />
             <WindowRangeBracket spanDays={spanDays} domainDays={stripDomain} />

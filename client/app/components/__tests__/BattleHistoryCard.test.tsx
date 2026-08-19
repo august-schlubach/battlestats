@@ -338,6 +338,58 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(0));
     });
 
+    test('anchors the strip readout to the exact career integers, not the payload\'s rounded WR', async () => {
+        // The payload's lifetime_win_rate is rounded to ONE decimal by the
+        // backend, so a strip anchored to it reads 63.50 where the page header
+        // says 63.53 (nekonomae/na, 9164 wins in 14425 battles). The host passes
+        // the integers the header itself is computed from; the strip must use
+        // them.
+        const utcToday = new Date().toISOString().slice(0, 10);
+        const byDay: BattleHistoryByDay[] = [
+            { date: utcToday, battles: 4, wins: 3, damage: 0, frags: 0 },
+        ];
+        const payload = buildPayload({
+            available_modes: ['random'],
+            by_day: byDay,
+            totals: {
+                ...buildPayload().totals,
+                lifetime_battles: 14_425,
+                lifetime_win_rate: 63.5,
+            },
+        });
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({ data: payload, headers: {} });
+
+        const { unmount } = render(
+            <BattleHistoryCard
+                playerName="nekonomae"
+                realm="na"
+                overallBattles={14_425}
+                overallWins={9_164}
+            />,
+        );
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        // Idle readout sits on the newest day carrying battles — today.
+        await waitFor(() => {
+            expect(screen.getByTestId('strip-readout').textContent).toContain('63.53%');
+        });
+        unmount();
+
+        // Without the override the strip falls back to the payload figure and
+        // reads the coarser 63.50 — correct to the precision it was given.
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({ data: payload, headers: {} });
+        render(<BattleHistoryCard playerName="nekonomae" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('strip-readout').textContent).toContain('63.50%');
+        });
+    });
+
     test('splits Win Rate into sortable WR (window) and Overall WR (overall + delta) columns', async () => {
         resolveWith(buildPayload({
             by_ship: [
