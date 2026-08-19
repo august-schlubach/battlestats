@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, cleanup } from '@testing-library/react';
 import BattleHistoryCard, {
     type BattleHistoryPayload,
     type BattleHistoryByDay,
@@ -125,6 +125,9 @@ describe('BattleHistoryCard', () => {
     beforeEach(() => {
         mockFetchSharedJson.mockReset();
         mockTrackEvent.mockReset();
+        // The window pill persists per (realm, player, mode). Without this a
+        // pill click in one test restores as the starting window in the next.
+        window.localStorage.clear();
         // Default response for the always-60d strip fetch (second useEffect call).
         // Individual tests override the main window fetch via resolveWith().
         mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
@@ -906,6 +909,7 @@ describe('BattleHistoryCard', () => {
 describe('battle-history prefetch dedupe contract', () => {
     beforeEach(() => {
         mockFetchSharedJson.mockReset();
+        window.localStorage.clear();
         // Default for the always-month sparkline fetch (second useEffect);
         // tests override the main fetch via resolveWith().
         mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
@@ -1058,5 +1062,126 @@ describe('BattleHistoryCard — locale coverage', () => {
         expect(screen.getByText('Random Battles')).toBeInTheDocument();
         expect(screen.getByText('Frags/Battle')).toBeInTheDocument();
         expect(screen.getByText('Avg damage')).toBeInTheDocument();
+    });
+});
+
+// The window pill is remembered per (realm, player, mode) so a reader who works
+// in Week on one account returns to Week there — without imposing it on the next
+// player they open, or on the Ranked tab of the same player.
+describe('window pill persistence', () => {
+    const KEY = 'battlestats:battle-history:window';
+
+    beforeEach(() => {
+        mockFetchSharedJson.mockReset();
+        mockTrackEvent.mockReset();
+        window.localStorage.clear();
+        mockFetchSharedJson.mockResolvedValue({ data: buildPayload({ by_day: [] }), headers: {} });
+    });
+
+    const mainWindows = (): string[] =>
+        mainFetchCalls().map((c) => {
+            const u = (c as unknown[])[0] as string;
+            return new URL(u, 'http://t').searchParams.get('window') ?? '';
+        });
+
+    test('a stored pick drives the FIRST main fetch — the default window is never requested', async () => {
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'week');
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        // The whole point of gating the fetch on the restored value: one request
+        // for the remembered window, not a default fetch followed by a correction.
+        expect(mainWindows()).toEqual(['week']);
+        expect(screen.getByRole('button', { name: /^Week$/ })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('clicking a pill persists it under the realm+player+mode scope', async () => {
+        // Recent battles so the Month pill is not dimmed by the empty-window
+        // disable — a disabled pill's onClick returns before it can persist.
+        const day = (offset: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - offset);
+            return d.toISOString().slice(0, 10);
+        };
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                by_day: [
+                    { date: day(1), battles: 4, wins: 2, damage: 0, frags: 0 },
+                    { date: day(0), battles: 3, wins: 1, damage: 0, frags: 0 },
+                ],
+            }),
+            headers: {},
+        });
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        await act(async () => { screen.getByRole('button', { name: /^Month$/ }).click(); });
+        expect(window.localStorage.getItem(`${KEY}:na:lil_boots:random`)).toBe('month');
+    });
+
+    test('the pick does NOT cross realms for the same player name', async () => {
+        // The same name can be a different account on another realm, so an EU
+        // Wara39 must not inherit the NA Wara39's window.
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'day');
+        render(<BattleHistoryCard playerName="lil_boots" realm="eu" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mainWindows()).toEqual(['sixty']);
+        expect(screen.getByRole('button', { name: /^60d$/ })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('the pick does NOT cross players, and matches case-insensitively', async () => {
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'day');
+        render(<BattleHistoryCard playerName="someone_else" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mainWindows()).toEqual(['sixty']);
+        cleanup();
+
+        // A link that differs only in case is the same account, so it resolves
+        // to the same stored pick.
+        mockFetchSharedJson.mockClear();
+        render(<BattleHistoryCard playerName="LIL_BOOTS" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mainWindows()).toEqual(['day']);
+    });
+
+    test('a stored window with no pill is ignored — the reader is never stranded', async () => {
+        // `year` is a real BattleHistoryWindow the backend still accepts, but no
+        // pill exposes it: restoring it would show a window the reader cannot see
+        // selected and cannot leave by clicking the pill they are on.
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'year');
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mainWindows()).toEqual(['sixty']);
+        cleanup();
+
+        mockFetchSharedJson.mockClear();
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'not-a-window');
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mainWindows()).toEqual(['sixty']);
+    });
+
+    test('the Ranked tab keeps its own pick, separate from Activity', async () => {
+        // The player page mounts this card twice over different data; a window
+        // chosen on one must not move the other underneath the reader.
+        window.localStorage.setItem(`${KEY}:na:lil_boots:random`, 'week');
+        mockByMode({ by_day: [] });
+        render(<BattleHistoryCard playerName="lil_boots" realm="na" mode="ranked" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(mainWindows()).toEqual(['sixty']);
     });
 });

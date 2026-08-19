@@ -763,6 +763,48 @@ const WINDOW_SPAN_DAYS: Record<BattleHistoryWindow, number> = {
     day: 1, week: 7, month: 30, sixty: 60, year: 365,
 };
 
+// Window-pill persistence. The pick sticks per (realm, player, mode) — the same
+// scope the treemap color metric uses — so a reader who works in Week on one
+// account keeps Week there without imposing it on the next player they open,
+// and the Ranked tab's pick never moves the Activity tab underneath them.
+//
+// Only pills a user can actually reach are honoured on read: `year` is a valid
+// BattleHistoryWindow the backend still accepts but no pill exposes, so a stale
+// or hand-edited value naming it would strand the reader on a window they cannot
+// see selected and cannot leave by clicking the pill they are on.
+const WINDOW_PREF_KEY = 'battlestats:battle-history:window';
+
+const isStickyWindow = (v: unknown): v is BattleHistoryWindow =>
+    typeof v === 'string' && (VISIBLE_WINDOWS as ReadonlyArray<string>).includes(v);
+
+export const readWindowPref = (
+    scope: string | null | undefined,
+): BattleHistoryWindow | null => {
+    if (!scope || typeof globalThis.window === 'undefined') {
+        return null;
+    }
+    try {
+        const stored = globalThis.window.localStorage.getItem(`${WINDOW_PREF_KEY}:${scope}`);
+        return isStickyWindow(stored) ? stored : null;
+    } catch {
+        // storage unavailable (private mode / disabled) — fall back to default
+        return null;
+    }
+};
+
+export const writeWindowPref = (
+    scope: string | null | undefined, w: BattleHistoryWindow,
+): void => {
+    if (!scope || typeof globalThis.window === 'undefined') {
+        return;
+    }
+    try {
+        globalThis.window.localStorage.setItem(`${WINDOW_PREF_KEY}:${scope}`, w);
+    } catch {
+        // ignore storage failures (private mode / quota)
+    }
+};
+
 const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     playerName,
     realm,
@@ -776,14 +818,16 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     captionLeading,
 }) => {
     const requestSignal = usePlayerRequestSignal();
-    // Identity the treemaps remember their color-metric pick against. Realm is
-    // part of the key because the same name can be a different account on
-    // another realm; the name is lowercased so a link that differs only in case
-    // still resolves to the one stored pick. Mode is in the key because the
-    // player page mounts this card twice (Activity = random, Ranked = ranked)
-    // over different data — and the dmg baseline is random-only, so the metric
-    // that reads best genuinely differs between the two.
-    const treemapPrefScope = useMemo(
+    // Identity every remembered pick on this card is scoped to — the treemap
+    // color metric and the window pill. Realm is part of the key because the
+    // same name can be a different account on another realm; the name is
+    // lowercased so a link that differs only in case still resolves to the one
+    // stored pick. Mode is in the key because the player page mounts this card
+    // twice (Activity = random, Ranked = ranked) over different data — the dmg
+    // baseline is random-only, so the metric that reads best genuinely differs
+    // between the two, and a Ranked-tab window pick must not move the Activity
+    // tab underneath the reader.
+    const prefScope = useMemo(
         () => `${realm}:${playerName.toLowerCase()}:${mode}`,
         [realm, playerName, mode],
     );
@@ -805,6 +849,25 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         DEFAULT_BATTLE_HISTORY_WINDOW,
     );
     const [userPickedWindow, setUserPickedWindow] = useState(false);
+    // The scope whose stored window pick has been applied to state. Compared
+    // against the live `prefScope` rather than held as a bare boolean so that
+    // opening a second player does not let the first player's window drive one
+    // fetch before the new pick resolves: while they differ, the main fetch
+    // below holds. localStorage is read in an effect, never in the useState
+    // initializer, because it is client-only and reading it during the initial
+    // render would desync SSR from CSR (same rule as the treemap pref).
+    const [windowPrefScope, setWindowPrefScope] = useState<string | null>(null);
+    useEffect(() => {
+        const stored = readWindowPref(prefScope);
+        setWindow(stored ?? DEFAULT_BATTLE_HISTORY_WINDOW);
+        // A restored pick counts as explicit ONLY when it differs from the
+        // default. At the default the reader is where an untouched card would
+        // have put them, so the standalone no-battles collapse below must still
+        // apply — otherwise remembering "60d" would make empty cards appear for
+        // players who previously had none.
+        setUserPickedWindow(stored !== null && stored !== DEFAULT_BATTLE_HISTORY_WINDOW);
+        setWindowPrefScope(prefScope);
+    }, [prefScope]);
     // Ship selected in the table → its combat profile (ShipStats) shows below
     // the rollup separator. Clicking the same row again clears it (toggle).
     const [selectedShip, setSelectedShip] = useState<{
@@ -826,6 +889,13 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     };
 
     useEffect(() => {
+        // Hold until the stored window pick for THIS scope has been applied.
+        // Without the gate a reader whose remembered pill is Week would spend a
+        // request on the default window first and then immediately re-fetch —
+        // two round trips on every player open, for a value we already knew.
+        // The always-default strip fetch below is unaffected and still dedupes
+        // onto PlayerRouteView's prefetch, so nothing is lost by waiting a tick.
+        if (windowPrefScope !== prefScope) return;
         let cancelled = false;
         let pollTimer: ReturnType<typeof setTimeout> | null = null;
         let pendingAttempts = 0;
@@ -882,7 +952,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             cancelled = true;
             if (pollTimer !== null) clearTimeout(pollTimer);
         };
-    }, [playerName, realm, window, mode, refreshNonce, requestSignal]);
+    }, [playerName, realm, window, mode, refreshNonce, requestSignal,
+        prefScope, windowPrefScope]);
 
     // Reset the loaded gate whenever the entity/mode identity changes, so the
     // month fetch below re-establishes it rather than the empty-pill disable
@@ -897,6 +968,11 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // default window it is the same url + cacheKey as the main fetch, so
     // fetchSharedJson collapses the two into one request.
     useEffect(() => {
+        // Gated on the same pref resolution as the main fetch above purely to
+        // preserve their ORDER: the window the reader is waiting on must be
+        // requested before the constant backdrop, and the priority queue serves
+        // in arrival order. This fetch's url does not depend on the stored pick.
+        if (windowPrefScope !== prefScope) return;
         let cancelled = false;
         fetchSharedJson<BattleHistoryPayload>(
             battleHistoryFetchUrl(playerName, realm, DEFAULT_BATTLE_HISTORY_WINDOW, mode),
@@ -920,7 +996,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             })
             .catch(() => { /* sparkline stays empty on error */ });
         return () => { cancelled = true; };
-    }, [playerName, realm, mode, refreshNonce, requestSignal]);
+    }, [playerName, realm, mode, refreshNonce, requestSignal,
+        prefScope, windowPrefScope]);
 
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on
@@ -1153,6 +1230,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                                         }
                                         setWindow(w);
                                         setUserPickedWindow(true);
+                                        writeWindowPref(prefScope, w);
                                     }}
                                     aria-pressed={isActive}
                                     aria-disabled={disabled}
@@ -1320,7 +1398,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                         byShip={payload.by_ship ?? []}
                         selectedShipId={selectedShip?.ship_id ?? null}
                         onShipClick={(row) => toggleShip(row, 'treemap')}
-                        prefScope={treemapPrefScope}
+                        prefScope={prefScope}
                     />
                 </div>
             )}
