@@ -224,3 +224,41 @@ means reverting the release commit and redeploying both halves.
   rollout perturbs.
 - `runbook-ship-list-rollup-source-2026-08-14.md` — the 40d-labelled-45d
   mislabelling precedent that Step 5 exists to prevent.
+
+## Outcome — executed 2026-08-19 (UTC), v5.3.11
+
+Released `v5.3.11`, both halves deployed, all six verification checks passed.
+
+| Check | Result |
+|---|---|
+| Env pins | `SHIP_LEADERBOARD_WINDOW_DAYS="60"`, `SHIP_BADGE_MIN_BATTLES="20"` live in `/etc/battlestats-server.env` |
+| Beat cadence | one hour per realm — na `2`, eu `6`, asia `10`, minute `30`, descriptions read "daily recompute of the trailing 60-day board" |
+| Snapshots | window `2026-06-20..2026-08-19` (60d) on all three realms — na 349 ships / 5,102 rows (120.7s), eu 403 / 5,962 (451.5s), asia 397 / 5,846 (205.4s) |
+| Coverage vs model | na 349 (predicted ~346), eu 403 (~402), asia 397 (~398) — inside the treemap-union margin |
+| Floor | Shimakaze NA board: 15 rows, minimum 22 battles — no row under 20 |
+| Surfaces | `/ship` board, landing treemap (`limit=25`), and the player timeline all report `window_days=60`, `captured_on=2026-08-19`; footer 5.3.11 |
+
+### Two things worth knowing for the next widen
+
+1. **The EU rollup lost the fast path at the moment of the widen.**
+   `ship_pop_rollup_covers_window` (`data.py:7367`) requires a row for **every**
+   date in the half-open window. Widening to 60d pulled `2026-06-20` into the
+   window, and EU had no `ShipPopDailyAgg` row for that day, so *every* EU
+   tier×type bucket silently fell back to the raw `BattleEvent` scan — correct
+   but minutes per bucket, with the warmer's 30-minute budget in front of it.
+   Fixed by rebuilding the one realm-day: `rollup_ship_pop_daily('eu', date(2026,6,20))`
+   → 164,733 source rows into 1,333 agg rows in 43.9s, after which all three
+   realms returned `covers_window: True` and buckets dropped to ~50–200s.
+   **Check `ship_pop_rollup_covers_window` for all three realms BEFORE the next
+   widen, not after.** The gap is at the *oldest* edge of the new window, which
+   is exactly the day a widen newly requires.
+
+2. **The queue cannot be trusted for the rebuild.** The EU snapshot dispatched to
+   `background` was never picked up — the queue was 26 deep with 3 unacked
+   behind other work. Revoked it and ran `compute_ship_top_player_snapshot`
+   synchronously on the droplet instead. For a rollout, go synchronous from the
+   start; the queue is for the nightly path.
+
+Remaining at hand-off: asia T9/T8 list buckets still warming (T10 done on all
+three realms). They serve the durable `:published` copy until warm, which is the
+designed behaviour, and asia's own daily warmer runs at 15:15 UTC.
