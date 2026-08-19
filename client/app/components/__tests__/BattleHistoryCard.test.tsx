@@ -108,7 +108,8 @@ const mockByMode = (
 };
 
 // Main (non-sparkline) fetch calls — identified by label, since the main window
-// defaults to 'sixty' and shares the same url as the always-60d strip
+// defaults to 'month' while the strip always fetches 'sixty', so the two are
+// now distinct requests rather than one deduped call
 // fetch (the strip uses label 'BattleHistoryCard:sparkline'). Optionally
 // filtered by mode. Lets assertions target the main fetch without depending on
 // call order/count.
@@ -141,7 +142,7 @@ describe('BattleHistoryCard', () => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
 
-        expect(screen.getByText(/Last 60 days/i)).toBeInTheDocument();
+        expect(screen.getByText(/Last 30 days/i)).toBeInTheDocument();
         // Two ships present, sorted Yamato first.
         const rows = screen.getAllByRole('row');
         // 1 header + 2 data rows.
@@ -152,7 +153,7 @@ describe('BattleHistoryCard', () => {
         // in the "WR %" header).
         expect(screen.getByText('66.7')).toBeInTheDocument();
         expect(screen.getByText('50.0')).toBeInTheDocument();
-        expect(screen.getByLabelText(/60-day battle activity/i)).toBeInTheDocument();
+        expect(screen.getByLabelText(/30-day battle activity/i)).toBeInTheDocument();
     });
 
     test('clicking a ship row opens the combat profile as a body-portaled modal; backdrop and Escape close it', async () => {
@@ -385,7 +386,11 @@ describe('BattleHistoryCard', () => {
 
     test('embedded: reports availability false for a zero-battle, random-only player', async () => {
         const onAvailabilityChange = jest.fn();
-        resolveWith(buildPayload({
+        // mockResolvedValue, not resolveWith's ...Once: availability is now
+        // judged on the 60-day STRIP payload, so "no battles" has to hold for
+        // the wider span too. A player empty at 30d but not at 60d is available
+        // — the fallback opens them on 60d — which is the case below this one.
+        mockFetchSharedJson.mockResolvedValue({ headers: {}, data: buildPayload({
             available_modes: ['random'],
             totals: {
                 battles: 0, wins: 0, losses: 0, win_rate: 0,
@@ -394,7 +399,7 @@ describe('BattleHistoryCard', () => {
             },
             by_ship: [],
             by_day: [],
-        }));
+        }) });
         render(
             <BattleHistoryCard
                 embedded
@@ -405,6 +410,48 @@ describe('BattleHistoryCard', () => {
         );
         await waitFor(() => {
             expect(onAvailabilityChange).toHaveBeenCalledWith(false, ['random']);
+        });
+    });
+
+    test('embedded: a 30d-empty player is still AVAILABLE — judged on the 60d strip', async () => {
+        // The regression this guards: the card opens on Month, so a player whose
+        // last battles were ~45 days ago has an empty month payload. Reading
+        // availability off that reported "no activity", the parent disabled the
+        // Activity tab, and the 30d-empty fallback never got to promote them to
+        // 60d — the tab went dark for exactly the population it serves.
+        const onAvailabilityChange = jest.fn();
+        const utcDay = (o: number): string => {
+            const d = new Date();
+            d.setUTCDate(d.getUTCDate() - o);
+            return d.toISOString().slice(0, 10);
+        };
+        mockFetchSharedJson.mockImplementation((url: string) => {
+            const w = new URL(url, 'http://t').searchParams.get('window');
+            return Promise.resolve({
+                headers: {},
+                data: buildPayload(w === 'sixty'
+                    ? { by_day: [{ date: utcDay(45), battles: 9, wins: 5, damage: 0, frags: 0 }] }
+                    : {
+                        by_day: [],
+                        by_ship: [],
+                        totals: {
+                            battles: 0, wins: 0, losses: 0, win_rate: 0,
+                            damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                            planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                        },
+                    }),
+            });
+        });
+        render(
+            <BattleHistoryCard
+                embedded
+                playerName="lapsed"
+                realm="na"
+                onAvailabilityChange={onAvailabilityChange}
+            />,
+        );
+        await waitFor(() => {
+            expect(onAvailabilityChange).toHaveBeenCalledWith(true, ['random']);
         });
     });
 
@@ -463,23 +510,25 @@ describe('BattleHistoryCard', () => {
         expect(container).toBeEmptyDOMElement();
     });
 
-    test('initial fetch uses window=sixty (default) + realm', () => {
+    test('fires TWO distinct fetches: month for the view, sixty for the strip', () => {
         mockFetchSharedJson.mockReturnValue(new Promise(() => {}));
         render(<BattleHistoryCard playerName="lil_boots" realm="eu" />);
-        // The card fires the main window fetch plus the always-60d strip fetch.
-        // At the default window they are the SAME url — one cache key, one
-        // request after dedup — which is the point of the shared default.
-        const url = mockFetchSharedJson.mock.calls
-            .map((c) => c[0] as string)
-            .find((u) => u.includes('window=sixty'));
-        expect(url).toBeDefined();
-        expect(url).toContain('/api/player/lil_boots/battle-history/');
-        expect(url).toContain('window=sixty');
-        expect(url).toContain('realm=eu');
-        // No fetch asks for the old month default any more.
-        expect(mockFetchSharedJson.mock.calls
-            .map((c) => c[0] as string)
-            .some((u) => u.includes('window=month'))).toBe(false);
+        // These no longer share a url. The card opens on Month while the strip
+        // always pulls the full 60-day backdrop — the span the 60d pill animates
+        // out to, and the data the 30d-empty fallback reads. They cannot be
+        // collapsed into one request: totals and by_ship are aggregated
+        // server-side per window, so a 30d view is not derivable from 60d.
+        const urls = mockFetchSharedJson.mock.calls.map((c) => c[0] as string);
+        const main = urls.find((u) => u.includes('window=month'));
+        const strip = urls.find((u) => u.includes('window=sixty'));
+        expect(main).toBeDefined();
+        expect(strip).toBeDefined();
+        expect(main).toContain('/api/player/lil_boots/battle-history/');
+        expect(main).toContain('realm=eu');
+        expect(strip).toContain('realm=eu');
+        // The view's window is requested BEFORE the backdrop: the reader is
+        // waiting on the former, and the shared queue serves in arrival order.
+        expect(urls.indexOf(main!)).toBeLessThan(urls.indexOf(strip!));
     });
 
     test('initial fetch uses mode=random (default)', () => {
@@ -724,47 +773,83 @@ describe('BattleHistoryCard', () => {
         };
         const bracket = () => screen.getByTestId('window-range-bracket');
 
-        test('the strip is 60 bars wide on every pill — the bars never reflow', async () => {
+        // The strip SHOWS 30 days on Day/Week/Month and 60 on the 60d pill, but
+        // it HOLDS all 60 at every setting: the days outside the shown domain
+        // sit at a negative x and are clipped. That is what makes the change a
+        // glide in both directions instead of a glide one way and a pop the
+        // other, so "still 60 groups mounted" is the mechanism under test, not
+        // an implementation detail.
+        const strip = () => screen.getByLabelText(/-day battle activity/i);
+        const barGroups = () => strip().querySelectorAll('.sparkline-bar-rise');
+        const firstBarWidth = () => Number(
+            strip().querySelector('.sparkline-bar-rise rect')!.getAttribute('width'));
+
+        test('shows 30 days on Day/Week/Month and 60 on the 60d pill', async () => {
             await renderActive();
-            const bars = () => screen
-                .getByLabelText(/60-day battle activity/i)
-                .querySelectorAll('.sparkline-bar-rise');
-            expect(bars()).toHaveLength(60);
-            for (const label of [/^Day$/, /^Week$/, /^Month$/, /^60d$/]) {
+            // Opens on Month → a 30-day backdrop, bars 2.85 wide.
+            expect(strip().getAttribute('aria-label')).toMatch(/^30-day/);
+            expect(firstBarWidth()).toBeCloseTo(2.85, 5);
+
+            await act(async () => { screen.getByRole('button', { name: /^60d$/ }).click(); });
+            expect(strip().getAttribute('aria-label')).toMatch(/^60-day/);
+            expect(firstBarWidth()).toBeCloseTo(1.175, 5);
+
+            // ...and back, so the widen is not one-way.
+            await act(async () => { screen.getByRole('button', { name: /^Week$/ }).click(); });
+            expect(strip().getAttribute('aria-label')).toMatch(/^30-day/);
+            expect(firstBarWidth()).toBeCloseTo(2.85, 5);
+        });
+
+        test('every held day stays mounted across a domain change, so it glides', async () => {
+            await renderActive();
+            expect(barGroups()).toHaveLength(60);
+            for (const label of [/^Day$/, /^Week$/, /^60d$/, /^Month$/]) {
                 await act(async () => { screen.getByRole('button', { name: label }).click(); });
-                expect(bars()).toHaveLength(60);
+                expect(barGroups()).toHaveLength(60);
             }
         });
 
-        test('at the 60d default it spans the full domain at zero opacity', async () => {
+        test('at the Month default it spans the full 30-day domain at zero opacity', async () => {
             await renderActive();
+            expect(bracket().style.transform).toBe('translate(0.000px, 0px) scale(1.00000, 1)');
+            expect(bracket().style.opacity).toBe('0');
+        });
+
+        test('60d also spans its full domain at zero opacity', async () => {
+            // The bracket dissolves whenever the span equals the shown domain —
+            // it has stopped carrying information. With a 30-day backdrop that
+            // now happens at Month as well as at 60d, so the bracket is visible
+            // only on Day and Week.
+            await renderActive();
+            await act(async () => { screen.getByRole('button', { name: /^60d$/ }).click(); });
             expect(bracket().style.transform).toBe('translate(0.000px, 0px) scale(1.00000, 1)');
             expect(bracket().style.opacity).toBe('0');
         });
 
         test('narrowing the window contracts it rightward, opaque', async () => {
             await renderActive();
-            // At a 60-bar domain the pitch is 1.675 (bar 1.175 + gap 0.5).
-            // Month: left = 30 × 1.675 = 50.25, scale = 49.75 ÷ 100.
-            await act(async () => { screen.getByRole('button', { name: /^Month$/ }).click(); });
-            expect(bracket().style.transform).toBe('translate(50.250px, 0px) scale(0.49750, 1)');
-            expect(bracket().style.opacity).toBe('1');
-            // Week: left = 53 × 1.675 = 88.775
+            // At a 30-bar domain the pitch is 3.35 (bar 2.85 + gap 0.5).
+            // Week: left = 23 × 3.35 = 77.05, scale = 22.95 ÷ 100.
             await act(async () => { screen.getByRole('button', { name: /^Week$/ }).click(); });
-            expect(bracket().style.transform).toBe('translate(88.775px, 0px) scale(0.11225, 1)');
+            expect(bracket().style.transform).toBe('translate(77.050px, 0px) scale(0.22950, 1)');
             expect(bracket().style.opacity).toBe('1');
-            // Day: left = 59 × 1.675 = 98.825, one bar wide.
+            // Day: left = 29 × 3.35 = 97.15, one bar wide.
             await act(async () => { screen.getByRole('button', { name: /^Day$/ }).click(); });
-            expect(bracket().style.transform).toBe('translate(98.825px, 0px) scale(0.01175, 1)');
+            expect(bracket().style.transform).toBe('translate(97.150px, 0px) scale(0.02850, 1)');
             expect(bracket().style.opacity).toBe('1');
+            // On the 60d pill the domain widens, so the SAME Week span is
+            // measured against 60 bars and reads much narrower.
+            await act(async () => { screen.getByRole('button', { name: /^60d$/ }).click(); });
+            await act(async () => { screen.getByRole('button', { name: /^Week$/ }).click(); });
+            expect(bracket().style.transform).toBe('translate(77.050px, 0px) scale(0.22950, 1)');
         });
 
         test('stays mounted for a player with no battles at all', async () => {
             // CSS transitions do not run on first render, so the bracket must
             // never unmount — a conditionally-rendered one would pop into place
-            // with no motion on 60d → Month, and the motion is the feature. It
+            // with no motion on Month → Week, and the motion is the feature. It
             // is mounted even for a player with an entirely empty strip; at the
-            // 60d default it is merely transparent.
+            // Month default it is merely transparent.
             mockFetchSharedJson.mockReset();
             mockFetchSharedJson.mockResolvedValue({
                 data: buildPayload({ by_day: [] }), headers: {},
@@ -784,7 +869,7 @@ describe('BattleHistoryCard', () => {
         });
     });
 
-    test('the 60d pill is disabled when the trailing 60 days have no battles', async () => {
+    test('an inactive 60d pill is disabled when the trailing 60 days have no battles', async () => {
         // Battles 60 days back: present in the payload, outside every pill's
         // span. With the strip now 60 days deep, 60d's emptiness is derivable
         // the same way week's and month's are.
@@ -804,21 +889,24 @@ describe('BattleHistoryCard', () => {
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        // 60d is the active window, so the isActive guard keeps it interactive;
-        // Week and Month are inactive and equally empty, so they dim.
+        // Month is the active window now, so the isActive guard keeps IT
+        // interactive; 60d and Week are inactive and equally empty, so they dim.
+        // The single battle sits at day 60 — outside even the 60-day span — so
+        // the 30d-empty fallback does not fire and Month stays selected.
         await waitFor(() => {
-            expect(screen.getByRole('button', { name: /^Month$/ })).toBeDisabled();
+            expect(screen.getByRole('button', { name: /^60d$/ })).toBeDisabled();
         });
-        expect(screen.getByRole('button', { name: /^Month$/ }).getAttribute('title'))
-            .toBe('No battles in the last 30 days');
+        expect(screen.getByRole('button', { name: /^60d$/ }).getAttribute('title'))
+            .toBe('No battles in the last 60 days');
         expect(screen.getByRole('button', { name: /^Week$/ })).toBeDisabled();
-        // Switch off 60d, then back: now inactive, Month reports it too.
-        expect(screen.getByRole('button', { name: /^60d$/ })).not.toBeDisabled();
+        expect(screen.getByRole('button', { name: /^Month$/ })).not.toBeDisabled();
     });
 
     test('the currently-viewed window is never disabled, even when its span is empty', async () => {
-        // All windows empty. 60d is the active default → it must NOT be
+        // All windows empty. Month is the active default → it must NOT be
         // disabled (you are viewing it); the inactive Week pill IS disabled.
+        // Nothing anywhere means the fallback has no wider span to promote to,
+        // so the card stays on Month rather than bouncing to 60d.
         // Embedded so the empty card renders its chrome (pills) instead of null.
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({
@@ -838,8 +926,8 @@ describe('BattleHistoryCard', () => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
 
-        // Active 60d pill: enabled despite the empty window (isActive guard).
-        const activeBtn = screen.getByRole('button', { name: /^60d$/ });
+        // Active Month pill: enabled despite the empty window (isActive guard).
+        const activeBtn = screen.getByRole('button', { name: /^Month$/ });
         expect(activeBtn).not.toBeDisabled();
         expect(activeBtn.getAttribute('aria-pressed')).toBe('true');
         // Inactive, equally-empty Week pill: disabled.
@@ -852,12 +940,12 @@ describe('BattleHistoryCard', () => {
         jest.useFakeTimers();
         try {
             // The FIRST main ranked fetch returns the pending header so the
-            // card schedules a poll, the next does not. (The always-60d strip
-            // fetch shares the same URL but fires second — the main fetch
-            // effect is declared first — so it never sees the header.)
+            // card schedules a poll, the next does not. The header is keyed to
+            // the MAIN fetch's window (month) — the strip's own sixty-day fetch
+            // is a separate request now and never drives the poll.
             let rankedSeen = 0;
             mockByMode({ available_modes: ['random', 'ranked'] }, {}, (params): Record<string, string> => {
-                if (params.get('mode') === 'ranked' && params.get('window') === 'sixty') {
+                if (params.get('mode') === 'ranked' && params.get('window') === 'month') {
                     rankedSeen += 1;
                     if (rankedSeen === 1) {
                         return { 'X-Ranked-Observation-Pending': 'true' };
@@ -919,19 +1007,19 @@ describe('battle-history prefetch dedupe contract', () => {
         // Drift guard: PlayerRouteView's prefetch and the card's first fetch must
         // share these EXACT strings, or the prefetch becomes a duplicate request.
         expect(battleHistoryFetchUrl('lil_boots', 'na')).toBe(
-            '/api/player/lil_boots/battle-history/?window=sixty&mode=random&realm=na');
+            '/api/player/lil_boots/battle-history/?window=month&mode=random&realm=na');
         expect(battleHistoryCacheKey('lil_boots', 'na')).toBe(
-            'battle-history:lil_boots:na:sixty:random:0:0');
+            'battle-history:lil_boots:na:month:random:0:0');
     });
 
     it('prefetchBattleHistory fires the canonical 60d/random fetch', () => {
         mockFetchSharedJson.mockResolvedValueOnce({ data: buildPayload(), headers: {} });
         prefetchBattleHistory('lil_boots', 'na');
         expect(mockFetchSharedJson).toHaveBeenCalledWith(
-            '/api/player/lil_boots/battle-history/?window=sixty&mode=random&realm=na',
+            '/api/player/lil_boots/battle-history/?window=month&mode=random&realm=na',
             expect.objectContaining({
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
-                cacheKey: 'battle-history:lil_boots:na:sixty:random:0:0',
+                cacheKey: 'battle-history:lil_boots:na:month:random:0:0',
             }),
         );
     });
@@ -943,9 +1031,9 @@ describe('battle-history prefetch dedupe contract', () => {
             expect(mockFetchSharedJson).toHaveBeenCalled();
         });
         const [url, opts] = mockFetchSharedJson.mock.calls[0];
-        expect(url).toBe('/api/player/lil_boots/battle-history/?window=sixty&mode=random&realm=na');
+        expect(url).toBe('/api/player/lil_boots/battle-history/?window=month&mode=random&realm=na');
         expect(opts).toEqual(expect.objectContaining({
-            cacheKey: 'battle-history:lil_boots:na:sixty:random:0:0',
+            cacheKey: 'battle-history:lil_boots:na:month:random:0:0',
             ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         }));
     });
@@ -1012,7 +1100,7 @@ describe('BattleHistoryCard — locale coverage', () => {
 
     it('renders the Korean window header, pills, mode caption and totals tiles', async () => {
         await renderInLocale('ko');
-        expect(screen.getByText('최근 60일')).toBeInTheDocument();
+        expect(screen.getByText('최근 30일')).toBeInTheDocument();
         expect(screen.getByText('일')).toBeInTheDocument();
         expect(screen.getByText('주')).toBeInTheDocument();
         expect(screen.getByText('월')).toBeInTheDocument();
@@ -1027,14 +1115,14 @@ describe('BattleHistoryCard — locale coverage', () => {
         // battle" under a 전투 평균치 block header we do not render, and the
         // same page uses it for a raw record count elsewhere.
         expect(screen.getByText('평균 격침')).toBeInTheDocument();
-        expect(screen.queryByText('Last 60 days')).toBeNull();
+        expect(screen.queryByText('Last 30 days')).toBeNull();
         expect(screen.getByText('함선 수')).toBeInTheDocument();
         expect(screen.queryByText('Frags/Battle')).toBeNull();
     });
 
     it('renders the Japanese window header, pills, mode caption and totals tiles', async () => {
         await renderInLocale('ja');
-        expect(screen.getByText('直近60日間')).toBeInTheDocument();
+        expect(screen.getByText('直近30日間')).toBeInTheDocument();
         expect(screen.getByText('ランダム戦')).toBeInTheDocument();
         expect(screen.getByText('戦闘数')).toBeInTheDocument();
         // Twice, same reason as the Korean case above.
@@ -1058,7 +1146,7 @@ describe('BattleHistoryCard — locale coverage', () => {
 
     it('leaves the English card exactly as it was', async () => {
         await renderInLocale('en');
-        expect(screen.getByText('Last 60 days')).toBeInTheDocument();
+        expect(screen.getByText('Last 30 days')).toBeInTheDocument();
         expect(screen.getByText('Random Battles')).toBeInTheDocument();
         expect(screen.getByText('Frags/Battle')).toBeInTheDocument();
         expect(screen.getByText('Avg damage')).toBeInTheDocument();
@@ -1129,8 +1217,8 @@ describe('window pill persistence', () => {
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        expect(mainWindows()).toEqual(['sixty']);
-        expect(screen.getByRole('button', { name: /^60d$/ })).toHaveAttribute('aria-pressed', 'true');
+        expect(mainWindows()).toEqual(['month']);
+        expect(screen.getByRole('button', { name: /^Month$/ })).toHaveAttribute('aria-pressed', 'true');
     });
 
     test('the pick does NOT cross players, and matches case-insensitively', async () => {
@@ -1139,7 +1227,7 @@ describe('window pill persistence', () => {
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        expect(mainWindows()).toEqual(['sixty']);
+        expect(mainWindows()).toEqual(['month']);
         cleanup();
 
         // A link that differs only in case is the same account, so it resolves
@@ -1161,7 +1249,7 @@ describe('window pill persistence', () => {
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        expect(mainWindows()).toEqual(['sixty']);
+        expect(mainWindows()).toEqual(['month']);
         cleanup();
 
         mockFetchSharedJson.mockClear();
@@ -1170,7 +1258,7 @@ describe('window pill persistence', () => {
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        expect(mainWindows()).toEqual(['sixty']);
+        expect(mainWindows()).toEqual(['month']);
     });
 
     test('the Ranked tab keeps its own pick, separate from Activity', async () => {
@@ -1182,6 +1270,94 @@ describe('window pill persistence', () => {
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
-        expect(mainWindows()).toEqual(['sixty']);
+        expect(mainWindows()).toEqual(['month']);
+    });
+});
+
+// The card opens on Month. A player with nothing in the last 30 days would see
+// an empty card, so the strip's own data promotes them to 60d once it lands.
+describe('30d-empty fallback to 60d', () => {
+    const KEY = 'battlestats:battle-history:window';
+    const utcDay = (o: number): string => {
+        const d = new Date();
+        d.setUTCDate(d.getUTCDate() - o);
+        return d.toISOString().slice(0, 10);
+    };
+    // Battles 45 days back: inside the 60-day strip, outside the 30-day default.
+    const lapsedStrip = [{ date: utcDay(45), battles: 9, wins: 5, damage: 0, frags: 0 }];
+
+    beforeEach(() => {
+        mockFetchSharedJson.mockReset();
+        mockTrackEvent.mockReset();
+        window.localStorage.clear();
+    });
+
+    test('promotes a 30d-empty player to 60d, and grays the narrower pills', async () => {
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: lapsedStrip }), headers: {},
+        });
+        render(<BattleHistoryCard embedded playerName="lapsed" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /^60d$/ })).toHaveAttribute('aria-pressed', 'true');
+        });
+        // ...and the windows with nothing in them dim, per the usual rule.
+        expect(screen.getByRole('button', { name: /^Day$/ })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^Week$/ })).toBeDisabled();
+        expect(screen.getByRole('button', { name: /^Month$/ })).toBeDisabled();
+    });
+
+    test('the fallback is a derivation, not a pick — it never persists', async () => {
+        // If it wrote the pref, a returning player would be pinned to 60d long
+        // after they start playing again and Month becomes the better view.
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: lapsedStrip }), headers: {},
+        });
+        render(<BattleHistoryCard embedded playerName="lapsed" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /^60d$/ })).toHaveAttribute('aria-pressed', 'true');
+        });
+        expect(window.localStorage.getItem(`${KEY}:na:lapsed:random`)).toBeNull();
+    });
+
+    test('a player WITH recent battles stays on Month', async () => {
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({
+                by_day: [{ date: utcDay(2), battles: 6, wins: 3, damage: 0, frags: 0 }],
+            }),
+            headers: {},
+        });
+        render(<BattleHistoryCard embedded playerName="active" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(screen.getByRole('button', { name: /^Month$/ })).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    test('a stored pick outranks the fallback', async () => {
+        // The reader chose Week on this player before. Even though Week is empty
+        // and the fallback would otherwise fire, their choice wins — the pill
+        // simply shows an empty window, which is what they asked to see.
+        window.localStorage.setItem(`${KEY}:na:lapsed:random`, 'week');
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: lapsedStrip }), headers: {},
+        });
+        render(<BattleHistoryCard embedded playerName="lapsed" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        expect(screen.getByRole('button', { name: /^Week$/ })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: /^60d$/ })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    test('a player with nothing in 60 days either stays on Month', async () => {
+        mockFetchSharedJson.mockResolvedValue({
+            data: buildPayload({ by_day: [] }), headers: {},
+        });
+        render(<BattleHistoryCard embedded playerName="silent" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        // There is no wider span carrying data, so promoting would gain nothing.
+        expect(screen.getByRole('button', { name: /^Month$/ })).toHaveAttribute('aria-pressed', 'true');
     });
 });
