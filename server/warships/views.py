@@ -1216,6 +1216,12 @@ def _build_battle_history_payload(player, period: str, windows: int,
             "avg_damage": avg_damage,
             "survival_rate": survival_rate,
             "lifetime_battles": lifetime_battles_overall or None,
+            # Exact career wins alongside the rate. `lifetime_win_rate` is
+            # rounded to one decimal, which is coarser than the two decimals the
+            # player header states career WR to, so a client that anchors a
+            # series to the rate lands up to 0.05% off the number beside it.
+            # Additive: the rate keeps its rounding and its consumers.
+            "lifetime_wins": lifetime_wins_overall or None,
             "lifetime_win_rate": lifetime_overall_wr,
             "delta_win_rate": delta_overall_wr,
         },

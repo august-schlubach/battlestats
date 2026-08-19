@@ -61,6 +61,12 @@ interface BattleHistoryTotals {
     survived_battles: number;
     survival_rate: number;
     lifetime_battles?: number | null;
+    // Exact career wins for this mode. Added so the strip's overall-WR line can
+    // anchor to integers: `lifetime_win_rate` beside it is rounded to ONE
+    // decimal by the backend, which is coarser than the two decimals the page
+    // states career WR to. Optional — a backend older than this field simply
+    // leaves the strip on the rounded anchor.
+    lifetime_wins?: number | null;
     lifetime_win_rate?: number | null;
     delta_win_rate?: number | null;
 }
@@ -1157,8 +1163,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // Lifetime baseline from the month fetch, used to anchor the sparkline's
     // overall-WR overlay line. Null in modes without a lifetime (e.g. combined).
     const [stripLifetime, setStripLifetime] = useState<{
-        battles: number | null; winRate: number | null;
-    }>({ battles: null, winRate: null });
+        battles: number | null; wins: number | null; winRate: number | null;
+    }>({ battles: null, wins: null, winRate: null });
     const [error, setError] = useState<Error | null>(null);
     const [loading, setLoading] = useState(true);
     const [window, setWindow] = useState<BattleHistoryWindow>(
@@ -1308,6 +1314,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                 setStripByDay(data.by_day ?? []);
                 setStripLifetime({
                     battles: data.totals?.lifetime_battles ?? null,
+                    wins: data.totals?.lifetime_wins ?? null,
                     winRate: data.totals?.lifetime_win_rate ?? null,
                 });
                 setStripPayload(data);
@@ -1534,8 +1541,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     overallBattles != null && overallBattles > 0
                         ? overallBattles : stripLifetime.battles
                 }
+                // Exact wins from whichever source has them: the host's prop
+                // (random, available without a backend deploy) or the payload
+                // (both modes, once the backend ships `lifetime_wins`). Ranked
+                // has no prop — its baseline is a different aggregate — so it
+                // rides the payload.
                 lifetimeWins={
-                    overallBattles != null && overallBattles > 0 ? overallWins : null
+                    (overallBattles != null && overallBattles > 0 ? overallWins : null)
+                    ?? stripLifetime.wins
                 }
                 lifetimeWinRate={stripLifetime.winRate}
             />

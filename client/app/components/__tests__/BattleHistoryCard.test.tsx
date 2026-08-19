@@ -377,16 +377,37 @@ describe('BattleHistoryCard', () => {
         });
         unmount();
 
-        // Without the override the strip falls back to the payload figure and
-        // reads the coarser 63.50 — correct to the precision it was given.
+        // Without the override, and against a backend too old to send
+        // `lifetime_wins`, the strip falls back to the rounded rate and reads the
+        // coarser 63.50 — correct to the precision it was given.
         mockFetchSharedJson.mockReset();
         mockFetchSharedJson.mockResolvedValue({ data: payload, headers: {} });
-        render(<BattleHistoryCard playerName="nekonomae" realm="na" />);
+        const stale = render(<BattleHistoryCard playerName="nekonomae" realm="na" />);
         await waitFor(() => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
         await waitFor(() => {
             expect(screen.getByTestId('strip-readout').textContent).toContain('63.50%');
+        });
+        stale.unmount();
+
+        // Ranked passes no override — its career baseline is a different
+        // aggregate — so it reconciles through the payload's own `lifetime_wins`.
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: {
+                ...payload,
+                available_modes: ['ranked'],
+                totals: { ...payload.totals, lifetime_wins: 9_164 },
+            },
+            headers: {},
+        });
+        render(<BattleHistoryCard playerName="nekonomae" realm="na" mode="ranked" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('strip-readout').textContent).toContain('63.53%');
         });
     });
 
