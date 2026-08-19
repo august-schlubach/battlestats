@@ -470,7 +470,7 @@ built as an **English literal inside the component**, never passed through
   (`{bucket}`, `{windowPhrase}`, `{view}`).
 
 Translating any of these three keys alone would have shipped a mixed-language
-string (e.g. `함선 리더보드 · last 45 days rolling`). The fix was one refactor
+string (e.g. `함선 리더보드 · last 60 days rolling`). The fix was one refactor
 across both components: give every interpolated clause its own dictionary
 key, resolved through `t()` **in the component** before being handed to the
 outer template as a var, so the outer template only ever composes already-

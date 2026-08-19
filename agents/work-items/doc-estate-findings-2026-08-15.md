@@ -248,7 +248,8 @@ the required **Why:**/**How to apply:** structure.
 **Rotted — the env-authority cluster (high).** Four memories assert prod values the
 deploy script contradicts, which is the exact error class one of them exists to
 prevent: `project_ship_leaderboard_window_30d_shipped` (claims
-`SHIP_LEADERBOARD_WINDOW_DAYS` is not set in prod — it is pinned at 45; and cites
+`SHIP_LEADERBOARD_WINDOW_DAYS` is not set in prod — it is pinned (45 when this
+was written; 60 since 2026-08-18); and cites
 retention 32 where it is 105), `project_battle_history_archive_prune_live` (92d),
 `reference_infra_resources` (92d projection), `project_30d_window_worldview` (32d).
 

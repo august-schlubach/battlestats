@@ -4179,6 +4179,67 @@
             "archive_on": [
                 "clan-members-invalidation-shipped-and-verified"
             ]
+        },
+        "agents/runbooks/runbook-ship-standings-60d-foothold-2026-08-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "ship standings 60d foothold",
+                "ship badge minimum battles floor",
+                "SHIP_BADGE_MIN_BATTLES floor study",
+                "ship snapshot rebuild cost",
+                "why does the ship snapshot take minutes",
+                "90d window blocker"
+            ],
+            "tags": [
+                "ship-badges",
+                "ship-standings",
+                "SHIP_BADGE_MIN_BATTLES",
+                "SHIP_BADGE_MIN_SHIP_POPULATION",
+                "SHIP_LEADERBOARD_WINDOW_DAYS",
+                "snapshot-task",
+                "beat-cadence",
+                "PlayerDailyShipStats",
+                "BattleEvent",
+                "coverage",
+                "cost-measurement"
+            ],
+            "archive_on": [
+                "90d-window-shipped",
+                "floor-and-window-decision-landed",
+                "ship-standings-feature-removed"
+            ]
+        },
+        "agents/runbooks/runbook-ship-standings-60d-rollout-2026-08-18.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "deploy",
+            "owner": "backend",
+            "aliases": [
+                "ship standings 60d rollout",
+                "45d to 60d rollout",
+                "how to move the ship leaderboard window",
+                "snapshot cadence once daily",
+                "60d window deploy steps"
+            ],
+            "tags": [
+                "ship-standings",
+                "SHIP_LEADERBOARD_WINDOW_DAYS",
+                "SHIP_BADGE_MIN_BATTLES",
+                "beat-cadence",
+                "rollout",
+                "deploy",
+                "snapshot-rebuild",
+                "cache-warm"
+            ],
+            "archive_on": [
+                "60d-rollout-verified-and-stable",
+                "90d-window-shipped"
+            ]
         }
     }
 }

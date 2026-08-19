@@ -648,7 +648,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
     // The "· last N days rolling" clause used to be an English literal built
     // right here — the composed-template blocker: translating the outer
     // landing.shipLeaderboard.heading key alone would still have shipped
-    // "함선 리더보드 · last 45 days rolling". landing.shipLeaderboard.windowSuffix
+    // "함선 리더보드 · last 60 days rolling". landing.shipLeaderboard.windowSuffix
     // resolves the clause through t() first, so the whole heading is one
     // translated sentence in any locale.
     const headingLabel = windowDays

@@ -783,12 +783,22 @@ set_env_value BATTLE_HISTORY_ARCHIVE_BATCH_SIZE 2000
 set_env_value BATTLE_HISTORY_ARCHIVE_SLEEP 0.5
 set_env_value BATTLE_HISTORY_ARCHIVE_STATEMENT_TIMEOUT 180
 # Ship-standings rolling window (the /ship boards, profile badges, landing
-# treemap + tier-type list). Raised 30 -> 45 on 2026-07-24 as the first
-# foothold toward a 90d rolling leaderboard; pinned here (not just .env.cloud)
-# so it survives a deploy from any checkout. Advancing it requires a snapshot
-# rebuild to take effect (caches are keyed on the snapshot date). Code default
-# stays 30. See project_90d_window_ui_branch.
-set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 45
+# treemap + tier-type list). 30 -> 45 on 2026-07-24, 45 -> 60 on 2026-08-18 —
+# footholds toward a 90d rolling leaderboard (90d becomes computable ~2026-09-11,
+# when capture depth reaches it). Pinned here (not just .env.cloud) so it
+# survives a deploy from any checkout. Advancing it requires a snapshot rebuild
+# to take effect (caches are keyed on the snapshot date) — until that rebuild,
+# boards serve the OLD window's data under the NEW label. Code default stays 30.
+# See agents/runbooks/runbook-ship-standings-60d-rollout-2026-08-18.md.
+set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 60
+# Per-player battle floor for entering a ship's standings pool. Pinned 2026-08-18
+# at 20, moving with the window above: 20 games in 60 days is the SAME bar as the
+# code default's 15 games in 45 days (0.333 games/day), so the widen keeps board
+# quality constant instead of admitting ~11% more thin-sample players. Measured
+# coverage at 60d/20 is flat against 45d/15 (na 346 vs 344, eu 402 vs 395, asia
+# 398 vs 397). Never raise this without moving the window with it — at 45d a
+# floor of 25 cost NA 20% of its boards. Code default stays 15.
+set_env_value SHIP_BADGE_MIN_BATTLES 20
 # BattleObservation row retention (DB audit F5, armed 2026-07-20): delete-only
 # tier riding the same archive command/timer. JSON-stripped skeletons past 32d
 # + fully-empty polls past 7d; never a JSON-carrying row (keep-latest-3

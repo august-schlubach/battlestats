@@ -89,8 +89,9 @@ only if it has no rows. A date that ages out of that span still missing is
    only 10 days of slack; a rolled day pruned before the window ends is
    unrepairable.
 
-**Roadmap (confirmed with the operator 2026-08-14): 45 today, a stop at 60 soon,
-90 is the target.** Both constants track `SHIP_LEADERBOARD_WINDOW_DAYS`
+**Roadmap (confirmed with the operator 2026-08-14; updated 2026-08-18): 45
+until 2026-08-18, **60 since**, 90 is the target (computable ~2026-09-11, when
+capture depth reaches it).** Both constants track `SHIP_LEADERBOARD_WINDOW_DAYS`
 automatically, so the transitions need no code change here — but re-read this
 section before altering either.
 

@@ -1,16 +1,17 @@
-# Runbook — Ship-leaderboard rolling window (14 → 30 → 45 → 60/90)
+# Runbook — Ship-leaderboard rolling window (14 → 30 → 45 → 60 → 90)
 
-**Date:** 2026-06-29 (14→30); extended 2026-08-02 to cover 30→45 and the advance procedure
+**Date:** 2026-06-29 (14→30); extended 2026-08-02 to cover 30→45 and the advance procedure; 45→60 landed 2026-08-18 (`runbook-ship-standings-60d-rollout-2026-08-18.md`)
 **Status:** active — this is the single reference for the window's live value and how to advance it
 **Owner:** data
 **Area:** `SHIP_LEADERBOARD_WINDOW_DAYS` (`data.py` default / deploy-script pin), nightly `snapshot_ship_top_players_task`, treemap / inline ship list / `/ship/<id>` board / profile ship badges, header copy
 
 ## Current value — read this first
 
-> **Production runs a 45-day window** (since 2026-07-24). It is pinned by
-> `set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 45` in
+> **Production runs a 60-day window** (since 2026-08-18; 45 from 2026-07-24). It
+> is pinned by `set_env_value SHIP_LEADERBOARD_WINDOW_DAYS 60` in
 > `server/deploy/deploy_to_droplet.sh` — git-tracked, so it survives a deploy from
-> any checkout.
+> any checkout. The 60d move also pinned `SHIP_BADGE_MIN_BATTLES 20` alongside it:
+> the floor tracks the window so the bar per day stays constant (20/60d == 15/45d).
 >
 > **The code default in `data.py` is 30 and is deliberately NOT the live value.**
 > Reading `data.py` alone will tell you 30 and be wrong. The deploy script is the
@@ -22,8 +23,9 @@
 
 The end state is a single **90-day rolling** leaderboard. 45 and 60 are disposable
 stepping stones gated on battle-history retention depth, **not** a user-facing
-selector. Next foothold 60d (~mid-Aug 2026), then 90d (~late Sept 2026, once the
-live window backfills to full depth).
+selector. 60d landed 2026-08-18. **90d is not yet computable**: `BattleEvent` and
+`PlayerDailyShipStats` both start 2026-06-13, so a 90d window today would produce a
+66-day board labelled 90d. Real 90d depth arrives ~2026-09-11.
 
 ## Purpose
 
