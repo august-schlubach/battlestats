@@ -6,7 +6,6 @@ import BattleHistoryCard, {
     battleHistoryCacheKey,
     battleHistoryFetchUrl,
     buildWindowedDays,
-    buildStripReadout,
     prefetchBattleHistory,
     BATTLE_HISTORY_FETCH_TTL_MS,
 } from '../BattleHistoryCard';
@@ -213,7 +212,7 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByText('1.5')).toBeInTheDocument();
     });
 
-    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + the crosshair readout still reports the true count', async () => {
+    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height, and the crosshair tracks the day under the pointer', async () => {
         // The sparkline windows monthByDay to the last 30 UTC days, so build
         // dates relative to UTC "today" to keep them in-window without faking
         // the clock.
@@ -230,8 +229,18 @@ describe('BattleHistoryCard', () => {
         ];
         // Drive every fetch (main window + always-month sparkline) with this by_day.
         mockFetchSharedJson.mockReset();
+        // A lifetime baseline so the strip draws its overall-WR line and the
+        // readout has a second field to report.
         mockFetchSharedJson.mockResolvedValue({
-            data: buildPayload({ available_modes: ['random'], by_day: byDay }),
+            data: buildPayload({
+                available_modes: ['random'],
+                by_day: byDay,
+                totals: {
+                    ...buildPayload().totals,
+                    lifetime_battles: 4_000,
+                    lifetime_win_rate: 55.0,
+                },
+            }),
             headers: {},
         });
 
@@ -282,16 +291,14 @@ describe('BattleHistoryCard', () => {
         };
         await hoverIndex(26);
         const readout = () => screen.getByTestId('strip-readout').textContent ?? '';
+        // The row reports the hovered day and the overall (lifetime) win rate at
+        // the end of it — nothing else.
         expect(readout()).toContain(utcDay(3));
-        expect(readout()).toContain('130W / 120L');
-        expect(readout()).toMatch(/250 battles/);
+        expect(readout()).toMatch(/^\d{4}-\d{2}-\d{2}\d+\.\d{2}%$/);
 
-        // Mousing one bar right moves the readout to the next day, and a sub-cap
-        // day carries no cap note.
+        // Mousing one bar right moves the readout to the next day.
         await hoverIndex(28);
         expect(readout()).toContain(utcDay(1));
-        expect(readout()).toContain('12W / 13L');
-        expect(readout()).toContain('48.0%');
 
         // The rule exists only while the pointer is over the strip, and the
         // hovered day carries a 1px inner halo that does NOT change the bar's
@@ -312,7 +319,8 @@ describe('BattleHistoryCard', () => {
         // An empty day gets no halo — its bar is a 2px stub a 1px inset would
         // fill solid; the rule alone marks those.
         await hoverIndex(5);
-        expect(screen.getByTestId('strip-readout').textContent).toContain('no battles');
+        // Index 5 of a 30-day domain is 24 days back.
+        expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(24));
         expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
 
         fireEvent.pointerLeave(hit);
@@ -321,27 +329,6 @@ describe('BattleHistoryCard', () => {
         // ...but the readout row stays mounted (fixed height), falling back to
         // the newest day carrying battles so nothing below it shifts.
         expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(0));
-    });
-
-    test('buildStripReadout: W/L split, session WR, and the day-over-day overall-WR delta', () => {
-        const day: BattleHistoryByDay = {
-            date: '2026-08-19', battles: 20, wins: 12, damage: 0, frags: 0,
-        };
-        const r = buildStripReadout(day, 54.21, 54.19);
-        expect(r).toMatchObject({
-            date: '2026-08-19', battles: 20, wins: 12, losses: 8,
-        });
-        expect(r.winRate).toBeCloseTo(60, 5);
-        expect(r.delta).toBeCloseTo(0.02, 5);
-
-        // No prior day (the strip's leftmost slot) means no delta to report,
-        // and a day with no battles has no session win rate.
-        expect(buildStripReadout(day, 54.21, null).delta).toBeNull();
-        const empty = buildStripReadout(
-            { date: '2026-08-18', battles: 0, wins: 0, damage: 0, frags: 0 }, 54.19, 54.19,
-        );
-        expect(empty.winRate).toBeNull();
-        expect(empty.delta).toBeCloseTo(0, 5);
     });
 
     test('splits Win Rate into sortable WR (window) and Overall WR (overall + delta) columns', async () => {

@@ -555,94 +555,36 @@ const WindowRangeBracket: React.FC<{ spanDays: number; domainDays: number }> = (
 // has to be told twice.
 const STRIP_BAR_CAP = 50;
 
-// One day's worth of crosshair readout, resolved from the strip's own series.
-// Pure and exported so the cap note and the day-over-day delta can be asserted
-// without driving pointer geometry through jsdom, which has no layout.
-export type StripReadout = {
-    date: string;
-    battles: number;
-    wins: number;
-    losses: number;
-    /** That day's session win rate — null on a day with no battles. */
-    winRate: number | null;
-    /** Overall (lifetime) WR at the end of that day, per the reconstructed line. */
-    overall: number | null;
-    /** Day-over-day change in that overall WR: the strip's "Δ for the day". */
-    delta: number | null;
-};
-
-export const buildStripReadout = (
-    day: BattleHistoryByDay,
-    overall: number | null,
-    prevOverall: number | null,
-): StripReadout => ({
-    date: day.date,
-    battles: day.battles,
-    wins: day.wins,
-    losses: day.battles - day.wins,
-    winRate: day.battles > 0 ? (day.wins / day.battles) * 100 : null,
-    overall,
-    delta: overall != null && prevOverall != null ? overall - prevOverall : null,
-});
-
 // The strip's readout line, sitting directly above the bars in a FIXED-height
-// row. It is never conditionally mounted: a row that appeared on hover would
-// shove the treemaps below it down by its own height on every mouse-over. Idle
-// state reads the newest day (the Google Finance convention — the crosshair
-// moves the quote, it doesn't conjure it).
-const StripReadoutRow: React.FC<{ r: StripReadout | null; live: boolean }> = ({ r, live }) => {
-    const tone = r?.delta == null || Math.abs(r.delta) < 0.005
-        ? 'var(--text-muted)'
-        : r.delta > 0 ? '#74c476' : '#a50f15';
-    const sep = <span className="text-[var(--text-muted)] opacity-40">·</span>;
-    return (
-        <div
-            data-testid="strip-readout"
-            // Typeface, size, and weight match the per-ship table's ship-name
-            // cell: the body face (Inter) at text-base/font-medium, not the
-            // Courier the numeric columns use. `tabular-nums` stays — the
-            // crosshair sweeps continuously, and proportional digits would make
-            // the row twitch sideways on every frame.
-            className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-sm font-medium leading-5 tabular-nums"
-            style={{ opacity: r == null ? 0 : live ? 1 : 0.72 }}
-        >
-            {r != null && (
-                <>
-                    <span className="text-[var(--text-strong)]">{r.date}</span>
-                    {sep}
-                    <span className="text-[var(--text-muted)]">
-                        {r.battles === 0 ? 'no battles' : `${r.battles} battles`}
-                    </span>
-                    {r.winRate != null && (
-                        <>
-                            {sep}
-                            <span className="text-[var(--text-muted)]">{r.wins}W / {r.losses}L</span>
-                            {sep}
-                            <span style={{ color: wrColor(r.winRate) }}>{r.winRate.toFixed(1)}%</span>
-                        </>
-                    )}
-                    {r.overall != null && (
-                        <>
-                            {sep}
-                            <span className="text-[var(--text-muted)]">
-                                overall <span style={{ color: wrColor(r.overall) }}>{r.overall.toFixed(2)}%</span>
-                            </span>
-                            {r.delta != null && r.battles > 0 && (
-                                // Sign only when the value actually rounds off zero —
-                                // "Δ+0.00" on a day the line did not move is a lie the
-                                // eye reads before the digits do.
-                                <span style={{ color: tone }}>
-                                    Δ{Math.abs(r.delta) >= 0.005 && r.delta > 0 ? '+' : ''}
-                                    {(Math.abs(r.delta) < 0.005 ? 0 : r.delta).toFixed(2)}
-                                </span>
-                            )}
-                        </>
-                    )}
-                </>
-            )}
-        </div>
-    );
-};
+// row: the hovered day and the player's overall (lifetime) win rate at the end
+// of it, and nothing else. It is never conditionally mounted — a row that
+// appeared on hover would shove the treemaps below it down by its own height on
+// every mouse-over. Idle state reads the newest day (the Google Finance
+// convention: the crosshair moves the quote, it doesn't conjure it).
+const StripReadoutRow: React.FC<{
+    date: string | null;
+    overall: number | null;
+    live: boolean;
+}> = ({ date, overall, live }) => (
+    <div
+        data-testid="strip-readout"
+        // Typeface and weight match the per-ship table's ship-name cell: the body
+        // face (Inter) at font-medium, not the Courier the numeric columns use.
+        // `tabular-nums` stays — the crosshair sweeps continuously, and
+        // proportional digits would make the row twitch sideways on every frame.
+        className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-sm font-medium leading-5 tabular-nums"
+        style={{ opacity: date == null ? 0 : live ? 1 : 0.72 }}
+    >
+        {date != null && (
+            <>
+                <span className="text-[var(--text-strong)]">{date}</span>
+                {overall != null && (
+                    <span style={{ color: wrColor(overall) }}>{overall.toFixed(2)}%</span>
+                )}
+            </>
+        )}
+    </div>
+);
 
 const InlineSparkline: React.FC<{
     days: BattleHistoryByDay[];
@@ -763,13 +705,6 @@ const InlineSparkline: React.FC<{
         if (visible[i].battles > 0) { idleIdx = i; break; }
     }
     const readIdx = hovered ?? idleIdx;
-    const readout = visible.length > 0
-        ? buildStripReadout(
-            visible[readIdx],
-            wrSeries[readIdx] ?? null,
-            readIdx > 0 ? wrSeries[readIdx - 1] ?? null : null,
-        )
-        : null;
     // The dot rides the WR line itself, interpolated between the two data points
     // the rule falls between — not parked on the nearest one. Snapping it would
     // make it stutter along a line the rule crosses smoothly. Outside the drawn
@@ -832,7 +767,11 @@ const InlineSparkline: React.FC<{
 
     return (
         <div>
-            <StripReadoutRow r={readout} live={hovered != null} />
+            <StripReadoutRow
+                date={visible.length > 0 ? visible[readIdx].date : null}
+                overall={visible.length > 0 ? wrSeries[readIdx] ?? null : null}
+                live={hovered != null}
+            />
             {/* Positioning context for the crosshair dot. The dot is an HTML
                 overlay, not an SVG <circle>: preserveAspectRatio="none" stretches
                 x by ~8.5x at card width, which would smear a circle into an
