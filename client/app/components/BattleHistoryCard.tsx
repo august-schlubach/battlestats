@@ -564,8 +564,12 @@ const STRIP_BAR_CAP = 50;
 const StripReadoutRow: React.FC<{
     date: string | null;
     overall: number | null;
+    /** Day-over-day change in that overall WR, or null when there is no prior
+     *  day to measure against. Shown only when it rounds off zero: a day the
+     *  line did not move has no delta to report. */
+    delta: number | null;
     live: boolean;
-}> = ({ date, overall, live }) => (
+}> = ({ date, overall, delta, live }) => (
     <div
         data-testid="strip-readout"
         // Typeface and weight match the per-ship table's ship-name cell: the body
@@ -580,6 +584,16 @@ const StripReadoutRow: React.FC<{
                 <span className="text-[var(--text-strong)]">{date}</span>
                 {overall != null && (
                     <span style={{ color: wrColor(overall) }}>{overall.toFixed(2)}%</span>
+                )}
+                {delta != null && Math.abs(delta) >= 0.005 && (
+                    // Same two tones the per-ship table's Δ column uses, so a
+                    // rising line reads the same colour in both places.
+                    <span
+                        data-testid="strip-readout-delta"
+                        style={{ color: delta > 0 ? '#74c476' : '#a50f15' }}
+                    >
+                        {delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(2)}
+                    </span>
                 )}
             </>
         )}
@@ -603,6 +617,7 @@ const InlineSparkline: React.FC<{
     const uid = React.useId().replace(/:/g, '');
     const wrClipId = `sparkline-wr-${uid}`;
     const haloClipId = `sparkline-halo-${uid}`;
+    const stripClipId = `sparkline-strip-${uid}`;
     // Crosshair position, in viewBox x (0–100) rather than a day index: the rule
     // tracks the pointer CONTINUOUSLY, at pointer granularity, instead of
     // snapping between 30 discrete stops. Storing viewBox units also survives a
@@ -770,6 +785,12 @@ const InlineSparkline: React.FC<{
             <StripReadoutRow
                 date={visible.length > 0 ? visible[readIdx].date : null}
                 overall={visible.length > 0 ? wrSeries[readIdx] ?? null : null}
+                delta={
+                    visible.length > 0 && readIdx > 0
+                        && wrSeries[readIdx] != null && wrSeries[readIdx - 1] != null
+                        ? wrSeries[readIdx]! - wrSeries[readIdx - 1]!
+                        : null
+                }
                 live={hovered != null}
             />
             {/* Positioning context for the crosshair dot. The dot is an HTML
@@ -794,13 +815,25 @@ const InlineSparkline: React.FC<{
                     // half its stroke would be clipped by the viewport — and today
                     // is the bar readers hover most. Same escape WindowRangeBracket
                     // takes; the 1px that hangs past the edge reaches no scrolling
-                    // ancestor.
+                    // ancestor. The bars get an EXPLICIT clip below, because they
+                    // were relying on the viewport this opens up.
                     style={{ overflow: 'visible' }}
                 >
+                    {/* Days outside the shown domain sit at negative x and are
+                        clipped rather than unmounted, so a 30d↔60d change moves
+                        every bar along one continuous path instead of popping half
+                        of them in and out of existence. That clip used to be the
+                        SVG viewport; `overflow: visible` above hands it back, so
+                        the strip states it outright. */}
+                    <defs>
+                        <clipPath id={stripClipId}>
+                            <rect x={0} y={0} width={W} height={H} />
+                        </clipPath>
+                    </defs>
                     {/* Keyed on the data-presence transition so the bars remount and
                         replay their grow-from-the-x-axis entrance when the real window
                         lands (the padded all-zero stubs they mount with don't count). */}
-                    <g key={entranceKey}>
+                    <g key={entranceKey} clipPath={`url(#${stripClipId})`}>
                         {days.map((d, i) => {
                             const x = (i - offset) * (barW + gap);
                             const { h: totalH, y: totalY } = barRect(d);

@@ -291,10 +291,15 @@ describe('BattleHistoryCard', () => {
         };
         await hoverIndex(26);
         const readout = () => screen.getByTestId('strip-readout').textContent ?? '';
-        // The row reports the hovered day and the overall (lifetime) win rate at
-        // the end of it — nothing else.
+        // The row reports the hovered day, the overall (lifetime) win rate at the
+        // end of it, and — only when the line actually moved — a signed delta.
         expect(readout()).toContain(utcDay(3));
-        expect(readout()).toMatch(/^\d{4}-\d{2}-\d{2}\d+\.\d{2}%$/);
+        expect(readout()).toMatch(/^\d{4}-\d{2}-\d{2}\d+\.\d{2}%(?:[+\u2212]\d+\.\d{2})?$/);
+        // 130 wins in 250 battles is below the 55% lifetime baseline, so that day
+        // pulled the line down: the delta reads negative, in the table's red.
+        const delta = screen.getByTestId('strip-readout-delta');
+        expect(delta.textContent).toMatch(/^\u2212\d+\.\d{2}$/);
+        expect(delta).toHaveStyle({ color: '#a50f15' });
 
         // Mousing one bar right moves the readout to the next day.
         await hoverIndex(28);
@@ -319,8 +324,10 @@ describe('BattleHistoryCard', () => {
         // An empty day gets no halo — its bar is a 2px stub a 1px inset would
         // fill solid; the rule alone marks those.
         await hoverIndex(5);
-        // Index 5 of a 30-day domain is 24 days back.
+        // Index 5 of a 30-day domain is 24 days back. No battles that day means the
+        // line did not move, so there is no delta to show.
         expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(24));
+        expect(screen.queryByTestId('strip-readout-delta')).not.toBeInTheDocument();
         expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
 
         fireEvent.pointerLeave(hit);
