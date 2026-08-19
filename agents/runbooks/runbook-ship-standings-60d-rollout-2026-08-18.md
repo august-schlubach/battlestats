@@ -259,6 +259,7 @@ Released `v5.3.11`, both halves deployed, all six verification checks passed.
    synchronously on the droplet instead. For a rollout, go synchronous from the
    start; the queue is for the nightly path.
 
-Remaining at hand-off: asia T9/T8 list buckets still warming (T10 done on all
-three realms). They serve the durable `:published` copy until warm, which is the
-designed behaviour, and asia's own daily warmer runs at 15:15 UTC.
+All 30 tier×type buckets across eu + asia warmed to completion (na was already
+current through its own chain); final sweep confirms `window_days=60`,
+`captured_on=2026-08-19` on na T10, eu T8, and asia T8/T9 buckets. Nothing left
+pending.
