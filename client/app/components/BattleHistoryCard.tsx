@@ -546,6 +546,107 @@ const WindowRangeBracket: React.FC<{ spanDays: number; domainDays: number }> = (
     );
 };
 
+// Hard cap on the bar y-domain: 50 battles/day. Early daily-data backfills
+// observed multi-day gaps as a single spike (e.g. 250 games on one day), which
+// flattened every normal <20-game day to no visible height. We pin the domain
+// to 50 (auto-scaling below that when no day reaches it) and clamp any over-cap
+// day to full height; the true count stays in the crosshair readout.
+const STRIP_BAR_CAP = 50;
+
+// One day's worth of crosshair readout, resolved from the strip's own series.
+// Pure and exported so the cap note and the day-over-day delta can be asserted
+// without driving pointer geometry through jsdom, which has no layout.
+export type StripReadout = {
+    date: string;
+    battles: number;
+    wins: number;
+    losses: number;
+    /** That day's session win rate — null on a day with no battles. */
+    winRate: number | null;
+    /** Overall (lifetime) WR at the end of that day, per the reconstructed line. */
+    overall: number | null;
+    /** Day-over-day change in that overall WR: the strip's "Δ for the day". */
+    delta: number | null;
+    capped: boolean;
+};
+
+export const buildStripReadout = (
+    day: BattleHistoryByDay,
+    overall: number | null,
+    prevOverall: number | null,
+): StripReadout => ({
+    date: day.date,
+    battles: day.battles,
+    wins: day.wins,
+    losses: day.battles - day.wins,
+    winRate: day.battles > 0 ? (day.wins / day.battles) * 100 : null,
+    overall,
+    delta: overall != null && prevOverall != null ? overall - prevOverall : null,
+    capped: day.battles > STRIP_BAR_CAP,
+});
+
+// The strip's readout line, sitting directly above the bars in a FIXED-height
+// row. It is never conditionally mounted: a row that appeared on hover would
+// shove the treemaps below it down by its own height on every mouse-over. Idle
+// state reads the newest day (the Google Finance convention — the crosshair
+// moves the quote, it doesn't conjure it).
+const StripReadoutRow: React.FC<{ r: StripReadout | null; live: boolean }> = ({ r, live }) => {
+    const tone = r?.delta == null || Math.abs(r.delta) < 0.005
+        ? 'var(--text-muted)'
+        : r.delta > 0 ? '#74c476' : '#a50f15';
+    const sep = <span className="text-[var(--text-muted)] opacity-40">·</span>;
+    return (
+        <div
+            data-testid="strip-readout"
+            className="flex h-[18px] items-center gap-2 overflow-hidden whitespace-nowrap font-['Courier_New',Courier,monospace] text-[11px] leading-[18px] tabular-nums"
+            style={{ opacity: r == null ? 0 : live ? 1 : 0.72 }}
+        >
+            {r != null && (
+                <>
+                    <span className="text-[var(--text-strong)]">{r.date}</span>
+                    {sep}
+                    <span className="text-[var(--text-muted)]">
+                        {r.battles === 0 ? 'no battles' : `${r.battles} battles`}
+                    </span>
+                    {r.winRate != null && (
+                        <>
+                            {sep}
+                            <span className="text-[var(--text-muted)]">{r.wins}W / {r.losses}L</span>
+                            {sep}
+                            <span style={{ color: wrColor(r.winRate) }}>{r.winRate.toFixed(1)}%</span>
+                        </>
+                    )}
+                    {r.overall != null && (
+                        <>
+                            {sep}
+                            <span className="text-[var(--text-muted)]">
+                                overall <span style={{ color: wrColor(r.overall) }}>{r.overall.toFixed(2)}%</span>
+                            </span>
+                            {r.delta != null && r.battles > 0 && (
+                                // Sign only when the value actually rounds off zero —
+                                // "Δ+0.00" on a day the line did not move is a lie the
+                                // eye reads before the digits do.
+                                <span style={{ color: tone }}>
+                                    Δ{Math.abs(r.delta) >= 0.005 && r.delta > 0 ? '+' : ''}
+                                    {(Math.abs(r.delta) < 0.005 ? 0 : r.delta).toFixed(2)}
+                                </span>
+                            )}
+                        </>
+                    )}
+                    {r.capped && (
+                        <>
+                            {sep}
+                            <span className="text-[var(--text-muted)]">
+                                bar capped at {STRIP_BAR_CAP}
+                            </span>
+                        </>
+                    )}
+                </>
+            )}
+        </div>
+    );
+};
+
 const InlineSparkline: React.FC<{
     days: BattleHistoryByDay[];
     /** How many trailing days are SHOWN. `days` may hold more; the rest are
@@ -560,6 +661,9 @@ const InlineSparkline: React.FC<{
     // Stable per-instance id for the WR-line draw-reveal clipPath (colons from
     // useId aren't valid in a url(#...) fragment, so strip them).
     const wrClipId = `sparkline-wr-${React.useId().replace(/:/g, '')}`;
+    // Crosshair index, into the VISIBLE slice. Declared above the short-data
+    // bail below — a hook after an early return is a conditional hook call.
+    const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
     if (days.length < 2) return null;
     const W = STRIP_VIEW_W;
     const H = 64;
@@ -576,13 +680,8 @@ const InlineSparkline: React.FC<{
     // 60-day maximum into the 30-day view would flatten it against a peak the
     // reader can no longer see.
     const visible = days.slice(offset);
-    // Hard-cap the bar y-domain at 50 battles/day. Early daily-data backfills
-    // observed multi-day gaps as a single spike (e.g. 250 games on one day),
-    // which flattened every normal <20-game day to no visible height. We pin the
-    // domain to 50 (auto-scaling below that when no day reaches it) and clamp any
-    // over-cap day to full height; the true count stays in the tooltip.
-    const BAR_CAP = 50;
-    const maxBattles = Math.min(BAR_CAP, Math.max(1, ...visible.map(d => d.battles)));
+    const maxBattles = Math.min(STRIP_BAR_CAP, Math.max(1, ...visible.map(d => d.battles)));
+    const centerX = (i: number): number => i * (barW + gap) + barW / 2;
 
     // Overlay: a continuous line tracing the player's OVERALL (lifetime) win rate
     // over the window — not the per-day session WR. Anchored to the lifetime
@@ -594,21 +693,27 @@ const InlineSparkline: React.FC<{
     // the full 0–100% axis. Empty days inherit the prior aggregate, so the line is
     // naturally continuous. Modes without a lifetime baseline (e.g. pure ranked)
     // omit the line.
+    //
+    // `wrSeries` is kept at VISIBLE-day indexing and hoisted out of the guard
+    // below, because the crosshair reads it by day index. `wrPoints` cannot serve
+    // that purpose: it SKIPS null days, so its indices drift out of alignment
+    // with the days for any player whose lifetime origin falls inside the window.
     const wrPad = 2;
+    const wrSeries: (number | null)[] = new Array(visible.length).fill(null);
     const wrPoints: string[] = [];
+    let wrY: ((v: number) => number) | null = null;
     if (
         lifetimeBattles != null && lifetimeBattles > 0
         && lifetimeWinRate != null
     ) {
         let cumBattles = lifetimeBattles;
         let cumWins = Math.round(lifetimeBattles * (lifetimeWinRate / 100));
-        const series: (number | null)[] = new Array(visible.length).fill(null);
         for (let i = visible.length - 1; i >= 0; i -= 1) {
-            series[i] = cumBattles > 0 ? (cumWins / cumBattles) * 100 : null;
+            wrSeries[i] = cumBattles > 0 ? (cumWins / cumBattles) * 100 : null;
             cumBattles -= visible[i].battles;
             cumWins -= visible[i].wins;
         }
-        const vals = series.filter((v): v is number => v != null);
+        const vals = wrSeries.filter((v): v is number => v != null);
         if (vals.length >= 1) {
             const minV = Math.min(...vals);
             const maxV = Math.max(...vals);
@@ -616,14 +721,42 @@ const InlineSparkline: React.FC<{
             const padding = range * 0.15 + 0.0001;
             const yMin = minV - padding;
             const span = (maxV + padding) - yMin;
-            series.forEach((v, i) => {
+            wrY = (v: number) => wrPad + (1 - (v - yMin) / span) * (H - 2 * wrPad);
+            wrSeries.forEach((v, i) => {
                 if (v == null) return;
-                const cx = i * (barW + gap) + barW / 2;
-                const cy = wrPad + (1 - (v - yMin) / span) * (H - 2 * wrPad);
-                wrPoints.push(`${cx.toFixed(2)},${cy.toFixed(2)}`);
+                wrPoints.push(`${centerX(i).toFixed(2)},${wrY!(v).toFixed(2)}`);
             });
         }
     }
+
+    // Crosshair. `hoverIdx` survives a domain change (the 30d↔60d pill glide),
+    // so clamp on read rather than resetting — the rule stays under the cursor
+    // instead of vanishing mid-transition.
+    const hovered = hoverIdx == null ? null : Math.max(0, Math.min(shown - 1, hoverIdx));
+    // Idle readout: the newest day carrying battles, so the row says something
+    // true before the reader ever moves the mouse.
+    let idleIdx = shown - 1;
+    for (let i = shown - 1; i >= 0; i -= 1) {
+        if (visible[i].battles > 0) { idleIdx = i; break; }
+    }
+    const readIdx = hovered ?? idleIdx;
+    const readout = visible.length > 0
+        ? buildStripReadout(
+            visible[readIdx],
+            wrSeries[readIdx] ?? null,
+            readIdx > 0 ? wrSeries[readIdx - 1] ?? null : null,
+        )
+        : null;
+    // Pointer → day. Nearest bar CENTRE, so the gaps between bars resolve to
+    // whichever bar the cursor is closest to rather than to nothing. Measured
+    // off the wrapper div, whose box is the SVG's; hit-testing the bars
+    // themselves would drop every gap pixel.
+    const handlePointer = (e: React.PointerEvent<HTMLDivElement>) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        const vx = ((e.clientX - rect.left) / rect.width) * W;
+        setHoverIdx(Math.max(0, Math.min(shown - 1, Math.round((vx - barW / 2) / (barW + gap)))));
+    };
 
     // The card mounts with an all-zero padded window first, then the real days
     // land when the async battle-history fetch resolves. Flip this key on that
@@ -636,96 +769,153 @@ const InlineSparkline: React.FC<{
     // their DOM nodes, keyed by date). The WR polyline cannot: `points` is not
     // an animatable property. So it re-runs its left-to-right draw whenever the
     // shown domain changes, which reads as the line redrawing itself over the
-    // new span rather than snapping to it.
+    // new span rather than snapping to it. Hover is deliberately NOT in this
+    // key — a crosshair sweep must not re-trigger the draw-reveal (which is
+    // also the animationend signal the Insights tabs gate on).
     const wrEntranceKey = `${entranceKey}:${shown}`;
+    const crossX = hovered != null ? centerX(hovered) : null;
+    const dotY = hovered != null && wrY != null && wrSeries[hovered] != null
+        ? wrY(wrSeries[hovered]!)
+        : null;
 
     return (
-        <svg
-            viewBox={`0 0 ${W} ${H}`}
-            width="100%"
-            height={H}
-            preserveAspectRatio="none"
-            aria-label={ariaLabel}
-            role="img"
-        >
-            {/* Keyed on the data-presence transition so the bars remount and
-                replay their grow-from-the-x-axis entrance when the real window
-                lands (the padded all-zero stubs they mount with don't count). */}
-            <g key={entranceKey}>
-                {days.map((d, i) => {
-                    const x = (i - offset) * (barW + gap);
-                    // Clamp the bar to the capped domain so an over-cap day pins to
-                    // full height instead of overflowing the chart.
-                    const totalH = d.battles === 0
-                        ? 2
-                        : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
-                    const totalY = H - totalH;
-                    const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
-                    const winsY = H - winsH;
-                    const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
-                    const losses = d.battles - d.wins;
-                    const tooltip = d.battles > 0
-                        ? `${d.date}: ${d.battles} battles — ${d.wins}W / ${losses}L (${wr!.toFixed(1)}%)${d.battles > BAR_CAP ? ` · bar capped at ${BAR_CAP}` : ''}`
-                        : `${d.date}: no battles`;
-                    return (
-                        // Each day's bars rise from the x-axis (scaleY 0→1, origin
-                        // bottom) with a small left-to-right stagger so they sweep
-                        // in alongside the WR-line draw. Both rects share the group
-                        // transform, so the wins overlay stays pinned to the total.
-                        <g
-                            key={d.date}
-                            className="sparkline-bar-rise"
-                            style={{ animationDelay: `${i * 18}ms` }}
-                        >
-                            <title>{tooltip}</title>
-                            <rect x={x} y={totalY} width={barW} height={totalH} fill="rgba(120,120,120,0.25)" rx="0.5" />
-                            {winsH > 0 && (
-                                <rect x={x} y={winsY} width={barW} height={winsH} fill={wrColor(wr)} opacity={0.85} rx="0.5" />
-                            )}
-                        </g>
-                    );
-                })}
-            </g>
-            {wrPoints.length >= 2 && (
-                <>
-                    {/* Clip rect wiped left→right by CSS (.sparkline-wr-reveal) to
-                        "draw" the WR line along its path of travel. Keyed on the
-                        same entrance signal as the bars so the draw plays once
-                        when data lands and stays put across live-refresh polls. */}
-                    <defs>
-                        <clipPath id={wrClipId}>
-                            <rect
-                                key={wrEntranceKey}
-                                className="sparkline-wr-reveal"
-                                x={0}
-                                y={0}
-                                width={W}
-                                height={H}
+        <div>
+            <StripReadoutRow r={readout} live={hovered != null} />
+            {/* Positioning context for the crosshair dot. The dot is an HTML
+                overlay, not an SVG <circle>: preserveAspectRatio="none" stretches
+                x by ~8.5x at card width, which would smear a circle into an
+                ellipse. The viewBox height (64) equals the rendered height, so
+                y is 1:1 with pixels and x maps straight to a percentage. */}
+            <div
+                data-testid="strip-hit-area"
+                className="relative"
+                onPointerMove={handlePointer}
+                onPointerLeave={() => setHoverIdx(null)}
+            >
+                <svg
+                    viewBox={`0 0 ${W} ${H}`}
+                    width="100%"
+                    height={H}
+                    preserveAspectRatio="none"
+                    aria-label={ariaLabel}
+                    role="img"
+                    // The crosshair over the newest day sits at x=98.6 of 100, so
+                    // half its stroke would be clipped by the viewport — and today
+                    // is the bar readers hover most. Same escape WindowRangeBracket
+                    // takes; the 1px that hangs past the edge reaches no scrolling
+                    // ancestor.
+                    style={{ overflow: 'visible' }}
+                >
+                    {/* Keyed on the data-presence transition so the bars remount and
+                        replay their grow-from-the-x-axis entrance when the real window
+                        lands (the padded all-zero stubs they mount with don't count). */}
+                    <g key={entranceKey}>
+                        {days.map((d, i) => {
+                            const x = (i - offset) * (barW + gap);
+                            // Clamp the bar to the capped domain so an over-cap day pins to
+                            // full height instead of overflowing the chart.
+                            const totalH = d.battles === 0
+                                ? 2
+                                : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
+                            const totalY = H - totalH;
+                            const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
+                            const winsY = H - winsH;
+                            const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
+                            return (
+                                // Each day's bars rise from the x-axis (scaleY 0→1, origin
+                                // bottom) with a small left-to-right stagger so they sweep
+                                // in alongside the WR-line draw. Both rects share the group
+                                // transform, so the wins overlay stays pinned to the total.
+                                // No <title>: the per-bar native tooltip was replaced by the
+                                // crosshair readout above (one row, no hover delay, and it
+                                // reports the overall-WR delta a <title> could not).
+                                <g
+                                    key={d.date}
+                                    className="sparkline-bar-rise"
+                                    data-date={d.date}
+                                    data-battles={d.battles}
+                                    style={{ animationDelay: `${i * 18}ms` }}
+                                >
+                                    <rect x={x} y={totalY} width={barW} height={totalH} fill="rgba(120,120,120,0.25)" rx="0.5" />
+                                    {winsH > 0 && (
+                                        <rect x={x} y={winsY} width={barW} height={winsH} fill={wrColor(wr)} opacity={0.85} rx="0.5" />
+                                    )}
+                                </g>
+                            );
+                        })}
+                    </g>
+                    {/* Crosshair rule, drawn over the bars and under the WR line so
+                        the line it is reading stays on top. */}
+                    {crossX != null && (
+                        <line
+                            data-testid="strip-crosshair"
+                            x1={crossX}
+                            x2={crossX}
+                            y1={0}
+                            y2={H}
+                            stroke="var(--text-muted)"
+                            strokeWidth={1}
+                            strokeOpacity={0.9}
+                            vectorEffect="non-scaling-stroke"
+                            pointerEvents="none"
+                        />
+                    )}
+                    {wrPoints.length >= 2 && (
+                        <>
+                            {/* Clip rect wiped left→right by CSS (.sparkline-wr-reveal) to
+                                "draw" the WR line along its path of travel. Keyed on the
+                                same entrance signal as the bars so the draw plays once
+                                when data lands and stays put across live-refresh polls. */}
+                            <defs>
+                                <clipPath id={wrClipId}>
+                                    <rect
+                                        key={wrEntranceKey}
+                                        className="sparkline-wr-reveal"
+                                        x={0}
+                                        y={0}
+                                        width={W}
+                                        height={H}
+                                    />
+                                </clipPath>
+                            </defs>
+                            <polyline
+                                points={wrPoints.join(' ')}
+                                fill="none"
+                                stroke="var(--accent-secondary-mid)"
+                                strokeWidth={1.75}
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                vectorEffect="non-scaling-stroke"
+                                clipPath={`url(#${wrClipId})`}
                             />
-                        </clipPath>
-                    </defs>
-                    <polyline
-                        points={wrPoints.join(' ')}
-                        fill="none"
-                        stroke="var(--accent-secondary-mid)"
-                        strokeWidth={1.75}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        vectorEffect="non-scaling-stroke"
-                        clipPath={`url(#${wrClipId})`}
+                        </>
+                    )}
+                    {wrPoints.length === 1 && (
+                        <circle
+                            cx={Number(wrPoints[0].split(',')[0])}
+                            cy={Number(wrPoints[0].split(',')[1])}
+                            r={1.75}
+                            fill="var(--accent-secondary-mid)"
+                            vectorEffect="non-scaling-stroke"
+                        />
+                    )}
+                </svg>
+                {crossX != null && dotY != null && (
+                    <span
+                        data-testid="strip-crosshair-dot"
+                        aria-hidden
+                        className="pointer-events-none absolute block h-[7px] w-[7px] rounded-full border-2"
+                        style={{
+                            left: `${crossX}%`,
+                            top: dotY,
+                            transform: 'translate(-50%, -50%)',
+                            borderColor: 'var(--accent-secondary-mid)',
+                            backgroundColor: 'var(--bg-card)',
+                        }}
                     />
-                </>
-            )}
-            {wrPoints.length === 1 && (
-                <circle
-                    cx={Number(wrPoints[0].split(',')[0])}
-                    cy={Number(wrPoints[0].split(',')[1])}
-                    r={1.75}
-                    fill="var(--accent-secondary-mid)"
-                    vectorEffect="non-scaling-stroke"
-                />
-            )}
-        </svg>
+                )}
+            </div>
+        </div>
     );
 };
 
