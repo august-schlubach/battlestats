@@ -598,7 +598,7 @@ const StripReadoutRow: React.FC<{ r: StripReadout | null; live: boolean }> = ({ 
     return (
         <div
             data-testid="strip-readout"
-            className="flex h-[18px] items-center gap-2 overflow-hidden whitespace-nowrap font-['Courier_New',Courier,monospace] text-[11px] leading-[18px] tabular-nums"
+            className="flex h-[22px] items-center gap-2 overflow-hidden whitespace-nowrap font-['Courier_New',Courier,monospace] text-[14px] leading-[22px] tabular-nums"
             style={{ opacity: r == null ? 0 : live ? 1 : 0.72 }}
         >
             {r != null && (
