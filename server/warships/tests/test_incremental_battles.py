@@ -2350,6 +2350,11 @@ class BattleHistoryEndpointTests(TestCase):
         # Overall lifetime now: 530/1000 = 53.0%. Prior: 529/996 = 53.1%. Delta: -0.1.
         self.assertEqual(body["totals"]["lifetime_win_rate"], 53.0)
         self.assertEqual(body["totals"]["delta_win_rate"], -0.1)
+        # The exact integers ride along beside the rounded rate: a client
+        # anchoring a series to `lifetime_win_rate` alone lands up to 0.05% off
+        # the career WR the player header states to two decimals.
+        self.assertEqual(body["totals"]["lifetime_battles"], 1000)
+        self.assertEqual(body["totals"]["lifetime_wins"], 530)
 
     def test_lifetime_null_when_battles_json_missing_ship(self):
         self.player.pvp_battles = 0

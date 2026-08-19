@@ -212,7 +212,7 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByText('1.5')).toBeInTheDocument();
     });
 
-    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + note it in the tooltip', async () => {
+    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height, and the crosshair tracks the day under the pointer', async () => {
         // The sparkline windows monthByDay to the last 30 UTC days, so build
         // dates relative to UTC "today" to keep them in-window without faking
         // the clock.
@@ -229,8 +229,18 @@ describe('BattleHistoryCard', () => {
         ];
         // Drive every fetch (main window + always-month sparkline) with this by_day.
         mockFetchSharedJson.mockReset();
+        // A lifetime baseline so the strip draws its overall-WR line and the
+        // readout has a second field to report.
         mockFetchSharedJson.mockResolvedValue({
-            data: buildPayload({ available_modes: ['random'], by_day: byDay }),
+            data: buildPayload({
+                available_modes: ['random'],
+                by_day: byDay,
+                totals: {
+                    ...buildPayload().totals,
+                    lifetime_battles: 4_000,
+                    lifetime_win_rate: 55.0,
+                },
+            }),
             headers: {},
         });
 
@@ -239,28 +249,166 @@ describe('BattleHistoryCard', () => {
             expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
         });
 
-        const titles = Array.from(container.querySelectorAll('title'));
+        // Bars carry their day + true count as data attributes (the per-bar
+        // <title> tooltip they used to carry is gone — the crosshair readout
+        // replaced it).
         const heightFor = (battles: number): number => {
-            const t = titles.find((el) => el.textContent?.includes(`${battles} battles`));
-            expect(t).toBeTruthy();
-            const rect = t!.parentElement!.querySelector('rect[fill="rgba(120,120,120,0.25)"]');
+            const rect = container.querySelector(
+                `.sparkline-bar-rise[data-battles="${battles}"] rect[fill="rgba(120,120,120,0.25)"]`,
+            );
+            expect(rect).toBeTruthy();
             return parseFloat(rect!.getAttribute('height') ?? '0');
         };
-        const titleFor = (battles: number): string =>
-            titles.find((el) => el.textContent?.includes(`${battles} battles`))!.textContent ?? '';
 
         // Both over-cap days (250 and 60) pin to the same full-height bar — neither
-        // towers over the other, and the true count stays in the tooltip.
+        // towers over the other.
         expect(heightFor(250)).toBeCloseTo(heightFor(60), 5);
-        expect(titleFor(250)).toMatch(/bar capped at 50/);
-        expect(titleFor(60)).toMatch(/bar capped at 50/);
-        expect(titleFor(250)).toContain('250 battles');
 
         // A sub-cap day scales against the cap (25/50 → half height), not the
-        // 250-game spike, and carries no cap note.
+        // 250-game spike.
         expect(heightFor(25)).toBeLessThan(heightFor(60));
         expect(heightFor(25)).toBeCloseTo(heightFor(60) / 2, 1);
-        expect(titleFor(25)).not.toMatch(/bar capped/);
+
+        // The true count survives in the crosshair readout. jsdom has no layout,
+        // so hand the hit area a box and drive the pointer across it: the strip
+        // shows 30 days, and the 250-battle day sits at index 26 (3 days back).
+        const hit = screen.getByTestId('strip-hit-area');
+        const WIDTH = 300;
+        jest.spyOn(hit, 'getBoundingClientRect').mockReturnValue({
+            left: 0, top: 0, right: WIDTH, bottom: 64, width: WIDTH, height: 64, x: 0, y: 0,
+            toJSON: () => ({}),
+        } as DOMRect);
+        const gap = 0.5;
+        const barW = (100 - gap * 29) / 30;
+        const clientXForIndex = (i: number): number =>
+            ((i * (barW + gap) + barW / 2) / 100) * WIDTH;
+
+        // The crosshair coalesces pointer events onto an animation frame, so let
+        // the frame run before reading the readout back.
+        const hoverIndex = async (i: number): Promise<void> => {
+            fireEvent.pointerMove(hit, { clientX: clientXForIndex(i) });
+            await act(async () => { await new Promise((r) => setTimeout(r, 32)); });
+        };
+        await hoverIndex(26);
+        const readout = () => screen.getByTestId('strip-readout').textContent ?? '';
+        // The row reports the hovered day, the overall (lifetime) win rate at the
+        // end of it, and — only when the line actually moved — a signed delta.
+        expect(readout()).toContain(utcDay(3));
+        expect(readout()).toMatch(/^\d{4}-\d{2}-\d{2}\d+\.\d{2}%(?:[+\u2212]\d+\.\d{2})?$/);
+        // 130 wins in 250 battles is below the 55% lifetime baseline, so that day
+        // pulled the line down: the delta reads negative, in the table's red.
+        const delta = screen.getByTestId('strip-readout-delta');
+        expect(delta.textContent).toMatch(/^\u2212\d+\.\d{2}$/);
+        expect(delta).toHaveStyle({ color: '#a50f15' });
+
+        // Mousing one bar right moves the readout to the next day.
+        await hoverIndex(28);
+        expect(readout()).toContain(utcDay(1));
+
+        // The rule exists only while the pointer is over the strip, and the
+        // hovered day carries a 1px inner halo that does NOT change the bar's
+        // footprint: the halo rect matches the bar rect exactly, and reads its
+        // 1px inward from a 2px stroke clipped to that same rect.
+        expect(screen.getByTestId('strip-crosshair')).toBeInTheDocument();
+        const halo = screen.getByTestId('strip-bar-halo');
+        const bar = container.querySelector(
+            '.sparkline-bar-rise[data-battles="25"] rect[fill="rgba(120,120,120,0.25)"]',
+        )!;
+        for (const attr of ['x', 'y', 'width', 'height']) {
+            expect(halo.getAttribute(attr)).toBe(bar.getAttribute(attr));
+        }
+        expect(halo.getAttribute('stroke-width')).toBe('2');
+        expect(halo.getAttribute('clip-path')).toMatch(/^url\(#sparkline-halo-/);
+        expect(halo.getAttribute('fill')).toBe('none');
+
+        // An empty day gets no halo — its bar is a 2px stub a 1px inset would
+        // fill solid; the rule alone marks those.
+        await hoverIndex(5);
+        // Index 5 of a 30-day domain is 24 days back. No battles that day means the
+        // line did not move, so there is no delta to show.
+        expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(24));
+        expect(screen.queryByTestId('strip-readout-delta')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
+
+        fireEvent.pointerLeave(hit);
+        expect(screen.queryByTestId('strip-crosshair')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
+        // ...but the readout row stays mounted (fixed height), falling back to
+        // the newest day carrying battles so nothing below it shifts.
+        expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(0));
+    });
+
+    test('anchors the strip readout to the exact career integers, not the payload\'s rounded WR', async () => {
+        // The payload's lifetime_win_rate is rounded to ONE decimal by the
+        // backend, so a strip anchored to it reads 63.50 where the page header
+        // says 63.53 (nekonomae/na, 9164 wins in 14425 battles). The host passes
+        // the integers the header itself is computed from; the strip must use
+        // them.
+        const utcToday = new Date().toISOString().slice(0, 10);
+        const byDay: BattleHistoryByDay[] = [
+            { date: utcToday, battles: 4, wins: 3, damage: 0, frags: 0 },
+        ];
+        const payload = buildPayload({
+            available_modes: ['random'],
+            by_day: byDay,
+            totals: {
+                ...buildPayload().totals,
+                lifetime_battles: 14_425,
+                lifetime_win_rate: 63.5,
+            },
+        });
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({ data: payload, headers: {} });
+
+        const { unmount } = render(
+            <BattleHistoryCard
+                playerName="nekonomae"
+                realm="na"
+                overallBattles={14_425}
+                overallWins={9_164}
+            />,
+        );
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        // Idle readout sits on the newest day carrying battles — today.
+        await waitFor(() => {
+            expect(screen.getByTestId('strip-readout').textContent).toContain('63.53%');
+        });
+        unmount();
+
+        // Without the override, and against a backend too old to send
+        // `lifetime_wins`, the strip falls back to the rounded rate and reads the
+        // coarser 63.50 — correct to the precision it was given.
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({ data: payload, headers: {} });
+        const stale = render(<BattleHistoryCard playerName="nekonomae" realm="na" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('strip-readout').textContent).toContain('63.50%');
+        });
+        stale.unmount();
+
+        // Ranked passes no override — its career baseline is a different
+        // aggregate — so it reconciles through the payload's own `lifetime_wins`.
+        mockFetchSharedJson.mockReset();
+        mockFetchSharedJson.mockResolvedValue({
+            data: {
+                ...payload,
+                available_modes: ['ranked'],
+                totals: { ...payload.totals, lifetime_wins: 9_164 },
+            },
+            headers: {},
+        });
+        render(<BattleHistoryCard playerName="nekonomae" realm="na" mode="ranked" />);
+        await waitFor(() => {
+            expect(screen.getByTestId('battle-history-card')).toBeInTheDocument();
+        });
+        await waitFor(() => {
+            expect(screen.getByTestId('strip-readout').textContent).toContain('63.53%');
+        });
     });
 
     test('splits Win Rate into sortable WR (window) and Overall WR (overall + delta) columns', async () => {

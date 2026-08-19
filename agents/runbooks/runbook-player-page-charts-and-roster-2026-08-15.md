@@ -2,7 +2,7 @@
 
 _Created: 2026-08-15_
 _Context: extracted verbatim-in-substance from `CLAUDE.md`'s "Key frontend patterns" block during the 2026-08-15 doc-estate pass. This material had no owning document — it was ~700 words of always-loaded context describing component behavior, and the only nearby docs (`runbook-mobile-player-detail-charts.md`, `archive/runbook-tier-type-correlation-rework-2026-07-01.md`) describe components that no longer exist._
-_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1)._
+_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1), plus the strip crosshair and the `lifetime_wins` precision contract (v5.4.2)._
 
 ## Purpose
 
@@ -117,6 +117,68 @@ A consequence to expect rather than treat as a bug: the bracket dissolves
 whenever the span equals the shown domain, so with a 30-day backdrop it is
 visible only on Day and Week — at Month it now reads as full-width and
 transparent, as it already did at 60d.
+
+## BattleHistoryCard — the strip crosshair and its readout (2026-08-19, v5.4.2)
+
+The per-bar `<title>` tooltips are gone. In their place a Google-Finance-style
+crosshair: a vertical rule, a dot on the overall-WR line, and a fixed-height
+readout row above the strip reading `<date> <overall WR> <signed delta>`.
+
+**What snaps and what does not.** Hover state is carried as a viewBox x, not a
+day index, so the rule tracks the pointer continuously (and survives a domain
+change for free — the coordinate space is identical at 30d and 60d). The dot is
+INTERPOLATED between the two WR points the rule falls between; snapping it would
+make it stutter along a line the rule crosses smoothly. The readout and the bar
+halo DO snap to the nearest bar centre, because the data is daily. The halo is
+what reconciles the two: the rule moves continuously, the halo says which day
+the numbers belong to.
+
+**Three constructions that look like decoration and are not:**
+
+1. **The readout row is always mounted at a fixed height**, idling on the newest
+   day carrying battles. A row that appeared on hover would shove the treemaps
+   below it down on every mouse-over.
+2. **The halo is a 2px non-scaling stroke clipped to the bar's own rect**, which
+   throws the outer half away and leaves exactly 1px INSIDE the existing
+   footprint. A plain 1px outline straddles the path and grows the bar by half a
+   pixel on every side. Verified by measuring the bar's painted box hovered and
+   unhovered — identical to the digit.
+3. **Hover is deliberately absent from the WR clip-path key.** A crosshair sweep
+   must not re-fire the draw-reveal, whose `animationend` is the signal the
+   Insights tabs gate on.
+
+**The trap this section exists for.** The strip `<svg>` carries
+`overflow: visible`, because the newest day's rule sits at x=98.6 of 100 and
+half its stroke would otherwise be clipped — and today is the bar readers hover
+most. The off-domain bars were relying on that same viewport to clip them. They
+now carry an EXPLICIT `clipPath` at the viewBox rect. **Remove that clip and all
+30 off-domain bars paint across the page to the left of the strip.** Shipped
+broken for two commits; caught by eye, not by a test.
+
+Pointer events are coalesced onto one animation frame — they fire faster than
+paint, and each one re-renders every bar.
+
+### Never anchor a series to `lifetime_win_rate`
+
+`totals.lifetime_win_rate` is rounded to ONE decimal by the backend
+(`views.py`, `round(100.0 * lifetime_wins_overall / lifetime_battles_overall, 1)`),
+while the player header states career WR to TWO from `pvp_ratio`. A strip
+anchored to the rate therefore ends up to 0.05% off the number printed above it:
+`nekonomae` NA read 63.50% against a 63.53% header.
+
+**`totals.lifetime_wins` (added 2026-08-19) carries the exact integers** beside
+`lifetime_battles`, from the same `lifetime_wins_overall` the rate is computed
+from — `player.pvp_wins` in random mode, `ranked_ctx["overall_wins"]` in ranked.
+It is ADDITIVE on purpose: raising the rate to two decimals would have dragged
+`delta_overall_wr` with it (derived against a one-decimal prior) and shifted
+every existing consumer.
+
+The client prefers exact wins from whichever source has them — the host prop
+(`overallBattles`/`overallWins`, passed by `PlayerDetailInsightsTabs` for random
+only, since ranked's baseline is a different aggregate) first, the payload
+second — and falls back to the rounded rate when neither is present. The derived
+fallback does NOT round to a whole win: it would be rounding a figure that is
+already lossy.
 
 ## BattleHistoryCard — the window pill is sticky (2026-08-19)
 
@@ -254,3 +316,7 @@ drops the moment the player is displaced), fed by `ship_badges`
 - Touching badge order: there are two dispatch sites, not one.
 - Touching the roster split: `is_clan_battle_player` must keep overriding the
   idle rule, or current-season shield wearers fall below the fold.
+- Touching the strip's `overflow`/clip: the off-domain bars are clipped by an
+  EXPLICIT `clipPath`, not by the viewport. Check the region left of the strip.
+- Anchoring anything new to a career win rate: use `totals.lifetime_wins`, not
+  `lifetime_win_rate` — the rate is rounded to one decimal.
