@@ -550,7 +550,9 @@ const WindowRangeBracket: React.FC<{ spanDays: number; domainDays: number }> = (
 // observed multi-day gaps as a single spike (e.g. 250 games on one day), which
 // flattened every normal <20-game day to no visible height. We pin the domain
 // to 50 (auto-scaling below that when no day reaches it) and clamp any over-cap
-// day to full height; the true count stays in the crosshair readout.
+// day to full height. The clamp is not annotated: the readout reports the day's
+// true battle count on every day, capped or not, so there is nothing the reader
+// has to be told twice.
 const STRIP_BAR_CAP = 50;
 
 // One day's worth of crosshair readout, resolved from the strip's own series.
@@ -567,7 +569,6 @@ export type StripReadout = {
     overall: number | null;
     /** Day-over-day change in that overall WR: the strip's "Δ for the day". */
     delta: number | null;
-    capped: boolean;
 };
 
 export const buildStripReadout = (
@@ -582,7 +583,6 @@ export const buildStripReadout = (
     winRate: day.battles > 0 ? (day.wins / day.battles) * 100 : null,
     overall,
     delta: overall != null && prevOverall != null ? overall - prevOverall : null,
-    capped: day.battles > STRIP_BAR_CAP,
 });
 
 // The strip's readout line, sitting directly above the bars in a FIXED-height
@@ -603,7 +603,7 @@ const StripReadoutRow: React.FC<{ r: StripReadout | null; live: boolean }> = ({ 
             // Courier the numeric columns use. `tabular-nums` stays — the
             // crosshair sweeps continuously, and proportional digits would make
             // the row twitch sideways on every frame.
-            className="flex h-6 items-center gap-2 overflow-hidden whitespace-nowrap text-base font-medium leading-6 tabular-nums"
+            className="flex h-5 items-center gap-2 overflow-hidden whitespace-nowrap text-sm font-medium leading-5 tabular-nums"
             style={{ opacity: r == null ? 0 : live ? 1 : 0.72 }}
         >
             {r != null && (
@@ -636,14 +636,6 @@ const StripReadoutRow: React.FC<{ r: StripReadout | null; live: boolean }> = ({ 
                                     {(Math.abs(r.delta) < 0.005 ? 0 : r.delta).toFixed(2)}
                                 </span>
                             )}
-                        </>
-                    )}
-                    {r.capped && (
-                        <>
-                            {sep}
-                            <span className="text-[var(--text-muted)]">
-                                bar capped at {STRIP_BAR_CAP}
-                            </span>
                         </>
                     )}
                 </>

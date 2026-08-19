@@ -213,7 +213,7 @@ describe('BattleHistoryCard', () => {
         expect(screen.getByText('1.5')).toBeInTheDocument();
     });
 
-    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + the crosshair readout keeps the true count', async () => {
+    test('caps sparkline bars at 50 battles/day: over-cap days pin to full height + the crosshair readout still reports the true count', async () => {
         // The sparkline windows monthByDay to the last 30 UTC days, so build
         // dates relative to UTC "today" to keep them in-window without faking
         // the clock.
@@ -285,7 +285,6 @@ describe('BattleHistoryCard', () => {
         expect(readout()).toContain(utcDay(3));
         expect(readout()).toContain('130W / 120L');
         expect(readout()).toMatch(/250 battles/);
-        expect(readout()).toMatch(/bar capped at 50/);
 
         // Mousing one bar right moves the readout to the next day, and a sub-cap
         // day carries no cap note.
@@ -293,7 +292,6 @@ describe('BattleHistoryCard', () => {
         expect(readout()).toContain(utcDay(1));
         expect(readout()).toContain('12W / 13L');
         expect(readout()).toContain('48.0%');
-        expect(readout()).not.toMatch(/bar capped/);
 
         // The rule exists only while the pointer is over the strip, and the
         // hovered day carries a 1px inner halo that does NOT change the bar's
@@ -331,7 +329,7 @@ describe('BattleHistoryCard', () => {
         };
         const r = buildStripReadout(day, 54.21, 54.19);
         expect(r).toMatchObject({
-            date: '2026-08-19', battles: 20, wins: 12, losses: 8, capped: false,
+            date: '2026-08-19', battles: 20, wins: 12, losses: 8,
         });
         expect(r.winRate).toBeCloseTo(60, 5);
         expect(r.delta).toBeCloseTo(0.02, 5);
@@ -344,11 +342,6 @@ describe('BattleHistoryCard', () => {
         );
         expect(empty.winRate).toBeNull();
         expect(empty.delta).toBeCloseTo(0, 5);
-
-        // Over-cap days flag the bar clamp so the readout can report the truth.
-        expect(buildStripReadout(
-            { date: '2026-08-17', battles: 51, wins: 30, damage: 0, frags: 0 }, null, null,
-        ).capped).toBe(true);
     });
 
     test('splits Win Rate into sortable WR (window) and Overall WR (overall + delta) columns', async () => {
