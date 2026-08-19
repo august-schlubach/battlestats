@@ -658,12 +658,26 @@ const InlineSparkline: React.FC<{
 }> = ({
     days, domainDays, ariaLabel, lifetimeBattles, lifetimeWinRate,
 }) => {
-    // Stable per-instance id for the WR-line draw-reveal clipPath (colons from
-    // useId aren't valid in a url(#...) fragment, so strip them).
-    const wrClipId = `sparkline-wr-${React.useId().replace(/:/g, '')}`;
-    // Crosshair index, into the VISIBLE slice. Declared above the short-data
-    // bail below — a hook after an early return is a conditional hook call.
-    const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
+    // Stable per-instance ids for the WR-line draw-reveal clipPath and the
+    // hovered bar's inner-halo clip (colons from useId aren't valid in a
+    // url(#...) fragment, so strip them).
+    const uid = React.useId().replace(/:/g, '');
+    const wrClipId = `sparkline-wr-${uid}`;
+    const haloClipId = `sparkline-halo-${uid}`;
+    // Crosshair position, in viewBox x (0–100) rather than a day index: the rule
+    // tracks the pointer CONTINUOUSLY, at pointer granularity, instead of
+    // snapping between 30 discrete stops. Storing viewBox units also survives a
+    // domain change for free — the coordinate space is the same at 30d and 60d.
+    // Declared above the short-data bail below; a hook after an early return is
+    // a conditional hook call.
+    const [hoverX, setHoverX] = React.useState<number | null>(null);
+    // Pointer events fire faster than paint. Coalesce them onto one frame so a
+    // fast sweep doesn't queue a re-render of every bar per event.
+    const frame = React.useRef<number | null>(null);
+    const pending = React.useRef<number | null>(null);
+    React.useEffect(() => () => {
+        if (frame.current != null) cancelAnimationFrame(frame.current);
+    }, []);
     if (days.length < 2) return null;
     const W = STRIP_VIEW_W;
     const H = 64;
@@ -682,6 +696,15 @@ const InlineSparkline: React.FC<{
     const visible = days.slice(offset);
     const maxBattles = Math.min(STRIP_BAR_CAP, Math.max(1, ...visible.map(d => d.battles)));
     const centerX = (i: number): number => i * (barW + gap) + barW / 2;
+    // One source for the bar rectangle, so the hover halo cannot drift off the
+    // bar it is meant to outline. Clamped to the capped domain, so an over-cap
+    // day pins to full height instead of overflowing the chart.
+    const barRect = (d: BattleHistoryByDay): { h: number; y: number } => {
+        const h = d.battles === 0
+            ? 2
+            : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
+        return { h, y: H - h };
+    };
 
     // Overlay: a continuous line tracing the player's OVERALL (lifetime) win rate
     // over the window — not the per-day session WR. Anchored to the lifetime
@@ -695,13 +718,12 @@ const InlineSparkline: React.FC<{
     // omit the line.
     //
     // `wrSeries` is kept at VISIBLE-day indexing and hoisted out of the guard
-    // below, because the crosshair reads it by day index. `wrPoints` cannot serve
-    // that purpose: it SKIPS null days, so its indices drift out of alignment
-    // with the days for any player whose lifetime origin falls inside the window.
+    // below, because the readout reads it by day index. `wrPts` cannot serve that
+    // purpose: it SKIPS null days, so its indices drift out of alignment with the
+    // days for any player whose lifetime origin falls inside the window.
     const wrPad = 2;
     const wrSeries: (number | null)[] = new Array(visible.length).fill(null);
-    const wrPoints: string[] = [];
-    let wrY: ((v: number) => number) | null = null;
+    const wrPts: { x: number; y: number }[] = [];
     if (
         lifetimeBattles != null && lifetimeBattles > 0
         && lifetimeWinRate != null
@@ -721,18 +743,22 @@ const InlineSparkline: React.FC<{
             const padding = range * 0.15 + 0.0001;
             const yMin = minV - padding;
             const span = (maxV + padding) - yMin;
-            wrY = (v: number) => wrPad + (1 - (v - yMin) / span) * (H - 2 * wrPad);
             wrSeries.forEach((v, i) => {
                 if (v == null) return;
-                wrPoints.push(`${centerX(i).toFixed(2)},${wrY!(v).toFixed(2)}`);
+                wrPts.push({ x: centerX(i), y: wrPad + (1 - (v - yMin) / span) * (H - 2 * wrPad) });
             });
         }
     }
+    const wrPoints = wrPts.map(p => `${p.x.toFixed(2)},${p.y.toFixed(2)}`);
 
-    // Crosshair. `hoverIdx` survives a domain change (the 30d↔60d pill glide),
-    // so clamp on read rather than resetting — the rule stays under the cursor
-    // instead of vanishing mid-transition.
-    const hovered = hoverIdx == null ? null : Math.max(0, Math.min(shown - 1, hoverIdx));
+    // Crosshair. The rule sits wherever the pointer is; the READOUT and the bar
+    // halo snap to the nearest bar CENTRE, so the gaps between bars still resolve
+    // to a day rather than to nothing, and the halo says which day the numbers
+    // above belong to while the rule moves continuously between them.
+    const crossX = hoverX == null ? null : Math.max(0, Math.min(W, hoverX));
+    const hovered = crossX == null
+        ? null
+        : Math.max(0, Math.min(shown - 1, Math.round((crossX - barW / 2) / (barW + gap))));
     // Idle readout: the newest day carrying battles, so the row says something
     // true before the reader ever moves the mouse.
     let idleIdx = shown - 1;
@@ -747,15 +773,42 @@ const InlineSparkline: React.FC<{
             readIdx > 0 ? wrSeries[readIdx - 1] ?? null : null,
         )
         : null;
-    // Pointer → day. Nearest bar CENTRE, so the gaps between bars resolve to
-    // whichever bar the cursor is closest to rather than to nothing. Measured
-    // off the wrapper div, whose box is the SVG's; hit-testing the bars
-    // themselves would drop every gap pixel.
+    // The dot rides the WR line itself, interpolated between the two data points
+    // the rule falls between — not parked on the nearest one. Snapping it would
+    // make it stutter along a line the rule crosses smoothly. Outside the drawn
+    // span (a lifetime origin inside the window leaves the left end blank) there
+    // is no line to sit on, so there is no dot.
+    let dotY: number | null = null;
+    if (crossX != null && wrPts.length >= 2 && crossX >= wrPts[0].x && crossX <= wrPts[wrPts.length - 1].x) {
+        for (let i = 0; i < wrPts.length - 1; i += 1) {
+            const a = wrPts[i];
+            const b = wrPts[i + 1];
+            if (crossX >= a.x && crossX <= b.x) {
+                const t = b.x === a.x ? 0 : (crossX - a.x) / (b.x - a.x);
+                dotY = a.y + (b.y - a.y) * t;
+                break;
+            }
+        }
+    }
+    // Pointer → viewBox x, measured off the wrapper div, whose box is the SVG's.
+    // Hit-testing the bars themselves would drop every gap pixel.
     const handlePointer = (e: React.PointerEvent<HTMLDivElement>) => {
         const rect = e.currentTarget.getBoundingClientRect();
         if (rect.width <= 0) return;
-        const vx = ((e.clientX - rect.left) / rect.width) * W;
-        setHoverIdx(Math.max(0, Math.min(shown - 1, Math.round((vx - barW / 2) / (barW + gap)))));
+        pending.current = ((e.clientX - rect.left) / rect.width) * W;
+        if (frame.current != null) return;
+        frame.current = requestAnimationFrame(() => {
+            frame.current = null;
+            if (pending.current != null) setHoverX(pending.current);
+        });
+    };
+    const clearPointer = () => {
+        if (frame.current != null) {
+            cancelAnimationFrame(frame.current);
+            frame.current = null;
+        }
+        pending.current = null;
+        setHoverX(null);
     };
 
     // The card mounts with an all-zero padded window first, then the real days
@@ -773,9 +826,11 @@ const InlineSparkline: React.FC<{
     // key — a crosshair sweep must not re-trigger the draw-reveal (which is
     // also the animationend signal the Insights tabs gate on).
     const wrEntranceKey = `${entranceKey}:${shown}`;
-    const crossX = hovered != null ? centerX(hovered) : null;
-    const dotY = hovered != null && wrY != null && wrSeries[hovered] != null
-        ? wrY(wrSeries[hovered]!)
+    // Inner halo geometry for the hovered day. Skipped on an empty day, whose
+    // bar is a 2px stub a 1px halo would fill solid; the rule marks those.
+    const haloDay = hovered != null ? visible[hovered] : null;
+    const halo = haloDay != null && haloDay.battles > 0
+        ? { x: hovered! * (barW + gap), ...barRect(haloDay) }
         : null;
 
     return (
@@ -790,7 +845,7 @@ const InlineSparkline: React.FC<{
                 data-testid="strip-hit-area"
                 className="relative"
                 onPointerMove={handlePointer}
-                onPointerLeave={() => setHoverIdx(null)}
+                onPointerLeave={clearPointer}
             >
                 <svg
                     viewBox={`0 0 ${W} ${H}`}
@@ -812,12 +867,7 @@ const InlineSparkline: React.FC<{
                     <g key={entranceKey}>
                         {days.map((d, i) => {
                             const x = (i - offset) * (barW + gap);
-                            // Clamp the bar to the capped domain so an over-cap day pins to
-                            // full height instead of overflowing the chart.
-                            const totalH = d.battles === 0
-                                ? 2
-                                : Math.max(4, Math.min(1, d.battles / maxBattles) * (H - 2));
-                            const totalY = H - totalH;
+                            const { h: totalH, y: totalY } = barRect(d);
                             const winsH = d.battles > 0 ? (d.wins / d.battles) * totalH : 0;
                             const winsY = H - winsH;
                             const wr = d.battles > 0 ? (d.wins / d.battles) * 100 : null;
@@ -844,6 +894,37 @@ const InlineSparkline: React.FC<{
                             );
                         })}
                     </g>
+                    {/* Inner halo on the hovered day. An SVG stroke straddles the
+                        path, so a plain 1px outline would grow the bar by half a
+                        pixel on every side. Drawing it at 2px and clipping to the
+                        bar's own rect throws the outer half away, leaving exactly
+                        1px INSIDE the bar's existing footprint — the bar's outer
+                        dimensions do not change. non-scaling-stroke keeps it 1
+                        device pixel on both axes despite the ~8.5x x-stretch. */}
+                    {halo != null && (
+                        <>
+                            <defs>
+                                <clipPath id={haloClipId}>
+                                    <rect x={halo.x} y={halo.y} width={barW} height={halo.h} rx="0.5" />
+                                </clipPath>
+                            </defs>
+                            <rect
+                                data-testid="strip-bar-halo"
+                                x={halo.x}
+                                y={halo.y}
+                                width={barW}
+                                height={halo.h}
+                                rx="0.5"
+                                fill="none"
+                                stroke="var(--text-strong)"
+                                strokeWidth={2}
+                                strokeOpacity={0.75}
+                                vectorEffect="non-scaling-stroke"
+                                clipPath={`url(#${haloClipId})`}
+                                pointerEvents="none"
+                            />
+                        </>
+                    )}
                     {/* Crosshair rule, drawn over the bars and under the WR line so
                         the line it is reading stays on top. */}
                     {crossX != null && (
@@ -892,8 +973,8 @@ const InlineSparkline: React.FC<{
                     )}
                     {wrPoints.length === 1 && (
                         <circle
-                            cx={Number(wrPoints[0].split(',')[0])}
-                            cy={Number(wrPoints[0].split(',')[1])}
+                            cx={wrPts[0].x}
+                            cy={wrPts[0].y}
                             r={1.75}
                             fill="var(--accent-secondary-mid)"
                             vectorEffect="non-scaling-stroke"

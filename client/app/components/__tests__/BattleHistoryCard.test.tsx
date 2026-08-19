@@ -274,7 +274,13 @@ describe('BattleHistoryCard', () => {
         const clientXForIndex = (i: number): number =>
             ((i * (barW + gap) + barW / 2) / 100) * WIDTH;
 
-        fireEvent.pointerMove(hit, { clientX: clientXForIndex(26) });
+        // The crosshair coalesces pointer events onto an animation frame, so let
+        // the frame run before reading the readout back.
+        const hoverIndex = async (i: number): Promise<void> => {
+            fireEvent.pointerMove(hit, { clientX: clientXForIndex(i) });
+            await act(async () => { await new Promise((r) => setTimeout(r, 32)); });
+        };
+        await hoverIndex(26);
         const readout = () => screen.getByTestId('strip-readout').textContent ?? '';
         expect(readout()).toContain(utcDay(3));
         expect(readout()).toContain('130W / 120L');
@@ -283,16 +289,37 @@ describe('BattleHistoryCard', () => {
 
         // Mousing one bar right moves the readout to the next day, and a sub-cap
         // day carries no cap note.
-        fireEvent.pointerMove(hit, { clientX: clientXForIndex(28) });
+        await hoverIndex(28);
         expect(readout()).toContain(utcDay(1));
         expect(readout()).toContain('12W / 13L');
         expect(readout()).toContain('48.0%');
         expect(readout()).not.toMatch(/bar capped/);
 
-        // The rule itself only exists while the pointer is over the strip.
+        // The rule exists only while the pointer is over the strip, and the
+        // hovered day carries a 1px inner halo that does NOT change the bar's
+        // footprint: the halo rect matches the bar rect exactly, and reads its
+        // 1px inward from a 2px stroke clipped to that same rect.
         expect(screen.getByTestId('strip-crosshair')).toBeInTheDocument();
+        const halo = screen.getByTestId('strip-bar-halo');
+        const bar = container.querySelector(
+            '.sparkline-bar-rise[data-battles="25"] rect[fill="rgba(120,120,120,0.25)"]',
+        )!;
+        for (const attr of ['x', 'y', 'width', 'height']) {
+            expect(halo.getAttribute(attr)).toBe(bar.getAttribute(attr));
+        }
+        expect(halo.getAttribute('stroke-width')).toBe('2');
+        expect(halo.getAttribute('clip-path')).toMatch(/^url\(#sparkline-halo-/);
+        expect(halo.getAttribute('fill')).toBe('none');
+
+        // An empty day gets no halo — its bar is a 2px stub a 1px inset would
+        // fill solid; the rule alone marks those.
+        await hoverIndex(5);
+        expect(screen.getByTestId('strip-readout').textContent).toContain('no battles');
+        expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
+
         fireEvent.pointerLeave(hit);
         expect(screen.queryByTestId('strip-crosshair')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
         // ...but the readout row stays mounted (fixed height), falling back to
         // the newest day carrying battles so nothing below it shifts.
         expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(0));
