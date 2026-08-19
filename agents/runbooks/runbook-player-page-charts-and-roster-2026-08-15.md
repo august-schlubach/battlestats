@@ -2,7 +2,7 @@
 
 _Created: 2026-08-15_
 _Context: extracted verbatim-in-substance from `CLAUDE.md`'s "Key frontend patterns" block during the 2026-08-15 doc-estate pass. This material had no owning document — it was ~700 words of always-loaded context describing component behavior, and the only nearby docs (`runbook-mobile-player-detail-charts.md`, `archive/runbook-tier-type-correlation-rework-2026-07-01.md`) describe components that no longer exist._
-_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9._
+_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill added 2026-08-19._
 
 ## Purpose
 
@@ -66,6 +66,35 @@ were **removed backend-side in 4.5.5** once nothing read them. With them went
 `battles_json` and never warms. `X-Tier-Type-Pending` survives for the one
 remaining case: a player whose battles were never fetched (`battles_json is None`,
 which is **distinct from `[]`** — that distinction has caused a bug before).
+
+## BattleHistoryCard — the window pill is sticky (2026-08-19)
+
+The Day / Week / Month / 60d pill row on the Activity tab is remembered in
+`localStorage` under `battlestats:battle-history:window:<realm>:<player>:<mode>`
+— the same `(realm, lowercased name, mode)` scope the treemap color metric uses,
+and for the same reasons: a name is a different account on another realm, a link
+differing only in case is the same account, and the page mounts this card twice
+(Activity = random, Ranked = ranked) so one tab's pick must not move the other.
+
+Three constraints shape the implementation, and each is load-bearing:
+
+1. **The value is read in an effect, never in the `useState` initializer.**
+   `localStorage` is client-only; reading it during the first render desyncs SSR
+   from CSR. Same rule as the treemap pref.
+2. **Both fetches are gated on the pref having resolved for the current scope**
+   (`windowPrefScope !== prefScope` → return). Gating the main fetch is what
+   stops a remembered Week from costing two round trips — one for the default,
+   one for the correction. The strip fetch does not depend on the stored pick and
+   is gated only to preserve fetch ORDER: the window the reader is waiting on
+   must reach the priority queue before the constant backdrop.
+3. **Only windows with a pill are honoured on read.** `year` is a valid
+   `BattleHistoryWindow` the backend still accepts but no pill exposes; restoring
+   it would strand the reader on a window they can neither see selected nor leave
+   by clicking the pill they are on.
+
+A restored pick counts as an explicit pick (`userPickedWindow`) **only when it
+differs from the default** — otherwise remembering `60d` would defeat the
+standalone card's no-battles collapse and surface empty cards.
 
 ## The other player-page figures
 
