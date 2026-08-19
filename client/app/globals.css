@@ -164,6 +164,23 @@ body {
   to { transform: scaleY(1); }
 }
 
+/* Domain glide. The strip shows 30 days for Day/Week/Month and 60 for the 60d
+   pill; every day it holds stays mounted at both settings (the ones outside the
+   shown domain sit at a negative x and are clipped by the viewport), so the
+   change is a move rather than a remount. `x` and `width` are SVG geometry
+   PROPERTIES — animatable as CSS since SVG2, which is what lets the bars glide
+   without a JS tween. Duration matches the bracket and the bar-rise so the
+   strip, its measure line and its bars settle as one motion. */
+.sparkline-bar-rise rect {
+  transition: x 410ms ease, width 410ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sparkline-bar-rise rect {
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* No rise — bars at full height immediately. */
   .sparkline-bar-rise {

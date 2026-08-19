@@ -2,7 +2,7 @@
 
 _Created: 2026-08-15_
 _Context: extracted verbatim-in-substance from `CLAUDE.md`'s "Key frontend patterns" block during the 2026-08-15 doc-estate pass. This material had no owning document — it was ~700 words of always-loaded context describing component behavior, and the only nearby docs (`runbook-mobile-player-detail-charts.md`, `archive/runbook-tier-type-correlation-rework-2026-07-01.md`) describe components that no longer exist._
-_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill added 2026-08-19._
+_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1)._
 
 ## Purpose
 
@@ -66,6 +66,57 @@ were **removed backend-side in 4.5.5** once nothing read them. With them went
 `battles_json` and never warms. `X-Tier-Type-Pending` survives for the one
 remaining case: a player whose battles were never fetched (`battles_json is None`,
 which is **distinct from `[]`** — that distinction has caused a bug before).
+
+## BattleHistoryCard — the strip domain, the default, and the fallback (2026-08-19, v5.4.1)
+
+**The strip shows 30 days on Day/Week/Month and 60 on the 60d pill.** It still
+HOLDS all 60 at every setting: days outside the shown domain are positioned at a
+negative x and clipped by the viewport, never unmounted. That is what makes the
+change a glide in both directions — bars keep their DOM nodes (keyed by date) and
+move under a CSS transition on `x`/`width` (SVG2 geometry properties, animatable
+as CSS; see `.sparkline-bar-rise rect` in globals.css, 410ms to match the bracket
+and the bar-rise). The WR polyline cannot transition — `points` is not an
+animatable property — so it re-runs its left-to-right draw on a domain change,
+which reads as redrawing over the new span rather than snapping.
+
+Every scale is computed over the VISIBLE slice, not the held array: the bar cap
+and the WR line's auto-range both use `days.slice(offset)`. Carrying the 60-day
+maximum into the 30-day view would flatten it against a peak the reader can no
+longer see. This is the reason the strip is re-rendered per domain rather than
+pan-and-zoomed with one transform, which would have been cheaper to animate.
+
+**The card opens on Month, not 60d.** `DEFAULT_BATTLE_HISTORY_WINDOW = 'month'`.
+Two consequences worth knowing:
+
+- **The strip no longer shares the default's URL.** It always fetches
+  `STRIP_FETCH_WINDOW` (`sixty`) — the span the 60d pill animates out to, and the
+  data the fallback reads. So a player page now issues TWO battle-history
+  requests (month for the view, sixty for the strip) where it issued one. They
+  cannot be collapsed: totals and `by_ship` are aggregated server-side per
+  window, so a 30d view is not derivable from a 60d payload. Against a request
+  queue capped at 6, that is a real +1.
+- **A player with nothing in 30 days is promoted to 60d** once the strip lands,
+  and the narrower pills gray themselves through the usual empty-window rule.
+  This is a DERIVATION, not a pick: it must never call `writeWindowPref`, or a
+  returning player stays pinned to 60d long after Month becomes the better view.
+  It defers to a stored pick and to any pill touched this session.
+
+**Two ordering traps this arrangement creates**, both fixed and both regression-tested:
+
+1. **Availability must be judged on the 60-day strip payload, not the selected
+   window.** Reading it off the month payload reported "no activity" for a
+   30d-empty player, the parent disabled the Activity tab, and the fallback never
+   ran — the tab went dark for exactly the population the fallback serves. Found
+   against a live player (`Almighty_Magoo` NA: 0 battles in 30d, 1 in 60d), not
+   in tests.
+2. **The standalone no-battles collapse is gated on `stripLoaded`.** Without it
+   the card returns null on the empty month payload and then reappears when the
+   fallback lands — a visible flash for the same population.
+
+A consequence to expect rather than treat as a bug: the bracket dissolves
+whenever the span equals the shown domain, so with a 30-day backdrop it is
+visible only on Day and Week — at Month it now reads as full-width and
+transparent, as it already did at 60d.
 
 ## BattleHistoryCard — the window pill is sticky (2026-08-19)
 

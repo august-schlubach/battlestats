@@ -123,8 +123,24 @@ export const BATTLE_HISTORY_FETCH_TTL_MS = 60_000;
 // can never drift off the window the card actually mounts with — a drift would
 // cost every player view a second query on this endpoint family rather than the
 // dedup the prefetch exists to get. Also the strip's fixed domain (see
-// STRIP_DOMAIN_DAYS), since the strip is now always the full 60 days.
-export const DEFAULT_BATTLE_HISTORY_WINDOW = 'sixty';
+// STRIP_DOMAIN_DAYS).
+//
+// The card OPENS on Month (30 days). `sixty` is one pill click away and is also
+// the automatic fallback for a player with nothing in the last 30 days — see
+// the fallback effect in the component. Note this is no longer the window the
+// strip fetches: the strip always pulls STRIP_FETCH_WINDOW (60d) so the 60d
+// pill has its data ready to animate into and the fallback has something to
+// decide on. That costs a second request per card — month for the view, sixty
+// for the strip — which cannot be collapsed, because totals and by_ship are
+// aggregated server-side per window and a 30d view is not derivable from a
+// 60d payload.
+export const DEFAULT_BATTLE_HISTORY_WINDOW = 'month';
+
+// The window the trend strip always fetches, independent of the pill. Wider
+// than the default view on purpose: the strip is the backdrop the 60d pill
+// animates out to, and the emptiness of the trailing 30 days (which decides
+// the fallback) is read off it.
+export const STRIP_FETCH_WINDOW = 'sixty';
 
 export const battleHistoryFetchUrl = (
     playerName: string, realm: string,
@@ -154,7 +170,7 @@ export const battleHistoryCacheKey = (
  */
 export const prefetchBattleHistory = (playerName: string, realm: string, signal?: AbortSignal): void => {
     void fetchSharedJson<BattleHistoryPayload>(battleHistoryFetchUrl(playerName, realm), {
-        label: 'BattleHistoryCard:sixty:random',
+        label: `BattleHistoryCard:${DEFAULT_BATTLE_HISTORY_WINDOW}:random`,
         ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
         cacheKey: battleHistoryCacheKey(playerName, realm),
         responseHeaders: ['X-Ranked-Observation-Pending', 'X-Ship-Pop-Pending'],
@@ -457,8 +473,8 @@ const STRIP_BAR_GAP = 0.5;
 const stripBarWidth = (n: number): number =>
     (STRIP_VIEW_W - STRIP_BAR_GAP * (n - 1)) / n;
 
-// A measure line under the strip reporting which slice of the fixed
-// STRIP_DOMAIN_DAYS domain the selected window pill actually covers: a rule with
+// A measure line under the strip reporting which slice of the strip's SHOWN
+// domain the selected window pill actually covers: a rule with
 // a tick at each end, right-anchored to the newest day and growing leftward into
 // the past as the window widens.
 //
@@ -468,12 +484,14 @@ const stripBarWidth = (n: number): number =>
 // motion is the whole point. Only opacity and the group transform are driven from
 // state. At the full domain the bracket expands to the strip's entire width as it
 // fades to nothing, dissolving exactly as it stops carrying information.
-const WindowRangeBracket: React.FC<{ spanDays: number }> = ({ spanDays }) => {
+const WindowRangeBracket: React.FC<{ spanDays: number; domainDays: number }> = ({
+    spanDays, domainDays,
+}) => {
     const H = 9;
-    const barW = stripBarWidth(STRIP_DOMAIN_DAYS);
+    const barW = stripBarWidth(domainDays);
     // Left edge of the span's first bar. The right edge stays pinned at
     // STRIP_VIEW_W — the newest day — so the bracket only ever grows leftward.
-    const left = (STRIP_DOMAIN_DAYS - spanDays) * (barW + STRIP_BAR_GAP);
+    const left = (domainDays - spanDays) * (barW + STRIP_BAR_GAP);
     const scaleX = (STRIP_VIEW_W - left) / STRIP_VIEW_W;
     return (
         <svg
@@ -501,7 +519,7 @@ const WindowRangeBracket: React.FC<{ spanDays: number }> = ({ spanDays }) => {
                 className="window-range-bracket"
                 style={{
                     transform: `translate(${left.toFixed(3)}px, 0px) scale(${scaleX.toFixed(5)}, 1)`,
-                    opacity: spanDays >= STRIP_DOMAIN_DAYS ? 0 : 1,
+                    opacity: spanDays >= domainDays ? 0 : 1,
                 }}
                 stroke="var(--text-muted)"
                 strokeWidth={2}
@@ -530,11 +548,14 @@ const WindowRangeBracket: React.FC<{ spanDays: number }> = ({ spanDays }) => {
 
 const InlineSparkline: React.FC<{
     days: BattleHistoryByDay[];
+    /** How many trailing days are SHOWN. `days` may hold more; the rest are
+     *  positioned off the left edge and clipped, so a domain change glides. */
+    domainDays: number;
     ariaLabel: string;
     lifetimeBattles?: number | null;
     lifetimeWinRate?: number | null;
 }> = ({
-    days, ariaLabel, lifetimeBattles, lifetimeWinRate,
+    days, domainDays, ariaLabel, lifetimeBattles, lifetimeWinRate,
 }) => {
     // Stable per-instance id for the WR-line draw-reveal clipPath (colons from
     // useId aren't valid in a url(#...) fragment, so strip them).
@@ -543,14 +564,25 @@ const InlineSparkline: React.FC<{
     const W = STRIP_VIEW_W;
     const H = 64;
     const gap = STRIP_BAR_GAP;
-    const barW = stripBarWidth(days.length);
+    // Geometry is the SHOWN domain's, not the array's. `offset` is how many
+    // leading days fall outside it; those bars get a negative x and are clipped
+    // by the viewport rather than unmounted, so widening/narrowing the domain
+    // moves every bar along one continuous path instead of popping half of them
+    // in and out of existence.
+    const shown = Math.min(domainDays, days.length);
+    const offset = days.length - shown;
+    const barW = stripBarWidth(shown);
+    // Every scale below is computed over the VISIBLE days only. Carrying the
+    // 60-day maximum into the 30-day view would flatten it against a peak the
+    // reader can no longer see.
+    const visible = days.slice(offset);
     // Hard-cap the bar y-domain at 50 battles/day. Early daily-data backfills
     // observed multi-day gaps as a single spike (e.g. 250 games on one day),
     // which flattened every normal <20-game day to no visible height. We pin the
     // domain to 50 (auto-scaling below that when no day reaches it) and clamp any
     // over-cap day to full height; the true count stays in the tooltip.
     const BAR_CAP = 50;
-    const maxBattles = Math.min(BAR_CAP, Math.max(1, ...days.map(d => d.battles)));
+    const maxBattles = Math.min(BAR_CAP, Math.max(1, ...visible.map(d => d.battles)));
 
     // Overlay: a continuous line tracing the player's OVERALL (lifetime) win rate
     // over the window — not the per-day session WR. Anchored to the lifetime
@@ -570,11 +602,11 @@ const InlineSparkline: React.FC<{
     ) {
         let cumBattles = lifetimeBattles;
         let cumWins = Math.round(lifetimeBattles * (lifetimeWinRate / 100));
-        const series: (number | null)[] = new Array(days.length).fill(null);
-        for (let i = days.length - 1; i >= 0; i -= 1) {
+        const series: (number | null)[] = new Array(visible.length).fill(null);
+        for (let i = visible.length - 1; i >= 0; i -= 1) {
             series[i] = cumBattles > 0 ? (cumWins / cumBattles) * 100 : null;
-            cumBattles -= days[i].battles;
-            cumWins -= days[i].wins;
+            cumBattles -= visible[i].battles;
+            cumWins -= visible[i].wins;
         }
         const vals = series.filter((v): v is number => v != null);
         if (vals.length >= 1) {
@@ -600,6 +632,12 @@ const InlineSparkline: React.FC<{
     // polls (the key is stable while data is present, so it doesn't re-fire).
     const hasBattleData = days.some(d => d.battles > 0);
     const entranceKey = hasBattleData ? 'ready' : 'empty';
+    // The bars glide between domains (a CSS transition on x/width — they keep
+    // their DOM nodes, keyed by date). The WR polyline cannot: `points` is not
+    // an animatable property. So it re-runs its left-to-right draw whenever the
+    // shown domain changes, which reads as the line redrawing itself over the
+    // new span rather than snapping to it.
+    const wrEntranceKey = `${entranceKey}:${shown}`;
 
     return (
         <svg
@@ -615,7 +653,7 @@ const InlineSparkline: React.FC<{
                 lands (the padded all-zero stubs they mount with don't count). */}
             <g key={entranceKey}>
                 {days.map((d, i) => {
-                    const x = i * (barW + gap);
+                    const x = (i - offset) * (barW + gap);
                     // Clamp the bar to the capped domain so an over-cap day pins to
                     // full height instead of overflowing the chart.
                     const totalH = d.battles === 0
@@ -657,7 +695,7 @@ const InlineSparkline: React.FC<{
                     <defs>
                         <clipPath id={wrClipId}>
                             <rect
-                                key={entranceKey}
+                                key={wrEntranceKey}
                                 className="sparkline-wr-reveal"
                                 x={0}
                                 y={0}
@@ -756,6 +794,18 @@ const WINDOW_HEADER_FALLBACK: Record<BattleHistoryWindow, string> = {
 // reported instead by the WindowRangeBracket beneath the strip.
 export const STRIP_DOMAIN_DAYS = 60;
 
+// How many of those days the strip actually SHOWS. Day/Week/Month read against
+// a 30-day backdrop — the span they measure is legible there, where against 60
+// a single day is a sliver. Picking 60d widens the backdrop to the full held
+// domain, animated (the bars glide, see .sparkline-bar-rise rect in globals.css).
+//
+// The strip still holds all STRIP_DOMAIN_DAYS days at every setting; the days
+// outside the shown domain are positioned off the left edge of the viewBox and
+// clipped, never unmounted. That is what makes the change a glide in BOTH
+// directions rather than a glide one way and a pop the other.
+export const stripDomainForWindow = (w: BattleHistoryWindow): number =>
+    (WINDOW_SPAN_DAYS[w] > 30 ? STRIP_DOMAIN_DAYS : 30);
+
 // Days each window pill covers — the span the bracket brackets. Clamped against
 // STRIP_DOMAIN_DAYS at the call site so `year` (still typed, no pill exposes it)
 // cannot drive the bracket off the left edge.
@@ -838,6 +888,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // so a still-loading card never dims a pill on stale/absent data — pills
     // stay enabled until the data is authoritative (the safe direction).
     const [stripLoaded, setStripLoaded] = useState(false);
+    // The strip's own payload, and whether its fetch has SETTLED (resolved or
+    // failed). `stripLoaded` deliberately stays false on failure so the
+    // empty-pill rule keeps pills enabled on absent data; availability needs the
+    // opposite — it must still latch if the strip never arrives.
+    const [stripPayload, setStripPayload] = useState<BattleHistoryPayload | null>(null);
+    const [stripSettled, setStripSettled] = useState(false);
     // Lifetime baseline from the month fetch, used to anchor the sparkline's
     // overall-WR overlay line. Null in modes without a lifetime (e.g. combined).
     const [stripLifetime, setStripLifetime] = useState<{
@@ -960,6 +1016,8 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // acting on the previous player's data (a refresh-poll re-fetch keeps it).
     useEffect(() => {
         setStripLoaded(false);
+        setStripSettled(false);
+        setStripPayload(null);
     }, [playerName, realm, mode]);
 
     // Separate fetch backing the trend strip, independent of the window driving
@@ -975,12 +1033,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         if (windowPrefScope !== prefScope) return;
         let cancelled = false;
         fetchSharedJson<BattleHistoryPayload>(
-            battleHistoryFetchUrl(playerName, realm, DEFAULT_BATTLE_HISTORY_WINDOW, mode),
+            battleHistoryFetchUrl(playerName, realm, STRIP_FETCH_WINDOW, mode),
             {
                 label: `BattleHistoryCard:sparkline`,
                 ttlMs: BATTLE_HISTORY_FETCH_TTL_MS,
                 cacheKey: battleHistoryCacheKey(
-                    playerName, realm, DEFAULT_BATTLE_HISTORY_WINDOW, mode, 0, refreshNonce,
+                    playerName, realm, STRIP_FETCH_WINDOW, mode, 0, refreshNonce,
                 ),
                 signal: requestSignal,
             },
@@ -992,12 +1050,46 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
                     battles: data.totals?.lifetime_battles ?? null,
                     winRate: data.totals?.lifetime_win_rate ?? null,
                 });
+                setStripPayload(data);
                 setStripLoaded(true);
+                setStripSettled(true);
             })
-            .catch(() => { /* sparkline stays empty on error */ });
+            .catch(() => {
+                // Sparkline stays empty on error — but availability must still
+                // latch, or the hosting tab sits in its default state forever.
+                if (!cancelled) setStripSettled(true);
+            });
         return () => { cancelled = true; };
     }, [playerName, realm, mode, refreshNonce, requestSignal,
         prefScope, windowPrefScope]);
+
+    // Fallback to 60d for a player with nothing in the last 30 days. The card
+    // opens on Month; if that span is empty but the wider one is not, showing an
+    // empty Month is strictly worse than showing the battles that exist — so the
+    // strip's own data promotes the view once it lands. The other pills then dim
+    // themselves through the usual empty-window rule.
+    //
+    // This is a DERIVATION, not a pick, and the distinction is the whole reason
+    // it does not call writeWindowPref: persisting it would pin a returning
+    // player to 60d forever, long after they start playing again and Month is
+    // the better view. It also defers to a real stored pick and to any pill the
+    // reader has touched this session.
+    useEffect(() => {
+        if (!stripLoaded) return;
+        if (windowPrefScope !== prefScope) return;
+        if (userPickedWindow || readWindowPref(prefScope) !== null) return;
+        if (window !== DEFAULT_BATTLE_HISTORY_WINDOW) return;
+        const trailing = (n: number): number =>
+            buildWindowedDays(stripByDay, n).reduce((sum, d) => sum + (d.battles || 0), 0);
+        if (trailing(WINDOW_SPAN_DAYS[DEFAULT_BATTLE_HISTORY_WINDOW]) === 0
+            && trailing(STRIP_DOMAIN_DAYS) > 0) {
+            setWindow('sixty');
+        }
+        // `window` is deliberately absent from the deps: this runs on the strip
+        // landing, and re-running it when the window changes would fight a
+        // reader who clicks back to an empty Month on purpose.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [stripLoaded, stripByDay, prefScope, windowPrefScope, userPickedWindow]);
 
     // Availability is a one-shot, stable signal: report it from the FIRST
     // resolved payload (or error) per (player, realm), then latch. Basing it on
@@ -1015,13 +1107,22 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             onAvailabilityChange(false, []);
             return;
         }
-        if (!payload) return;
+        // Judge on the WIDEST span the card can show — the strip's 60 days —
+        // not on whichever window is selected. The card opens on Month, so a
+        // player whose last battles were 45 days ago has an empty month payload;
+        // reading availability off that told the parent "no activity" and got
+        // the Activity tab disabled before the 30d-empty fallback could promote
+        // them to 60d. That is precisely the population the fallback exists for.
+        // Falls back to the main payload only if the strip never arrives.
+        if (!stripSettled) return;
+        const judged = stripPayload ?? payload;
+        if (!judged) return;
         availabilityReportedRef.current = true;
         onAvailabilityChange(
-            battleHistoryIndicatesActivity(payload, mode),
-            payload.available_modes ?? ['random'],
+            battleHistoryIndicatesActivity(judged, mode),
+            judged.available_modes ?? ['random'],
         );
-    }, [payload, error, mode, onAvailabilityChange]);
+    }, [payload, stripPayload, stripSettled, error, mode, onAvailabilityChange]);
 
     const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({
         key: 'battles', direction: 'desc',
@@ -1138,7 +1239,12 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // Embedded: never collapse to null here — the hosting tab is already active,
     // so render the chrome (sparkline/header/pills/"no battles") instead. The
     // parent dark-outs the tab and switches away when availability is false.
-    if (!embedded && (
+    // `stripLoaded` is load-bearing here, not defensive: the fallback below
+    // switches a 30d-empty player to 60d only once the strip resolves. Without
+    // the gate the card collapses to null on the empty month payload first and
+    // then reappears when the fallback lands — a visible flash for exactly the
+    // population the fallback exists to serve.
+    if (!embedded && stripLoaded && (
         !hasBattles
         && window === DEFAULT_BATTLE_HISTORY_WINDOW && !userPickedWindow
     )) {
@@ -1150,16 +1256,19 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // pre-retention-fill region simply renders empty by design. The same array
     // backs the empty-pill derivation below via trailing slices.
     const stripDays = buildWindowedDays(stripByDay, STRIP_DOMAIN_DAYS);
-    const spanDays = Math.min(WINDOW_SPAN_DAYS[window], STRIP_DOMAIN_DAYS);
+    // Day/Week/Month read against 30 days; 60d widens to the full held domain.
+    const stripDomain = stripDomainForWindow(window);
+    const spanDays = Math.min(WINDOW_SPAN_DAYS[window], stripDomain);
     const sparkline = (
         <>
             <InlineSparkline
                 days={stripDays}
-                ariaLabel={`${STRIP_DOMAIN_DAYS}-day battle activity`}
+                domainDays={stripDomain}
+                ariaLabel={`${stripDomain}-day battle activity`}
                 lifetimeBattles={stripLifetime.battles}
                 lifetimeWinRate={stripLifetime.winRate}
             />
-            <WindowRangeBracket spanDays={spanDays} />
+            <WindowRangeBracket spanDays={spanDays} domainDays={stripDomain} />
         </>
     );
     // Empty-window pill disable. Day emptiness is the backend 24h flag; week/
