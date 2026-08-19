@@ -598,7 +598,12 @@ const StripReadoutRow: React.FC<{ r: StripReadout | null; live: boolean }> = ({ 
     return (
         <div
             data-testid="strip-readout"
-            className="flex h-[22px] items-center gap-2 overflow-hidden whitespace-nowrap font-['Courier_New',Courier,monospace] text-[14px] leading-[22px] tabular-nums"
+            // Typeface, size, and weight match the per-ship table's ship-name
+            // cell: the body face (Inter) at text-base/font-medium, not the
+            // Courier the numeric columns use. `tabular-nums` stays — the
+            // crosshair sweeps continuously, and proportional digits would make
+            // the row twitch sideways on every frame.
+            className="flex h-6 items-center gap-2 overflow-hidden whitespace-nowrap text-base font-medium leading-6 tabular-nums"
             style={{ opacity: r == null ? 0 : live ? 1 : 0.72 }}
         >
             {r != null && (
