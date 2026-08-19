@@ -238,22 +238,32 @@ def register_periodic_schedules(sender, **kwargs):
     # the now-decommissioned featured boards (2026-06-22, backend removed in 3.0).
     # Retired via _RETIRED_SCHEDULE_NAMES; the task function is gone.
 
-    # -- Rolling T10 Top-Ship-Player snapshot (per realm, striped, every 12h) --
-    # Beat fires twice daily (12h apart); each run recomputes the trailing-window
-    # board so the profile badges + /ship standings evolve through the day (gated
-    # by SHIP_BADGE_SNAPSHOT_ENABLED). Per-realm hour striping keeps the three
-    # ~12s aggregations off each other; each realm runs at realm_hour and
-    # realm_hour+12. NOTE: offsets must be distinct *mod 12* under a 12h period —
-    # REALM_CRAWL_CRON_HOURS (0/6/12, built for 24h schedules) would collide
-    # (eu 0 == asia 12 mod 12), so we stripe via REALM_INTERVAL_OFFSETS*4
-    # (na 0 / eu 4 / asia 8). See agents/runbooks/runbook-ship-badges-rolling-2026-06-14.md.
+    # -- Rolling Top-Ship-Player snapshot (per realm, striped, once daily) --
+    # Beat fires once per realm per day; each run recomputes the trailing-window
+    # board, so the profile badges + /ship standings turn over daily (gated by
+    # SHIP_BADGE_SNAPSHOT_ENABLED). Per-realm hour striping keeps the three
+    # aggregations off each other: na 02:30 / eu 06:30 / asia 10:30 UTC via
+    # REALM_INTERVAL_OFFSETS*4. Those offsets predate this schedule — they were
+    # chosen when the period was 12h and firing hours had to be distinct *mod 12*
+    # (REALM_CRAWL_CRON_HOURS 0/6/12 would have collided, eu 0 == asia 12). Under
+    # a 24h period any distinct-hour striping works; *4 is kept because it is.
+    #
+    # COST (measured 2026-08-18, 45d window, from the background worker journal):
+    # na 98-161s, eu 269-347s, asia 81-167s per run — NOT the "~12s" this comment
+    # claimed for years, which was measured in 2026-06 at a 14d window against a
+    # 3.18M-row BattleEvent (now 14.4M). The aggregation IS the task on na and
+    # ~55-70% of it on eu. Halving the cadence 12h -> 24h on 2026-08-18 is what
+    # paid for the 45d -> 60d window widen; both chained warms
+    # (queue_realm_top_ships_warm, warm_all_ship_pop_avg_damage_task) have their
+    # own daily Beat entries, so a single firing orphans neither.
+    # See agents/runbooks/runbook-ship-standings-60d-rollout-2026-08-18.md.
     ship_badge_hour = int(os.getenv("SHIP_BADGE_SNAPSHOT_HOUR", "2"))
     for realm in sorted(VALID_REALMS):
         realm_hour = (ship_badge_hour +
                       REALM_INTERVAL_OFFSETS.get(realm, 0) * 4) % 24
         ship_badge_schedule, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
-            hour=f"{realm_hour},{(realm_hour + 12) % 24}",
+            hour=str(realm_hour),
             day_of_week="*",
             day_of_month="*",
             month_of_year="*",
@@ -268,7 +278,7 @@ def register_periodic_schedules(sender, **kwargs):
                 "enabled": True,
                 "args": json.dumps([]),
                 "kwargs": json.dumps({"realm": realm}),
-                "description": f"T10 top-player rolling snapshot ({realm.upper()}) — every-12h recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '30')}-day board.",
+                "description": f"Top-player rolling snapshot ({realm.upper()}) — daily recompute of the trailing {os.getenv('SHIP_LEADERBOARD_WINDOW_DAYS', '30')}-day board.",
             },
         )
 

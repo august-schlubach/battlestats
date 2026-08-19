@@ -7323,9 +7323,9 @@ SHIP_POP_ROLLUP_REFRESH_DAYS = 2      # today + yesterday always re-rolled
 
 # The rollup must span the WIDEST window any consumer reads, not merely the
 # ship-combat population window (30d) it was originally built for. The inline
-# ship leaderboard reads SHIP_LEADERBOARD_WINDOW_DAYS — prod 45 (pinned in
-# server/deploy/deploy_to_droplet.sh:787, observed 2026-08-14), with 60 and
-# then 90 on the roadmap.
+# ship leaderboard reads SHIP_LEADERBOARD_WINDOW_DAYS — prod 60 since
+# 2026-08-18 (pinned in server/deploy/deploy_to_droplet.sh:791; was 45 from
+# 2026-07-24), with 90 still on the roadmap.
 #
 # This is load-bearing, not tidiness. Gap repair only reaches dates inside the
 # catch-up span: `rollup_ship_pop_daily_catchup` iterates `cutoff .. today` and
@@ -7339,7 +7339,8 @@ SHIP_POP_ROLLUP_WINDOW_DAYS = max(
 
 # Retention must clear the widest window by enough margin that a gap surviving
 # a few days of failed rollups is still repairable. Derived rather than fixed
-# so the 45 -> 60 -> 90 window transitions cannot outrun it: at a 90d window a
+# so the 45 -> 60 -> 90 window transitions cannot outrun it (60 landed
+# 2026-08-18): at a 90d window a
 # flat 100 would have left only 10 days of slack.
 SHIP_POP_ROLLUP_RETENTION_MARGIN_DAYS = 15
 SHIP_POP_ROLLUP_RETENTION_DAYS = max(
@@ -7374,7 +7375,7 @@ def ship_pop_rollup_covers_window(realm, mode, window_start_d, window_end_d):
 
     That makes coverage a precondition, not a detail. A consumer swapping the
     raw scan for this table must prove the window is complete and fall back
-    otherwise — serving a 40-day sum labelled as a 45-day window is precisely
+    otherwise — serving a 40-day sum labelled as a 60-day window is precisely
     the silent-staleness failure this codebase keeps rediscovering. A realm-day
     with genuinely zero battles would also read as a gap; that is accepted,
     because the fallback is merely slower, never wrong.

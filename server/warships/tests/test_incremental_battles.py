@@ -3101,24 +3101,24 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["totals"]["battles"], 9)
         self.assertEqual(body["totals"]["wins"], 5)
 
-    def test_window_fortyfive_returns_45_days_of_daily_rollups(self):
-        """The `fortyfive` window reads PlayerDailyShipStats with windows=45.
-        Rows inside 45 days are included; the 46-day row is excluded.
+    def test_window_sixty_returns_60_days_of_daily_rollups(self):
+        """The `sixty` window reads PlayerDailyShipStats with windows=60.
+        Rows inside 60 days are included; the 61-day row is excluded.
         """
         today = django_timezone.now().date()
         PlayerDailyShipStats.objects.create(
             player=self.player, date=today, ship_id=42, ship_name="Yamato",
             mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=3,
         )
-        # 44 days old — inside the 45-day window, outside the 30-day month.
+        # 59 days old — inside the 60-day window, outside the 30-day month.
         PlayerDailyShipStats.objects.create(
-            player=self.player, date=today - timedelta(days=44),
+            player=self.player, date=today - timedelta(days=59),
             ship_id=42, ship_name="Yamato",
             mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
         )
-        # 46 days old — outside the 45-day window.
+        # 61 days old — outside the 60-day window.
         PlayerDailyShipStats.objects.create(
-            player=self.player, date=today - timedelta(days=46),
+            player=self.player, date=today - timedelta(days=61),
             ship_id=42, ship_name="Yamato",
             mode=PlayerDailyShipStats.MODE_RANDOM, battles=99, wins=99,
         )
@@ -3126,7 +3126,7 @@ class BattleHistoryEndpointTests(TestCase):
             "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
         ):
             r = self.client.get(
-                "/api/player/api_test/battle-history/?window=fortyfive&mode=random",
+                "/api/player/api_test/battle-history/?window=sixty&mode=random",
             )
         body = r.json()
         self.assertEqual(body["totals"]["battles"], 9)

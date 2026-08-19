@@ -201,25 +201,32 @@ class ObservationFloorRunsFourTimesADayTests(TestCase):
             )
 
 
-class ShipSnapshotFiresTwiceADayTests(TestCase):
-    """The rolling T10 top-ship-player snapshot recomputes every 12h, i.e.
-    twice per day per realm at striped, pairwise-distinct hours."""
+class ShipSnapshotFiresOncePerDayTests(TestCase):
+    """The rolling top-ship-player snapshot recomputes once per realm per day,
+    at striped, pairwise-distinct hours.
 
-    def test_ship_snapshot_fires_twice_per_day(self):
+    Was 2×/day (every 12h) until 2026-08-18. The second firing only refreshed
+    the same `captured_on` intra-day, and at 100-350s per run it was the cheapest
+    thing to give up to pay for the 45d -> 60d window widen. Both chained warms
+    have their own daily Beat entries, so dropping it orphans neither.
+    Runbook: runbook-ship-standings-60d-rollout-2026-08-18.md.
+    """
+
+    def test_ship_snapshot_fires_once_per_day(self):
         for realm in VALID_REALMS:
             row = PeriodicTask.objects.get(name=f"ship-top-player-snapshot-{realm}")
             hour_segments = row.crontab.hour.split(",")
             self.assertEqual(
-                len(hour_segments), 2,
-                f"ship-top-player-snapshot-{realm} should fire 2×/day (every "
-                f"12h), got hour='{row.crontab.hour}'",
+                len(hour_segments), 1,
+                f"ship-top-player-snapshot-{realm} should fire once daily, got "
+                f"hour='{row.crontab.hour}'",
             )
-            # The two firings are exactly 12h apart.
-            hours = sorted(int(h) for h in hour_segments)
-            self.assertEqual(
-                (hours[1] - hours[0]) % 24, 12,
-                f"ship-top-player-snapshot-{realm} firings should be 12h apart, "
-                f"got hour='{row.crontab.hour}'",
+            # A single concrete hour — never a wildcard or a step expression,
+            # either of which would fire far more often than once a day.
+            self.assertTrue(
+                hour_segments[0].isdigit(),
+                f"ship-top-player-snapshot-{realm} hour should be one concrete "
+                f"hour, got hour='{row.crontab.hour}'",
             )
 
     def test_ship_pop_bulk_warm_daily_just_after_midnight(self):
@@ -240,11 +247,12 @@ class ShipSnapshotFiresTwiceADayTests(TestCase):
         self.assertEqual(len(minutes), len(set(minutes)))
 
     def test_ship_snapshot_firings_dont_collide_across_realms(self):
-        # Compare the *set* of firing hours, not the raw "h1,h2" string: under
-        # a 12h period eu (offset 0) and asia (offset 12) would fire at the same
-        # two wall-clock hours while their hour strings ("2,14" vs "14,2") differ.
-        # A no-two-realms-share-a-firing-hour check is what actually guards the
-        # "three ~12s aggregations off each other" property.
+        # Compare the *set* of firing hours rather than the raw hour string.
+        # This mattered acutely under the pre-2026-08-18 12h period, where eu
+        # (offset 0) and asia (offset 12) fired at the same two wall-clock hours
+        # while their hour strings ("2,14" vs "14,2") differed. It still guards
+        # the property that matters — no two realms aggregate at once — now that
+        # each realm fires a single striped hour.
         all_hours = []
         for realm in VALID_REALMS:
             hour = PeriodicTask.objects.get(

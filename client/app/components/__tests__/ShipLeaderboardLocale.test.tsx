@@ -9,7 +9,7 @@ import { LocaleProvider } from '../../context/LocaleContext';
 // rolling" clause was an English literal built in this component and handed
 // to `landing.shipLeaderboard.heading` as an opaque {suffix} string — no
 // dictionary could ever untranslate it, so a Korean/Japanese visitor would
-// have seen "함선 리더보드 · last 45 days rolling" the moment that key shipped
+// have seen "함선 리더보드 · last 60 days rolling" the moment that key shipped
 // translated. These tests render under real ko/ja dictionaries (no
 // translate() mock — see ShipLeaderboardHeadingKey.test.tsx for the marker
 // technique that isolates the wiring itself) and assert the WHOLE heading is
@@ -51,7 +51,7 @@ describe('ShipLeaderboard heading — locale coverage (composed-template blocker
         mockFetch.mockImplementation(() => Promise.resolve({
             data: {
                 realm: 'na', tier: 10, ship_type: 'Battleship', ships: [],
-                window_start: '2026-06-20', window_end: '2026-08-04',
+                window_start: '2026-06-05', window_end: '2026-08-04',
             },
         } as never));
         renderWithLocale();
@@ -59,7 +59,7 @@ describe('ShipLeaderboard heading — locale coverage (composed-template blocker
         const heading = await screen.findByRole('heading', { name: /함선 리더보드/ });
         const ariaLabel = heading.getAttribute('aria-label');
         const visible = visibleHeadingText(heading);
-        expect(ariaLabel).toBe('함선 리더보드 · 최근 45일');
+        expect(ariaLabel).toBe('함선 리더보드 · 최근 60일');
         expect(visible).toBe(ariaLabel);
         expect(ariaLabel).not.toMatch(RAW_TOKEN_LEAK);
         expect(ariaLabel).not.toMatch(ENGLISH_CLAUSE_LEAK);
@@ -78,7 +78,7 @@ describe('ShipLeaderboard heading — locale coverage (composed-template blocker
         mockFetch.mockImplementation(() => Promise.resolve({
             data: {
                 realm: 'na', tier: 10, ship_type: 'Battleship', ships: [],
-                window_start: '2026-06-20', window_end: '2026-08-04',
+                window_start: '2026-06-05', window_end: '2026-08-04',
             },
         } as never));
         renderWithLocale();
@@ -86,7 +86,7 @@ describe('ShipLeaderboard heading — locale coverage (composed-template blocker
         const heading = await screen.findByRole('heading', { name: /艦艇リーダーボード/ });
         const ariaLabel = heading.getAttribute('aria-label');
         const visible = visibleHeadingText(heading);
-        expect(ariaLabel).toBe('艦艇リーダーボード · 直近45日間');
+        expect(ariaLabel).toBe('艦艇リーダーボード · 直近60日間');
         expect(visible).toBe(ariaLabel);
         expect(ariaLabel).not.toMatch(RAW_TOKEN_LEAK);
         expect(ariaLabel).not.toMatch(ENGLISH_CLAUSE_LEAK);

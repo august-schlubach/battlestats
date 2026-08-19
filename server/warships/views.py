@@ -719,10 +719,10 @@ BATTLE_HISTORY_WINDOWS = {
     "day":    {"period": "daily", "windows": 1},
     "week":   {"period": "daily", "windows": 7},
     "month":  {"period": "daily", "windows": 30},
-    # 60/90-day windows landed with the battle-history retention raise
-    # 32→92d (2026-07-20). Sits inside retention (45 < 92) and routes
-    # through the same daily-rollup path as `month`, just wider.
-    "fortyfive": {"period": "daily", "windows": 45},
+    # The extended lookback, second foothold toward the 90d rolling end
+    # state (45d shipped v4.4.0). Sits inside retention (60 < 105) and
+    # routes through the same daily-rollup path as `month`, just wider.
+    "sixty": {"period": "daily", "windows": 60},
     "year":   {"period": "daily", "windows": 365},
 }
 BATTLE_HISTORY_DEFAULT_WINDOW = "week"
@@ -743,7 +743,7 @@ def _battle_history_cache_key(realm: str, player_name: str, period: str,
     # out the Day pill without an extra round-trip.
     # v10: that flag became mode-scoped.
     # v11: the flag is GONE and `day` is a calendar window — the client derives
-    # every pill's emptiness from the 45-day strip it already holds. v10 `day`
+    # every pill's emptiness from the 60-day strip it already holds. v10 `day`
     # entries hold rolling-24h totals under a different period key, so nothing
     # earlier may be served.
     return realm_cache_key(

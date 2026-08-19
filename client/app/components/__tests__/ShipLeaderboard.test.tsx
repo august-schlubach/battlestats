@@ -108,20 +108,20 @@ describe('ShipLeaderboard', () => {
 
     // The section header names the standings window, derived from the served
     // payload's bounds rather than a hardcoded number — so it follows
-    // SHIP_LEADERBOARD_WINDOW_DAYS (prod pins 45; the code default is 30) as it
+    // SHIP_LEADERBOARD_WINDOW_DAYS (prod pins 60; the code default is 30) as it
     // advances toward the 90d end state without a frontend change.
     it('names the standings window in the header, derived from the payload bounds', async () => {
         mockFetch.mockImplementation((url: string) => {
             if (url.includes('/ships?')) {
                 return Promise.resolve({
-                    data: { ...listFixture, window_start: '2026-06-18', window_end: '2026-08-02' },
+                    data: { ...listFixture, window_start: '2026-06-03', window_end: '2026-08-02' },
                 } as never);
             }
             return routeFetch(url);
         });
         render(<ShipLeaderboard />);
         expect(
-            await screen.findByRole('heading', { name: 'Ship leaderboard · last 45 days rolling' }),
+            await screen.findByRole('heading', { name: 'Ship leaderboard · last 60 days rolling' }),
         ).toBeInTheDocument();
     });
 
@@ -152,14 +152,14 @@ describe('ShipLeaderboard', () => {
         mockFetch.mockImplementation((url: string) => {
             if (url.includes('/ships?')) {
                 return Promise.resolve({
-                    data: { ...listFixture, window_start: '2026-06-18', window_end: '2026-08-02' },
+                    data: { ...listFixture, window_start: '2026-06-03', window_end: '2026-08-02' },
                 } as never);
             }
             return routeFetch(url);
         });
         render(<ShipLeaderboard />);
-        const heading = await screen.findByRole('heading', { name: 'Ship leaderboard · last 45 days rolling' });
-        expect(visibleHeadingText(heading)).toBe('Ship leaderboard · last 45 days rolling');
+        const heading = await screen.findByRole('heading', { name: 'Ship leaderboard · last 60 days rolling' });
+        expect(visibleHeadingText(heading)).toBe('Ship leaderboard · last 60 days rolling');
     });
 
     it('renders the header VISIBLE text — not just its accessible name — as a bare title', async () => {
@@ -173,14 +173,14 @@ describe('ShipLeaderboard', () => {
         mockFetch.mockImplementation((url: string) => {
             if (url.includes('/ships?')) {
                 return Promise.resolve({
-                    data: { ...listFixture, window_start: '2026-06-18', window_end: '2026-08-02' },
+                    data: { ...listFixture, window_start: '2026-06-03', window_end: '2026-08-02' },
                 } as never);
             }
             return routeFetch(url);
         });
         render(<ShipLeaderboard />);
         expect(
-            await screen.findByRole('button', { name: /rolling trailing 45-day window/i }),
+            await screen.findByRole('button', { name: /rolling trailing 60-day window/i }),
         ).toBeInTheDocument();
     });
 

@@ -54,7 +54,7 @@ describe('ShipLeaderboard heading — single-source regression net', () => {
         mockFetch.mockImplementation(() => Promise.resolve({
             data: {
                 realm: 'na', tier: 10, ship_type: 'Battleship', ships: [],
-                window_start: '2026-06-20', window_end: '2026-08-04',
+                window_start: '2026-06-05', window_end: '2026-08-04',
             },
         } as never));
         render(<ShipLeaderboard />);
@@ -62,12 +62,12 @@ describe('ShipLeaderboard heading — single-source regression net', () => {
         const heading = await screen.findByRole('heading', { name: /MARKER HEADING/ });
         const ariaLabel = heading.getAttribute('aria-label');
         const visible = visibleHeadingText(heading);
-        expect(ariaLabel).toBe('MARKER HEADING · last 45 days rolling');
+        expect(ariaLabel).toBe('MARKER HEADING · last 60 days rolling');
         // The invariant Fix 2 establishes: whatever translate() returns for
         // this key becomes BOTH the accessible name and the visible copy.
         // Before the fix, `visible` would have stayed the hardcoded English
-        // "Ship leaderboard · last 45 days rolling" here instead.
+        // "Ship leaderboard · last 60 days rolling" here instead.
         expect(visible).toBe(ariaLabel);
-        expect(visible).toBe('MARKER HEADING · last 45 days rolling');
+        expect(visible).toBe('MARKER HEADING · last 60 days rolling');
     });
 });

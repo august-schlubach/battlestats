@@ -335,7 +335,7 @@ pair. See the comment on this key in `en.ts`/`ko.ts`/`ja.ts`.
 locale-toggle spec named three `en.ts` keys whose `{}` clauses were built as
 English literals inside components, never passed through `t()` — translating
 the outer template alone would have shipped a mixed-language string like
-`함선 리더보드 · last 45 days rolling`. Each clause now has its own key,
+`함선 리더보드 · last 60 days rolling`. Each clause now has its own key,
 resolved through `t()` in the component before being handed to the outer
 template as a var. Two kinds of new key:
 
