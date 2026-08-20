@@ -294,7 +294,12 @@ describe('BattleHistoryCard', () => {
         // The row reports the hovered day, the overall (lifetime) win rate at the
         // end of it, and — only when the line actually moved — a signed delta.
         expect(readout()).toContain(utcDay(3));
-        expect(readout()).toMatch(/^\d{4}-\d{2}-\d{2}\d+\.\d{2}%(?:[+\u2212]\d+\.\d{2})?$/);
+        expect(readout()).toMatch(
+            /^\d{4}-\d{2}-\d{2}\d+\.\d{2}%(?:[+\u2212]\d+\.\d{2})?\d+W \d+L$/,
+        );
+        // ...and, right-justified, the day's own record. That day is 130 wins in
+        // 250 battles, so the losses are derived, not read: 250 - 130 = 120.
+        expect(screen.getByTestId('strip-readout-record').textContent).toBe('130W 120L');
         // 130 wins in 250 battles is below the 55% lifetime baseline, so that day
         // pulled the line down: the delta reads negative, in the table's red.
         const delta = screen.getByTestId('strip-readout-delta');
@@ -328,6 +333,9 @@ describe('BattleHistoryCard', () => {
         // line did not move, so there is no delta to show.
         expect(screen.getByTestId('strip-readout').textContent).toContain(utcDay(24));
         expect(screen.queryByTestId('strip-readout-delta')).not.toBeInTheDocument();
+        // Nor is there a record to state: a day with no battles reports no W/L
+        // rather than "0W 0L".
+        expect(screen.queryByTestId('strip-readout-record')).not.toBeInTheDocument();
         expect(screen.queryByTestId('strip-bar-halo')).not.toBeInTheDocument();
 
         fireEvent.pointerLeave(hit);
