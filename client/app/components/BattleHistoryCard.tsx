@@ -627,7 +627,14 @@ const StripReadoutRow: React.FC<{
                         data-testid="strip-readout-record"
                         className="ml-auto text-[var(--text-muted)]"
                     >
-                        {wins}W {battles - wins}L
+                        {/* The W/L letters ride at 0.75em: they are unit labels,
+                            not data. Shrinking them lets the two counts carry the
+                            row's weight while the letters stay legible enough to
+                            say which is which. Baseline-aligned by default, which
+                            is what keeps the pair reading as one token. */}
+                        {wins}<span className="text-[0.75em]">W</span>
+                        {' '}
+                        {battles - wins}<span className="text-[0.75em]">L</span>
                     </span>
                 )}
             </>

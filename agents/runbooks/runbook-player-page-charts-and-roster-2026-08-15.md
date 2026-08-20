@@ -129,7 +129,9 @@ CAREER line stands at the end of that day, the right one is what the player
 actually did during it. Losses are derived (`battles - wins`), not carried on the
 payload. The record is omitted on a zero-battle day — "0W 0L" is noise the bar
 stub already conveys — and it is untinted, because the row already spends its two
-colours on the WR value and the delta.
+colours on the WR value and the delta. The `W` and `L` glyphs themselves render
+at `0.75em` — they are unit labels, not data, so the counts carry the row's
+weight and the letters only disambiguate them.
 
 **What snaps and what does not.** Hover state is carried as a viewBox x, not a
 day index, so the rule tracks the pointer continuously (and survives a domain
