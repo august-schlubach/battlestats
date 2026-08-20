@@ -584,8 +584,14 @@ const StripReadoutRow: React.FC<{
      *  day to measure against. Shown only when it rounds off zero: a day the
      *  line did not move has no delta to report. */
     delta: number | null;
+    /** The day's own record. Right-justified at the far end of the row: the
+     *  left cluster reports the CAREER line's position, this reports what the
+     *  player actually did on the hovered day. Omitted on a day with no
+     *  battles — "0W 0L" is noise, and the bar stub already says it. */
+    wins: number | null;
+    battles: number | null;
     live: boolean;
-}> = ({ date, overall, delta, live }) => (
+}> = ({ date, overall, delta, wins, battles, live }) => (
     <div
         data-testid="strip-readout"
         // Typeface and weight match the per-ship table's ship-name cell: the body
@@ -609,6 +615,19 @@ const StripReadoutRow: React.FC<{
                         style={{ color: delta > 0 ? '#74c476' : '#a50f15' }}
                     >
                         {delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(2)}
+                    </span>
+                )}
+                {battles != null && battles > 0 && wins != null && (
+                    // `ml-auto` rather than a spacer element: it pins this to the
+                    // right edge without disturbing the gap-2 rhythm of the left
+                    // cluster. Deliberately untinted — the row already spends its
+                    // two colours on the WR value and the delta, and a green W /
+                    // red L here would read as a third, competing verdict.
+                    <span
+                        data-testid="strip-readout-record"
+                        className="ml-auto text-[var(--text-muted)]"
+                    >
+                        {wins}W {battles - wins}L
                     </span>
                 )}
             </>
@@ -815,6 +834,8 @@ const InlineSparkline: React.FC<{
                         ? wrSeries[readIdx]! - wrSeries[readIdx - 1]!
                         : null
                 }
+                wins={visible.length > 0 ? visible[readIdx].wins : null}
+                battles={visible.length > 0 ? visible[readIdx].battles : null}
                 live={hovered != null}
             />
             {/* Positioning context for the crosshair dot. The dot is an HTML

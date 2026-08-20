@@ -2,7 +2,7 @@
 
 _Created: 2026-08-15_
 _Context: extracted verbatim-in-substance from `CLAUDE.md`'s "Key frontend patterns" block during the 2026-08-15 doc-estate pass. This material had no owning document — it was ~700 words of always-loaded context describing component behavior, and the only nearby docs (`runbook-mobile-player-detail-charts.md`, `archive/runbook-tier-type-correlation-rework-2026-07-01.md`) describe components that no longer exist._
-_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1), plus the strip crosshair and the `lifetime_wins` precision contract (v5.4.2)._
+_Status: **descriptive, not a change plan.** Everything here is live behavior as of v5.3.9, plus the sticky window pill and the 30/60-day strip domain added 2026-08-19 (v5.4.0, v5.4.1), plus the strip crosshair and the `lifetime_wins` precision contract (v5.4.2), plus the crosshair readout's right-justified W/L record (v5.4.3)._
 
 ## Purpose
 
@@ -122,7 +122,14 @@ transparent, as it already did at 60d.
 
 The per-bar `<title>` tooltips are gone. In their place a Google-Finance-style
 crosshair: a vertical rule, a dot on the overall-WR line, and a fixed-height
-readout row above the strip reading `<date> <overall WR> <signed delta>`.
+readout row above the strip reading `<date> <overall WR> <signed delta>` on the
+left and the hovered day's own record (`8W 2L`) right-justified at the far end
+(v5.4.3). The two clusters answer different questions: the left one is where the
+CAREER line stands at the end of that day, the right one is what the player
+actually did during it. Losses are derived (`battles - wins`), not carried on the
+payload. The record is omitted on a zero-battle day — "0W 0L" is noise the bar
+stub already conveys — and it is untinted, because the row already spends its two
+colours on the WR value and the delta.
 
 **What snaps and what does not.** Hover state is carried as a viewBox x, not a
 day index, so the rule tracks the pointer continuously (and survives a domain
