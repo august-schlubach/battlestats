@@ -706,6 +706,9 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
         return `${base}&sort=${encodeURIComponent(String(boardSort.key))}&dir=${boardSort.dir}`;
     }, [selectedShip, realm, boardSort]);
 
+    // Which link the one Share button copies, decided by which view is showing.
+    const shareUrl = selectedShip ? boardShareUrl : listShareUrl;
+
     // On /ships/<bucket> the address bar is the view, so keep the two in step as
     // pills are clicked. replace() rather than push() so Back leaves the page
     // instead of walking every filter click. Never runs on the landing page.
@@ -779,12 +782,7 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                 phone, and inline keeps the icon trailing the last word instead
                 of stranding it against the right edge. `relative` here is the
                 anchor InfoHint's panel drops from. */}
-            <div className="relative mb-2 flex items-start justify-between gap-3">
-                {/* The heading keeps its own inline flow inside this wrapper —
-                    the flex row is only there to park Share against the right
-                    edge, and making the h2 a flex item directly would break the
-                    two-line wrap the comment below depends on. */}
-                <div className="min-w-0">
+            <div className="relative mb-2">
                 {/* The icon lives inside the heading purely for line-breaking
                     (see the nowrap group below); `aria-label` pins the heading's
                     accessible name to the title so the hint's long tooltip text
@@ -806,19 +804,6 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         </span>
                     </span>
                 </h2>
-                </div>
-                {/* Sharing the ship list is the whole point of the /ships route:
-                    a Discord conversation about T9 destroyers wants a link that
-                    reproduces this exact bucket, percentile, and column. Hidden
-                    while a ship board is open — that view has its own button, to
-                    its own URL. */}
-                {!selectedShip && listShareUrl ? (
-                    <CopyLinkButton
-                        eventName="ship-list-share"
-                        ariaLabel={`Copy a link to the ${headingLabel} standings`}
-                        url={listShareUrl}
-                    />
-                ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -908,6 +893,23 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         </>
                     )}
                 </div>
+                {/* Share lives at the end of the filter row in BOTH views — the
+                    list and the drill-down board — so it never moves between
+                    them. Only the destination changes: the bucket's /ships URL,
+                    or the selected ship's /ship URL. */}
+                {shareUrl ? (
+                    <div className="ml-auto">
+                        <CopyLinkButton
+                            eventName={selectedShip ? 'ship-board-share' : 'ship-list-share'}
+                            ariaLabel={
+                                selectedShip
+                                    ? `Copy a link to the ${selectedShip.name} player standings`
+                                    : `Copy a link to the ${headingLabel} standings`
+                            }
+                            url={shareUrl}
+                        />
+                    </div>
+                ) : null}
             </div>
 
             <div className="mt-4">
@@ -928,7 +930,6 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         error={boardError}
                         onClear={clearShip}
                         onSortChange={onBoardSort}
-                        shareUrl={boardShareUrl}
                     />
                 ) : (
                     <ShipList
@@ -1101,8 +1102,7 @@ const ShipBoard: React.FC<{
     error: boolean;
     onClear: () => void;
     onSortChange: (key: keyof LeaderboardPlayer, dir: SortDir) => void;
-    shareUrl?: string | null;
-}> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange, shareUrl }) => {
+}> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange }) => {
     const ship = board?.ship;
     const players = useMemo(() => board?.players ?? [], [board]);
     // Top-3 medal, mirroring the full /ship page (ShipRouteView): the same
@@ -1149,17 +1149,6 @@ const ShipBoard: React.FC<{
                         shipId={ship?.ship_id}
                     />
                 </span>
-                {/* Shares the /ship page for this hull, carrying the column the
-                    board is sorted by so the preview names the same top 3. */}
-                {shareUrl ? (
-                    <div className="ml-auto">
-                        <CopyLinkButton
-                            eventName="ship-board-share"
-                            ariaLabel={`Copy a link to the ${shipName} player standings`}
-                            url={shareUrl}
-                        />
-                    </div>
-                ) : null}
             </div>
 
             <div className="mt-3">

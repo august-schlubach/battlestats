@@ -18,9 +18,15 @@ misbehaves on a recipient's screen.
 
 | Surface | Share button copies | Preview card |
 |---|---|---|
-| Landing ship list | `/ships/<bucket>?realm&wr&sort&dir` | `kind=shiplist`: top 3 ships |
-| Landing drill-down board | `/ship/<id>-<slug>?realm&sort&dir` | `kind=ship`: top 3 players |
+| Ship list (landing + `/ships`) | `/ships/<bucket>?realm&wr&sort&dir` | `kind=shiplist`: top 3 ships |
+| Drill-down player board | `/ship/<id>-<slug>?realm&sort&dir` | `kind=ship`: top 3 players |
 | `/ship/<id>-<slug>` masthead | the page's own URL | `kind=ship`: top 3 players |
+
+**Button placement.** The list and the drill-down share **one** button, pinned to the right end of
+the tier/type filter row; only its destination changes with the view. It first sat on the section
+heading for the list and on the board's "‹ Clear" row for the drill-down, which made it jump
+between the two — rejected on review 2026-08-20. Verified pixel-identical across both views
+(dx=0, dy=0 at 1440px). Under 768px the pills wrap and it right-aligns on the last filter line.
 
 New files: `client/app/ships/[bucket]/page.tsx`, `client/app/ships/[bucket]/ShipBucketRouteView.tsx`,
 `client/app/lib/tableSort.ts`.
