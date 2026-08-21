@@ -3170,6 +3170,37 @@
                 "landing-decommission-superseded"
             ]
         },
+        "agents/runbooks/runbook-shareable-ship-leaderboard-2026-08-20.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "frontend",
+            "aliases": [
+                "shareable ship leaderboard",
+                "ships route",
+                "ship standings share button",
+                "ship list og card",
+                "discord preview ship standings",
+                "url beats localStorage precedence"
+            ],
+            "tags": [
+                "open-graph",
+                "share",
+                "seo",
+                "sitemap",
+                "ship-leaderboard",
+                "landing-page",
+                "routing",
+                "localstorage",
+                "frontend",
+                "growth"
+            ],
+            "archive_on": [
+                "ships-route-retired",
+                "ship-standings-share-superseded"
+            ]
+        },
         "agents/runbooks/runbook-shiptool-integration-2026-06-22.md": {
             "kind": "runbook",
             "status": "active",

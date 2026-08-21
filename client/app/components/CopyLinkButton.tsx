@@ -22,13 +22,21 @@ const FEEDBACK_DURATION_MS = 1800;
 type CopyState = 'idle' | 'copied' | 'failed';
 
 interface CopyLinkButtonProps {
-    /** Umami event name; kept identical to the pre-removal names so the historical series reconnects. */
-    eventName: 'player-share' | 'clan-share';
+    /** Umami event name; the player/clan names are kept identical to the pre-removal ones so the historical series reconnects. */
+    eventName: 'player-share' | 'clan-share' | 'ship-list-share' | 'ship-board-share';
     ariaLabel: string;
     label?: string;
+    /**
+     * Path or absolute URL to copy instead of the current address. The ship
+     * boards need this: the leaderboard's view state (bucket, percentile, column
+     * sort) lives in component state on the landing page, so the address bar is
+     * not the thing worth sharing. A relative path is resolved against the
+     * current origin. Omitted, the button copies the page you are on.
+     */
+    url?: string;
 }
 
-const CopyLinkButton: React.FC<CopyLinkButtonProps> = ({ eventName, ariaLabel, label = 'Share' }) => {
+const CopyLinkButton: React.FC<CopyLinkButtonProps> = ({ eventName, ariaLabel, label = 'Share', url: target }) => {
     const { realm } = useRealm();
     const [copyState, setCopyState] = useState<CopyState>('idle');
 
@@ -48,10 +56,13 @@ const CopyLinkButton: React.FC<CopyLinkButtonProps> = ({ eventName, ariaLabel, l
         trackEvent(eventName, { realm });
 
         try {
-            const url = new URL(window.location.href);
+            const url = new URL(target ?? window.location.href, window.location.href);
             if (!url.searchParams.has('realm')) {
                 // A shared link must carry the realm, or the recipient may land
-                // on a different realm's view of the same name.
+                // on a different realm's view of the same name. The ship-board
+                // callers build their own realm-qualified `url` and so never
+                // reach this branch; it still covers the player/clan pages,
+                // which copy whatever address the visitor happens to be on.
                 url.searchParams.set('realm', realm);
             }
             // Absent on insecure origins and in some in-app browsers, which is
@@ -59,7 +70,7 @@ const CopyLinkButton: React.FC<CopyLinkButtonProps> = ({ eventName, ariaLabel, l
             await navigator.clipboard.writeText(url.toString());
             setCopyState('copied');
         } catch (error) {
-            console.error(`Failed to copy ${eventName === 'clan-share' ? 'clan' : 'player'} URL:`, error);
+            console.error(`Failed to copy ${eventName} URL:`, error);
             setCopyState('failed');
         }
     };

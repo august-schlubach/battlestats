@@ -731,3 +731,106 @@ describe('ShipLeaderboard', () => {
         });
     });
 });
+
+
+// ---------------------------------------------------------------------------
+// Shared-link behaviour (/ships/<bucket>). The whole point of the Share button
+// is that the recipient sees the SHARER's view; every assertion below is about
+// something that would otherwise fail silently, on the recipient's screen only.
+// ---------------------------------------------------------------------------
+describe('ShipLeaderboard with a shared initial view', () => {
+    beforeEach(() => {
+        mockFetch.mockReset();
+        mockFetch.mockImplementation((url: string) => routeFetch(url));
+        mockTrack.mockClear();
+        localStorage.clear();
+        Element.prototype.scrollIntoView = jest.fn();
+    });
+
+    const SHARED = {
+        tier: 10 as const,
+        type: 'Destroyer' as const,
+        wrPct: null,
+        sort: { key: 'avg_damage' as const, dir: 'desc' as const },
+    };
+
+    // The recipient's own remembered view, deliberately different on every axis.
+    const poisonPrefs = () => {
+        localStorage.setItem('bs-ship-leaderboard', JSON.stringify({ tier: 8, type: 'Cruiser', wrPct: 25 }));
+        localStorage.setItem('battlestats:ship-list:sort', JSON.stringify({ key: 'battles', dir: 'asc' }));
+    };
+
+    it('fetches the shared bucket, not the recipient stored one', async () => {
+        poisonPrefs();
+        render(<ShipLeaderboard initial={SHARED} />);
+
+        await waitFor(() => {
+            expect(mockFetch).toHaveBeenCalledWith(
+                '/api/realm/na/ships?tier=10&type=Destroyer',
+                expect.anything(),
+            );
+        });
+        // The stored T8/Cruiser/25% bucket must never have been requested.
+        for (const [url] of mockFetch.mock.calls) {
+            expect(url).not.toContain('tier=8');
+            expect(url).not.toContain('wr_pct=25');
+        }
+    });
+
+    it('presses the shared pills rather than the stored ones', async () => {
+        poisonPrefs();
+        render(<ShipLeaderboard initial={SHARED} />);
+
+        await screen.findAllByRole('button', { name: 'Gearing' });
+        expect(screen.getByRole('button', { name: '10' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'DD' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: '25%' })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('applies the shared column sort over the persisted one', async () => {
+        poisonPrefs();
+        render(<ShipLeaderboard initial={SHARED} />);
+
+        await screen.findAllByRole('button', { name: 'Gearing' });
+        // Shared sort is avg_damage desc: Gearing (61,880) outranks Shimakaze
+        // (54,210). The persisted battles-ascending sort would invert this.
+        const header = screen.getAllByRole('columnheader').find((th) => /avg dmg/i.test(th.textContent ?? ''));
+        expect(header).toHaveAttribute('aria-sort', 'descending');
+        const names = screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '');
+        expect(names[0]).toContain('Gearing');
+    });
+
+    it('never writes a shared view back over the recipient own preferences', async () => {
+        poisonPrefs();
+        render(<ShipLeaderboard initial={SHARED} />);
+
+        await screen.findAllByRole('button', { name: 'Gearing' });
+        await act(async () => { await Promise.resolve(); });
+
+        expect(JSON.parse(localStorage.getItem('bs-ship-leaderboard') as string))
+            .toEqual({ tier: 8, type: 'Cruiser', wrPct: 25 });
+        expect(JSON.parse(localStorage.getItem('battlestats:ship-list:sort') as string))
+            .toEqual({ key: 'battles', dir: 'asc' });
+    });
+
+    it('offers a Share link carrying the bucket, percentile, and column', async () => {
+        render(<ShipLeaderboard initial={SHARED} />);
+
+        await screen.findAllByRole('button', { name: 'Gearing' });
+        expect(screen.getByRole('button', { name: /copy a link to the .* standings/i }))
+            .toBeInTheDocument();
+    });
+
+    it('still honours stored preferences with no shared view (the landing page)', async () => {
+        poisonPrefs();
+        render(<ShipLeaderboard />);
+
+        await waitFor(() => {
+            expect(mockFetch).toHaveBeenCalledWith(
+                '/api/realm/na/ships?tier=8&type=Cruiser&wr_pct=25',
+                expect.objectContaining({ ttlMs: 0 }),
+            );
+        });
+    });
+});

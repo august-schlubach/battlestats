@@ -22,18 +22,30 @@ import { shipClass } from '../lib/shipIdentity';
 import NationFlag from './NationFlag';
 import ShipToolLink from './ShipToolLink';
 import TopShipIcon from './TopShipIcon';
-import { buildPlayerPath } from '../lib/entityRoutes';
+import {
+    buildPlayerPath,
+    buildShipBucketPath,
+    buildShipPath,
+    SHIP_BUCKET_TIERS,
+    SHIP_TYPES,
+    type ShipType,
+    type Tier,
+    type WrPct,
+} from '../lib/entityRoutes';
+import { sortRows, type SortDir } from '../lib/tableSort';
+import CopyLinkButton from './CopyLinkButton';
 import { trackEvent } from '../lib/umami';
 import wrColor from '../lib/wrColor';
 import SubmarineEasterEgg from './SubmarineEasterEgg';
 import CarrierEasterEgg from './CarrierEasterEgg';
 
-export type Tier = 8 | 9 | 10;
-// Raw `Ship.ship_type` strings the backend filters on (note: "AirCarrier", no
-// space). These are the `type` query-param values the new endpoint accepts.
-export const SHIP_TYPES = ['Battleship', 'Cruiser', 'Destroyer', 'AirCarrier', 'Submarine'] as const;
-export type ShipType = (typeof SHIP_TYPES)[number];
-const TIERS: Tier[] = [8, 9, 10];
+// The tier/type vocabulary and its URL encoding live in lib/entityRoutes, so
+// the shareable /ships/<bucket> route and this component cannot disagree about
+// what a bucket is. Re-exported here because RealmTopShipsTreemapSVG and the
+// tests import these names from this module.
+export type { Tier, ShipType, WrPct } from '../lib/entityRoutes';
+export { SHIP_TYPES };
+const TIERS: readonly Tier[] = SHIP_BUCKET_TIERS;
 
 // Win-rate-percentile filter for the ship LIST: narrows each ship's displayed
 // stats (battles, avg dmg, kills/battle, WR) to the top N% of that ship's
@@ -45,7 +57,7 @@ const TIERS: Tier[] = [8, 9, 10];
 // buckets are warmed by different tasks into separate cache keys, so a pill can
 // be serving an older window and thus a genuinely different ship set. See the
 // note on dataBasisHint; the tooltip promises nothing about ship membership.
-export type WrPct = 50 | 25 | null;
+// (WrPct itself is declared in lib/entityRoutes and re-exported above.)
 // `label` for the 50/25 pills is a plain percent literal (no translation
 // case — digits + "%" read the same in every locale); `null` ("All") is
 // wired through common.all at render time (fix round 1, F2) since "All" now
@@ -113,8 +125,24 @@ export interface ShipBucket {
     empty: boolean;
 }
 
+/**
+ * Seed state for the shareable /ships/<bucket> route. When present the URL is
+ * the WHOLE truth: localStorage is neither read nor written, so a recipient's
+ * remembered bucket and column can never override what the sharer sent. Absent
+ * (the landing page), the component keeps its localStorage behaviour unchanged.
+ */
+export interface ShipLeaderboardInitialView {
+    tier: Tier;
+    type: ShipType;
+    wrPct: WrPct;
+    sort: { key: keyof ListShip; dir: SortDir } | null;
+}
+
 interface ShipLeaderboardProps {
     onBucket?: (bucket: ShipBucket) => void;
+    initial?: ShipLeaderboardInitialView;
+    /** Mirror filter changes into the address bar (the /ships route only). */
+    syncUrl?: boolean;
 }
 
 // Exported so the landing treemap (RealmTopShipsTreemapSVG) can render the same
@@ -200,19 +228,8 @@ const PILL_OFF =
 // rows; until a header is clicked the server's natural order (win rate for the
 // list, rank for the board) is preserved (`sort === null`). New numeric columns
 // open descending (best-first); text columns open ascending (A→Z).
-type SortDir = 'asc' | 'desc';
-
-function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
-    const factor = dir === 'asc' ? 1 : -1;
-    return [...rows].sort((a, b) => {
-        const av = a[key];
-        const bv = b[key];
-        if (typeof av === 'string' && typeof bv === 'string') {
-            return av.localeCompare(bv) * factor;
-        }
-        return (Number(av) - Number(bv)) * factor;
-    });
-}
+// sortRows/SortDir moved to lib/tableSort so the Open Graph card ranks the top 3
+// with the exact comparator the table the user shared was using.
 
 // A ship's share of all battles played in its tier+class bucket this window,
 // formatted for the Battles column ("12.4%"). Returns null when the denominator
@@ -234,11 +251,16 @@ function useTableSort<T>(
     textKeys: ReadonlyArray<keyof T>,
     onChange?: (key: keyof T, dir: SortDir) => void,
     storageKey?: string,
+    // A sort carried in a shared URL. Present, it seeds the table AND suppresses
+    // the persisted restore below — otherwise the recipient's remembered column
+    // would land a beat later and quietly re-sort the shared view.
+    seed?: { key: keyof T; dir: SortDir } | null,
+    seeded = false,
 ) {
-    const [sort, setSort] = useState<{ key: keyof T; dir: SortDir } | null>(null);
+    const [sort, setSort] = useState<{ key: keyof T; dir: SortDir } | null>(seed ?? null);
 
     useEffect(() => {
-        if (!storageKey || typeof window === 'undefined') return;
+        if (seeded || !storageKey || typeof window === 'undefined') return;
         try {
             const raw = window.localStorage.getItem(storageKey);
             if (!raw) return;
@@ -249,7 +271,7 @@ function useTableSort<T>(
         } catch {
             /* ignore a malformed persisted sort — fall back to natural order */
         }
-    }, [storageKey]);
+    }, [storageKey, seeded]);
 
     const onSort = (key: keyof T) => {
         // Compute the next sort from the current render's value (not inside the
@@ -260,7 +282,9 @@ function useTableSort<T>(
                 : { key, dir: textKeys.includes(key) ? 'asc' : 'desc' };
         setSort(next);
         onChange?.(next.key, next.dir);
-        if (storageKey && typeof window !== 'undefined') {
+        // A seeded table is showing someone else's shared view; do not let it
+        // overwrite the visitor's own remembered column.
+        if (!seeded && storageKey && typeof window !== 'undefined') {
             try {
                 window.localStorage.setItem(storageKey, JSON.stringify(next));
             } catch {
@@ -365,7 +389,7 @@ const InfoHint: React.FC<{ text: string }> = ({ text }) => (
     </span>
 );
 
-const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(({ onBucket }, ref) => {
+const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(({ onBucket, initial, syncUrl = false }, ref) => {
     const { realm } = useRealm();
     const t = useT();
     const sectionRef = useRef<HTMLElement>(null);
@@ -376,21 +400,31 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
 
     // Land on T10 Battleships so the board shows real standings immediately
     // (these buckets are pre-warmed daily — see warm_realm_top_ships_task).
-    const [tier, setTier] = useState<Tier | null>(10);
-    const [type, setType] = useState<ShipType | null>('Battleship');
+    const [tier, setTier] = useState<Tier | null>(initial?.tier ?? 10);
+    const [type, setType] = useState<ShipType | null>(initial?.type ?? 'Battleship');
     // WR-percentile filter applies to the ship LIST only (not the drilled-in
     // player board). Defaults to the top 50% ("how are good players doing with
     // these ships?"); `null` is the all-players view. The default landing bucket
     // is pre-warmed (warm_realm_top_ships_task) so this view loads instantly.
-    const [wrPct, setWrPct] = useState<WrPct>(50);
+    const [wrPct, setWrPct] = useState<WrPct>(initial ? initial.wrPct : 50);
     const [selectedShip, setSelectedShip] = useState<{ id: number; name: string } | null>(null);
 
     // Restore the persisted tier/type/WR on mount (post-SSR, so the first client
     // render still matches the server's default markup — no hydration mismatch).
     // The list fetch is gated on this so it fires once, with the restored bucket,
     // instead of flashing the default bucket first.
+    // `initial` (a shared /ships link) outranks the stored preference. Without
+    // this the recipient of "here are the T9 destroyers" opens the link and sees
+    // their own last bucket instead — the feature failing silently, for exactly
+    // the people it was used on. Same precedence shape as the locale rule
+    // (`?lang=` > `bs-locale` > autodetect).
     const [prefsRestored, setPrefsRestored] = useState(false);
+    const hasInitialView = initial !== undefined;
     useEffect(() => {
+        if (hasInitialView) {
+            setPrefsRestored(true);
+            return;
+        }
         const stored = readStoredShipLbPrefs();
         if (stored) {
             if (stored.tier !== undefined) setTier(stored.tier);
@@ -398,19 +432,21 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
             if (stored.wrPct !== undefined) setWrPct(stored.wrPct);
         }
         setPrefsRestored(true);
-    }, []);
+    }, [hasInitialView]);
 
     // Persist the selection on every change (once restore has run, so the initial
     // default render never overwrites a stored preference). Treemap drill-downs
     // also set tier/type, so they persist too — which matches user intent.
     useEffect(() => {
-        if (!prefsRestored || tier == null || type == null) return;
+        // A shared link is someone else's view; writing it back would silently
+        // rewrite the visitor's own remembered bucket just for opening a link.
+        if (hasInitialView || !prefsRestored || tier == null || type == null) return;
         try {
             window.localStorage.setItem(SHIP_LB_PREFS_KEY, JSON.stringify({ tier, type, wrPct }));
         } catch {
             // localStorage unavailable
         }
-    }, [prefsRestored, tier, type, wrPct]);
+    }, [hasInitialView, prefsRestored, tier, type, wrPct]);
 
     const [list, setList] = useState<ListShip[] | null>(null);
     const [listTotalBattles, setListTotalBattles] = useState(0);
@@ -459,6 +495,23 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
     // ship list from the player board). Built here so realm lives in one place.
     const trackSort = (scope: 'ships' | 'players') => (column: string, dir: SortDir) =>
         trackEvent('ship-leaderboard-sort', { realm, scope, column, dir });
+
+    // The tables own their sort, but a Share link has to reproduce what is on
+    // screen, so the live column is mirrored up here. Seeded from the URL on the
+    // /ships route; null means the server's natural order.
+    const [listSort, setListSort] = useState<{ key: keyof ListShip; dir: SortDir } | null>(
+        initial?.sort ?? null,
+    );
+    const [boardSort, setBoardSort] = useState<{ key: keyof LeaderboardPlayer; dir: SortDir } | null>(null);
+
+    const onListSort = (key: keyof ListShip, dir: SortDir) => {
+        setListSort({ key, dir });
+        trackSort('ships')(String(key), dir);
+    };
+    const onBoardSort = (key: keyof LeaderboardPlayer, dir: SortDir) => {
+        setBoardSort({ key, dir });
+        trackSort('players')(String(key), dir);
+    };
 
     const bothSelected = tier != null && type != null;
     // World of Warships has no Tier 9 submarine and no Tier 9 aircraft carrier
@@ -628,6 +681,42 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
 
     const typeLabel = useMemo(() => (type ? shipClass(type)?.label ?? type : null), [type]);
 
+    // The shareable address for the bucket currently on screen. The landing page
+    // keeps its own URL, so this is built from live state rather than read from
+    // the address bar. Null for the shipless T9 sub/CV buckets, which have
+    // nothing to show a recipient.
+    const listShareUrl = useMemo(() => {
+        if (tier == null || type == null || isEasterEgg) return null;
+        return buildShipBucketPath({
+            tier,
+            type,
+            realm,
+            wrPct,
+            sort: listSort ? String(listSort.key) : null,
+            dir: listSort?.dir ?? null,
+        });
+    }, [tier, type, realm, wrPct, listSort, isEasterEgg]);
+
+    // The drill-down already has a real route of its own; sharing it just points
+    // at /ship/<id>-<slug> with the sort the sharer was looking at.
+    const boardShareUrl = useMemo(() => {
+        if (!selectedShip) return null;
+        const base = buildShipPath(selectedShip.id, selectedShip.name, realm);
+        if (!boardSort) return base;
+        return `${base}&sort=${encodeURIComponent(String(boardSort.key))}&dir=${boardSort.dir}`;
+    }, [selectedShip, realm, boardSort]);
+
+    // On /ships/<bucket> the address bar is the view, so keep the two in step as
+    // pills are clicked. replace() rather than push() so Back leaves the page
+    // instead of walking every filter click. Never runs on the landing page.
+    useEffect(() => {
+        if (!syncUrl || !listShareUrl || typeof window === 'undefined') return;
+        const current = `${window.location.pathname}${window.location.search}`;
+        if (current !== listShareUrl) {
+            window.history.replaceState(null, '', listShareUrl);
+        }
+    }, [syncUrl, listShareUrl]);
+
     // Window length in days, derived from the served payload's date bounds so the
     // header and the info tooltip always name the actual standings window
     // (30/45/60/90 as SHIP_LEADERBOARD_WINDOW_DAYS advances) rather than a
@@ -690,7 +779,12 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                 phone, and inline keeps the icon trailing the last word instead
                 of stranding it against the right edge. `relative` here is the
                 anchor InfoHint's panel drops from. */}
-            <div className="relative mb-2">
+            <div className="relative mb-2 flex items-start justify-between gap-3">
+                {/* The heading keeps its own inline flow inside this wrapper —
+                    the flex row is only there to park Share against the right
+                    edge, and making the h2 a flex item directly would break the
+                    two-line wrap the comment below depends on. */}
+                <div className="min-w-0">
                 {/* The icon lives inside the heading purely for line-breaking
                     (see the nowrap group below); `aria-label` pins the heading's
                     accessible name to the title so the hint's long tooltip text
@@ -712,6 +806,19 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         </span>
                     </span>
                 </h2>
+                </div>
+                {/* Sharing the ship list is the whole point of the /ships route:
+                    a Discord conversation about T9 destroyers wants a link that
+                    reproduces this exact bucket, percentile, and column. Hidden
+                    while a ship board is open — that view has its own button, to
+                    its own URL. */}
+                {!selectedShip && listShareUrl ? (
+                    <CopyLinkButton
+                        eventName="ship-list-share"
+                        ariaLabel={`Copy a link to the ${headingLabel} standings`}
+                        url={listShareUrl}
+                    />
+                ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -820,7 +927,8 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         loading={boardLoading}
                         error={boardError}
                         onClear={clearShip}
-                        onSortChange={trackSort('players')}
+                        onSortChange={onBoardSort}
+                        shareUrl={boardShareUrl}
                     />
                 ) : (
                     <ShipList
@@ -832,7 +940,9 @@ const ShipLeaderboard = forwardRef<ShipLeaderboardHandle, ShipLeaderboardProps>(
                         wrPct={wrPct}
                         tierTypeLabel={`T${tier} ${typeLabel ?? ''}`.trim()}
                         onOpen={openShip}
-                        onSortChange={trackSort('ships')}
+                        onSortChange={onListSort}
+                        seedSort={initial?.sort ?? null}
+                        seeded={hasInitialView}
                     />
                 )}
             </div>
@@ -858,8 +968,16 @@ const ShipList: React.FC<{
     tierTypeLabel: string;
     onOpen: (s: ListShip) => void;
     onSortChange: (key: keyof ListShip, dir: SortDir) => void;
-}> = ({ ships, totalBattles, loading, error, pending, wrPct, tierTypeLabel, onOpen, onSortChange }) => {
-    const { sort, onSort } = useTableSort<ListShip>(['ship_name'], onSortChange, SHIP_LIST_SORT_STORAGE_KEY);
+    seedSort?: { key: keyof ListShip; dir: SortDir } | null;
+    seeded?: boolean;
+}> = ({ ships, totalBattles, loading, error, pending, wrPct, tierTypeLabel, onOpen, onSortChange, seedSort = null, seeded = false }) => {
+    const { sort, onSort } = useTableSort<ListShip>(
+        ['ship_name'],
+        onSortChange,
+        SHIP_LIST_SORT_STORAGE_KEY,
+        seedSort,
+        seeded,
+    );
     const sortedShips = useMemo(
         () => (ships && sort ? sortRows(ships, sort.key, sort.dir) : ships),
         [ships, sort],
@@ -983,7 +1101,8 @@ const ShipBoard: React.FC<{
     error: boolean;
     onClear: () => void;
     onSortChange: (key: keyof LeaderboardPlayer, dir: SortDir) => void;
-}> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange }) => {
+    shareUrl?: string | null;
+}> = ({ realm, fallbackName, board, loading, error, onClear, onSortChange, shareUrl }) => {
     const ship = board?.ship;
     const players = useMemo(() => board?.players ?? [], [board]);
     // Top-3 medal, mirroring the full /ship page (ShipRouteView): the same
@@ -1030,6 +1149,17 @@ const ShipBoard: React.FC<{
                         shipId={ship?.ship_id}
                     />
                 </span>
+                {/* Shares the /ship page for this hull, carrying the column the
+                    board is sorted by so the preview names the same top 3. */}
+                {shareUrl ? (
+                    <div className="ml-auto">
+                        <CopyLinkButton
+                            eventName="ship-board-share"
+                            ariaLabel={`Copy a link to the ${shipName} player standings`}
+                            url={shareUrl}
+                        />
+                    </div>
+                ) : null}
             </div>
 
             <div className="mt-3">
