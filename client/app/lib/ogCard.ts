@@ -16,6 +16,8 @@
 // Runbook: agents/runbooks/runbook-audience-growth-instrumentation-2026-07-29.md
 
 import type { OgCardLayoutProps, OgStat } from './ogCardLayout';
+import { applySort, type SortDir } from './tableSort';
+import { shipBucketLabel, type ShipType, type Tier, type WrPct } from './entityRoutes';
 
 const API_ORIGIN = process.env.BATTLESTATS_API_ORIGIN ?? 'http://localhost:8888';
 
@@ -224,18 +226,6 @@ export const buildClanCardProps = (
     };
 };
 
-// Ship cards are payload-free by design: the slug already carries the name, and
-// the leaderboard aggregation is far too heavy to run per scrape for a surface
-// drawing ~50 pageviews a fortnight.
-export const buildShipCardProps = (label: string, realm: OgRealm): OgCardLayoutProps => ({
-    kicker: `Ship · ${realm.toUpperCase()}`,
-    title: label,
-    subtitle: 'Top players by win rate, rolling 30-day window',
-    // The subtitle already carries the explanation, so no second note.
-    stats: [],
-    fallbackNote: null,
-});
-
 export const buildDefaultCardProps = (): OgCardLayoutProps => ({
     kicker: 'WoWs Battlestats',
     title: 'World of Warships stats',
@@ -243,3 +233,250 @@ export const buildDefaultCardProps = (): OgCardLayoutProps => ({
     stats: [],
     fallbackNote: 'Player and clan statistics, ship standings, battle history',
 });
+
+// ---------------------------------------------------------------------------
+// Ship-standings cards (the Share buttons on the ship list and the drill-down
+// player board).
+//
+// These replace the payload-free ship card that shipped 2026-07-29. That card
+// was data-free on the stated grounds that "the leaderboard aggregation is far
+// too heavy to run per scrape". Measured 2026-08-20 against production, that no
+// longer holds: /api/realm/<realm>/ships and /api/realm/<realm>/ship/<id>/
+// leaderboard are both cache-first and serve warm in ~150ms -- the same call the
+// /ship page already makes on every visit -- and a scrape is further bounded by
+// this route's 1h ISR and the 2s abort below. The cost is one cached read per
+// URL per hour.
+//
+// The ordering must match whatever the sharer was looking at, so both builders
+// take a resolved sort and rank with the SAME comparator the tables use
+// (lib/tableSort). A second comparator here would drift, and the drift would
+// only ever be visible in a Discord preview nobody re-checks.
+//
+// Runbook: agents/runbooks/runbook-shareable-ship-leaderboard-2026-08-20.md
+// ---------------------------------------------------------------------------
+
+/** How many entries a card shows. Three fit the 1200px card without wrapping. */
+export const OG_TOP_N = 3;
+
+/**
+ * Names are rendered uppercase at 24px in a fixed row of three; past this they
+ * push the row wider than the card. Capped here rather than in the layout so the
+ * decision stays unit-testable.
+ */
+const MAX_ENTRY_LABEL = 18;
+
+const truncateLabel = (value: string): string =>
+    value.length > MAX_ENTRY_LABEL ? `${value.slice(0, MAX_ENTRY_LABEL - 1)}…` : value;
+
+export interface OgShipRow {
+    ship_id: number;
+    ship_name: string;
+    battles: number;
+    win_rate: number;
+    avg_damage: number;
+    kills_per_battle: number;
+}
+
+export interface OgPlayerRow {
+    rank: number;
+    player_name: string;
+    win_rate: number;
+    battles: number;
+    avg_damage: number;
+    kills_per_battle: number;
+}
+
+export interface ShipListOgCard {
+    rows: OgShipRow[];
+    windowDays: number | null;
+    /**
+     * A cold win-rate-percentile bucket is still being aggregated in the
+     * background. It carries no rows and otherwise reads exactly like an empty
+     * bucket, so every consumer must branch on this BEFORE row count.
+     */
+    pending: boolean;
+}
+
+export interface ShipBoardOgCard {
+    shipName: string | null;
+    tier: number | null;
+    rows: OgPlayerRow[];
+    windowDays: number | null;
+}
+
+const rowsOf = (payload: Record<string, unknown>, key: string): Record<string, unknown>[] =>
+    Array.isArray(payload[key]) ? (payload[key] as Record<string, unknown>[]) : [];
+
+export const fetchShipListOgCard = async (
+    realm: OgRealm,
+    tier: Tier,
+    type: ShipType,
+    wrPct: WrPct,
+): Promise<ShipListOgCard | null> => {
+    const wrParam = wrPct === null ? '' : `&wr_pct=${wrPct}`;
+    const result = await fetchEntityJson(
+        `/api/realm/${realm}/ships?tier=${tier}&type=${encodeURIComponent(type)}${wrParam}`,
+    );
+    if (!result) {
+        return null;
+    }
+
+    const { payload } = result;
+    return {
+        pending: payload.pending === true,
+        windowDays: finiteNumber(payload.window_days),
+        rows: rowsOf(payload, 'ships').map((s) => ({
+            ship_id: finiteNumber(s.ship_id) ?? 0,
+            ship_name: typeof s.ship_name === 'string' ? s.ship_name : '',
+            battles: finiteNumber(s.battles) ?? 0,
+            win_rate: finiteNumber(s.win_rate) ?? 0,
+            avg_damage: finiteNumber(s.avg_damage) ?? 0,
+            kills_per_battle: finiteNumber(s.kills_per_battle) ?? 0,
+        })),
+    };
+};
+
+export const fetchShipBoardOgCard = async (
+    shipId: number,
+    realm: OgRealm,
+): Promise<ShipBoardOgCard | null> => {
+    const result = await fetchEntityJson(`/api/realm/${realm}/ship/${shipId}/leaderboard`);
+    if (!result) {
+        return null;
+    }
+
+    const { payload } = result;
+    const ship = (payload.ship ?? {}) as Record<string, unknown>;
+    return {
+        shipName: typeof ship.name === 'string' && ship.name ? ship.name : null,
+        tier: finiteNumber(ship.tier),
+        windowDays: finiteNumber(payload.window_days),
+        rows: rowsOf(payload, 'players').map((p) => ({
+            rank: finiteNumber(p.rank) ?? 0,
+            player_name: typeof p.player_name === 'string' ? p.player_name : '',
+            win_rate: finiteNumber(p.win_rate) ?? 0,
+            battles: finiteNumber(p.battles) ?? 0,
+            avg_damage: finiteNumber(p.avg_damage) ?? 0,
+            kills_per_battle: finiteNumber(p.kills_per_battle) ?? 0,
+        })),
+    };
+};
+
+// How each sortable column reads on a card, and whether its value is a win rate
+// (the only metric the layout tints on the WR scale -- tinting a damage figure
+// green because the win rate is high would be a lie the reader cannot see).
+const METRIC_RENDERERS: Record<
+    string,
+    { noun: string; format: (row: Record<string, number>) => string; isWinRate?: boolean }
+> = {
+    win_rate: { noun: 'win rate', format: (r) => formatOgWinRate(r.win_rate), isWinRate: true },
+    battles: { noun: 'battles', format: (r) => formatOgCount(r.battles) },
+    avg_damage: { noun: 'average damage', format: (r) => formatOgCount(r.avg_damage) },
+    kills_per_battle: { noun: 'kills per battle', format: (r) => r.kills_per_battle.toFixed(2) },
+};
+
+/**
+ * Resolve the metric a card should display. Name columns and the natural server
+ * order (`sort === null`) have no meaningful number of their own, so both fall
+ * back to win rate -- a card headlined by alphabetical position would be absurd.
+ * `naturalNoun` describes that fallback ordering in the subtitle.
+ */
+const resolveMetric = (sortKey: string | null | undefined) =>
+    (sortKey && METRIC_RENDERERS[sortKey]) || METRIC_RENDERERS.win_rate;
+
+const entryStats = (
+    rows: Record<string, number>[],
+    labels: string[],
+    sortKey: string | null | undefined,
+): OgStat[] => {
+    const metric = resolveMetric(sortKey);
+    return rows.slice(0, OG_TOP_N).map((row, i) => ({
+        label: truncateLabel(labels[i]),
+        value: metric.format(row),
+        winRate: metric.isWinRate ? row.win_rate : null,
+    }));
+};
+
+const windowNote = (windowDays: number | null): string =>
+    windowDays ? `rolling ${windowDays} days` : 'current rolling window';
+
+/** "Ranked by win rate · rolling 60 days", or the natural-order phrasing. */
+const rankedSubtitle = (
+    sortKey: string | null | undefined,
+    naturalNoun: string,
+    windowDays: number | null,
+): string => {
+    const noun = sortKey && METRIC_RENDERERS[sortKey] ? METRIC_RENDERERS[sortKey].noun : naturalNoun;
+    return `Ranked by ${noun} · ${windowNote(windowDays)}`;
+};
+
+export const buildShipListCardProps = (
+    tier: Tier,
+    type: ShipType,
+    wrPct: WrPct,
+    card: ShipListOgCard | null,
+    realm: OgRealm,
+    sort: { key: string; dir: SortDir } | null,
+): OgCardLayoutProps => {
+    const bucket = shipBucketLabel(tier, type);
+    const kicker = wrPct === null
+        ? `Ships · ${realm.toUpperCase()}`
+        : `Ships · ${realm.toUpperCase()} · Top ${wrPct}%`;
+
+    // `pending` BEFORE row count: a cold percentile bucket returns no rows and is
+    // indistinguishable from an empty one, and this route's contract is that it
+    // always renders a card.
+    if (card?.pending) {
+        return {
+            kicker,
+            title: bucket,
+            subtitle: null,
+            stats: [],
+            fallbackNote: 'Standings for this bracket are being computed',
+        };
+    }
+
+    const rows = applySort(card?.rows ?? [], sort as { key: keyof OgShipRow; dir: SortDir } | null);
+    const stats = entryStats(
+        rows as unknown as Record<string, number>[],
+        rows.map((r) => r.ship_name),
+        sort?.key,
+    );
+
+    return {
+        kicker,
+        title: bucket,
+        subtitle: stats.length ? rankedSubtitle(sort?.key, 'win rate', card?.windowDays ?? null) : null,
+        stats,
+        fallbackNote: stats.length ? null : 'Win rate, battles, and average damage by ship',
+    };
+};
+
+export const buildShipBoardCardProps = (
+    label: string,
+    card: ShipBoardOgCard | null,
+    realm: OgRealm,
+    sort: { key: string; dir: SortDir } | null,
+): OgCardLayoutProps => {
+    const title = card?.shipName ?? label;
+    const kicker = card?.tier ? `Ship · T${card.tier} · ${realm.toUpperCase()}` : `Ship · ${realm.toUpperCase()}`;
+
+    const rows = applySort(card?.rows ?? [], sort as { key: keyof OgPlayerRow; dir: SortDir } | null);
+    const stats = entryStats(
+        rows as unknown as Record<string, number>[],
+        rows.map((r) => r.player_name),
+        sort?.key,
+    );
+
+    return {
+        kicker,
+        title,
+        // "rank" is the board's natural order, so a rank sort and no sort at all
+        // describe the same thing: standings position.
+        subtitle: stats.length
+            ? rankedSubtitle(sort?.key, 'standings rank', card?.windowDays ?? null)
+            : 'Top players by win rate',
+        stats,
+        fallbackNote: null,
+    };
+};

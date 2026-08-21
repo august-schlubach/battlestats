@@ -2,6 +2,7 @@ import React from 'react';
 import type { Metadata } from 'next';
 import ShipRouteView from '../../components/ShipRouteView';
 import { getSiteUrl } from '../../lib/siteOrigin';
+import { parseShipIdFromRouteSegment } from '../../lib/entityRoutes';
 
 
 interface ShipPageProps {
@@ -10,22 +11,37 @@ interface ShipPageProps {
     }>;
     searchParams: Promise<{
         realm?: string;
+        sort?: string;
+        dir?: string;
     }>;
 }
 
 
 export async function generateMetadata({ params, searchParams }: ShipPageProps): Promise<Metadata> {
     const { shipSlug } = await params;
-    const { realm } = await searchParams;
+    const { realm, sort, dir } = await searchParams;
     const realmParam = realm && ['na', 'eu', 'asia'].includes(realm) ? realm : 'na';
     const decoded = decodeURIComponent(shipSlug);
     // Derive a display label from the slug (strip the leading "<id>-").
     const label = decoded.replace(/^\d+-?/, '').replace(/-/g, ' ').trim() || decoded;
     const titleLabel = label.replace(/\b\w/g, (c) => c.toUpperCase());
     const url = getSiteUrl(`/ship/${shipSlug}?realm=${realmParam}`);
-    const ogImage = getSiteUrl(
-        `/og?kind=ship&label=${encodeURIComponent(titleLabel)}&realm=${realmParam}`,
-    );
+    // `id` is what makes this card data-bearing: with it the renderer fetches the
+    // real top 3 players. `sort`/`dir` carry the column the sharer had the board
+    // sorted by, so the preview names the same three. A link from before this
+    // shipped carries neither and still renders, name-only.
+    const shipId = parseShipIdFromRouteSegment(decoded);
+    const ogParams = new URLSearchParams({ kind: 'ship', label: titleLabel, realm: realmParam });
+    if (shipId) {
+        ogParams.set('id', String(shipId));
+    }
+    if (sort) {
+        ogParams.set('sort', sort);
+        if (dir) {
+            ogParams.set('dir', dir);
+        }
+    }
+    const ogImage = getSiteUrl(`/og?${ogParams.toString()}`);
 
     return {
         title: `Best ${titleLabel} players — Ship — WoWs Battlestats`,

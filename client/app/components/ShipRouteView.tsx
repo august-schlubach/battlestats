@@ -11,6 +11,7 @@ import wrColor from '../lib/wrColor';
 import { shipClass, nationLabel } from '../lib/shipIdentity';
 import TopShipIcon from './TopShipIcon';
 import ShipToolLink from './ShipToolLink';
+import CopyLinkButton from './CopyLinkButton';
 import { trackEvent } from '../lib/umami';
 
 const SHIP_LEADERBOARD_FETCH_TTL_MS = 900_000; // 15 min — mirrors the backend cache
@@ -222,13 +223,20 @@ const ShipRouteView: React.FC<ShipRouteViewProps> = ({ shipSlug }) => {
                         <span aria-hidden="true">★</span>Premium
                     </span>
                 )}
-                <span className="ml-auto">
+                <span className="ml-auto flex items-center gap-3">
                     <ShipToolLink
                         code={ship.shiptool_code}
                         shipName={ship.name}
                         realm={realm}
                         shipId={ship.ship_id}
                         size="md"
+                    />
+                    {/* This board is a fixed standings order, so the link carries
+                        no sort — the card's natural order says "standings rank",
+                        which is exactly what the page shows. */}
+                    <CopyLinkButton
+                        eventName="ship-board-share"
+                        ariaLabel={`Copy a link to the ${ship.name} player standings`}
                     />
                 </span>
             </header>

@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 
 import { getSiteUrl } from "./lib/siteOrigin";
+import { allShipBucketSegments } from "./lib/entityRoutes";
 
 const API_ORIGIN =
   process.env.BATTLESTATS_API_ORIGIN ?? "http://localhost:8888";
@@ -22,6 +23,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 1,
     },
   ];
+
+  // The 15 tier x type ship-standings buckets. Static (they are a fixed
+  // vocabulary, not entities), and canonical without view state so a bucket is
+  // one page rather than one per sort. The standings behind them are recomputed
+  // nightly.
+  for (const segment of allShipBucketSegments()) {
+    entries.push({
+      url: getSiteUrl(`/ships/${segment}`),
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.7,
+    });
+  }
 
   try {
     const realms = ['na', 'eu', 'asia'];

@@ -2,7 +2,10 @@ import {
     buildClanCardProps,
     buildDefaultCardProps,
     buildPlayerCardProps,
-    buildShipCardProps,
+    buildShipBoardCardProps,
+    buildShipListCardProps,
+    fetchShipBoardOgCard,
+    fetchShipListOgCard,
     fetchClanOgCard,
     fetchPlayerOgCard,
     formatOgCount,
@@ -230,18 +233,170 @@ describe('card composition', () => {
             .toBe('[PRIDE]');
     });
 
-    it('builds a fetch-free ship card', () => {
-        const props = buildShipCardProps('Moskva', 'asia');
+    it('falls back to a data-free ship card when the board fetch misses', () => {
+        const props = buildShipBoardCardProps('Moskva', null, 'asia', null);
 
         expect(props.kicker).toBe('Ship · ASIA');
         expect(props.title).toBe('Moskva');
-        expect(props.subtitle).toBe('Top players by win rate, rolling 30-day window');
+        expect(props.subtitle).toBe('Top players by win rate');
         expect(props.stats).toEqual([]);
-        // The subtitle is the explanation; a second note would duplicate it.
-        expect(props.fallbackNote).toBeNull();
     });
 
     it('has a branded default for an unrecognised request', () => {
         expect(buildDefaultCardProps().title).toBe('World of Warships stats');
+    });
+});
+
+
+describe('ship standings cards', () => {
+    const SHIPS = [
+        { ship_id: 1, ship_name: 'Aki', battles: 1892, win_rate: 63.2, avg_damage: 113740, kills_per_battle: 1.12 },
+        { ship_id: 2, ship_name: 'Bungo', battles: 6238, win_rate: 63.1, avg_damage: 128174, kills_per_battle: 1.27 },
+        { ship_id: 3, ship_name: 'Slava', battles: 7162, win_rate: 60.0, avg_damage: 132148, kills_per_battle: 1.26 },
+        { ship_id: 4, ship_name: 'Thor', battles: 7073, win_rate: 60.0, avg_damage: 102805, kills_per_battle: 1.10 },
+    ];
+    const listCard = { rows: SHIPS, windowDays: 60, pending: false };
+
+    const PLAYERS = [
+        { rank: 1, player_name: 'Flandre_ScarIet', win_rate: 74.45, battles: 137, avg_damage: 149417, kills_per_battle: 1.78 },
+        { rank: 2, player_name: 'Kaga_Fan', win_rate: 70.1, battles: 210, avg_damage: 140000, kills_per_battle: 1.60 },
+        { rank: 3, player_name: 'A_Very_Long_Captain_Name', win_rate: 68.0, battles: 300, avg_damage: 155000, kills_per_battle: 1.90 },
+        { rank: 4, player_name: 'Fourth', win_rate: 66.0, battles: 90, avg_damage: 120000, kills_per_battle: 1.20 },
+    ];
+    const boardCard = { shipName: 'Bungo', tier: 10, rows: PLAYERS, windowDays: 60 };
+
+    it('shows the top 3 ships by the shared sort, not the payload order', () => {
+        const props = buildShipListCardProps(10, 'Battleship', 50, listCard, 'na', {
+            key: 'avg_damage',
+            dir: 'desc',
+        });
+
+        expect(props.kicker).toBe('Ships · NA · Top 50%');
+        expect(props.title).toBe('T10 Battleships');
+        expect(props.subtitle).toBe('Ranked by average damage · rolling 60 days');
+        expect(props.stats?.map((s) => s.label)).toEqual(['Slava', 'Bungo', 'Aki']);
+        expect(props.stats?.map((s) => s.value)).toEqual(['132,148', '128,174', '113,740']);
+    });
+
+    it('tints only win-rate values on the WR scale', () => {
+        const byWr = buildShipListCardProps(10, 'Battleship', null, listCard, 'na', {
+            key: 'win_rate',
+            dir: 'desc',
+        });
+        expect(byWr.stats?.[0]).toEqual({ label: 'Aki', value: '63.2%', winRate: 63.2 });
+
+        const byDamage = buildShipListCardProps(10, 'Battleship', null, listCard, 'na', {
+            key: 'avg_damage',
+            dir: 'desc',
+        });
+        expect(byDamage.stats?.[0].winRate).toBeNull();
+    });
+
+    it('falls back to win rate for the natural order and for a name sort', () => {
+        for (const sort of [null, { key: 'ship_name' as const, dir: 'asc' as const }]) {
+            const props = buildShipListCardProps(10, 'Battleship', null, listCard, 'na', sort);
+            expect(props.subtitle).toBe('Ranked by win rate · rolling 60 days');
+            expect(props.stats?.[0].value).toMatch(/%$/);
+        }
+    });
+
+    it('preserves the payload order when no sort was shared', () => {
+        const props = buildShipListCardProps(10, 'Battleship', null, listCard, 'na', null);
+        expect(props.stats?.map((s) => s.label)).toEqual(['Aki', 'Bungo', 'Slava']);
+    });
+
+    it('drops the percentile from the kicker for the realm-wide aggregate', () => {
+        expect(buildShipListCardProps(9, 'Destroyer', null, listCard, 'eu', null).kicker).toBe('Ships · EU');
+    });
+
+    it('renders a warming note for a pending bucket rather than an empty card', () => {
+        // A cold percentile bucket carries no rows and is otherwise identical to
+        // an empty one; branching on row count first would report "no ships".
+        const props = buildShipListCardProps(10, 'Submarine', 25, { rows: [], windowDays: 60, pending: true }, 'na', {
+            key: 'win_rate',
+            dir: 'desc',
+        });
+
+        expect(props.stats).toEqual([]);
+        expect(props.fallbackNote).toBe('Standings for this bracket are being computed');
+    });
+
+    it('degrades to a branded bucket card when the list fetch misses', () => {
+        const props = buildShipListCardProps(8, 'Cruiser', null, null, 'asia', null);
+
+        expect(props.title).toBe('T8 Cruisers');
+        expect(props.stats).toEqual([]);
+        expect(props.fallbackNote).toBe('Win rate, battles, and average damage by ship');
+    });
+
+    it('shows the top 3 players by the shared sort', () => {
+        const props = buildShipBoardCardProps('Bungo', boardCard, 'na', { key: 'battles', dir: 'desc' });
+
+        expect(props.kicker).toBe('Ship · T10 · NA');
+        expect(props.title).toBe('Bungo');
+        expect(props.subtitle).toBe('Ranked by battles · rolling 60 days');
+        expect(props.stats?.map((s) => s.value)).toEqual(['300', '210', '137']);
+    });
+
+    it('describes rank and natural order as standings position', () => {
+        expect(buildShipBoardCardProps('Bungo', boardCard, 'na', null).subtitle)
+            .toBe('Ranked by standings rank · rolling 60 days');
+        expect(buildShipBoardCardProps('Bungo', boardCard, 'na', { key: 'rank', dir: 'asc' }).subtitle)
+            .toBe('Ranked by standings rank · rolling 60 days');
+    });
+
+    it('truncates a name that would push the three-up row past the card width', () => {
+        const props = buildShipBoardCardProps('Bungo', boardCard, 'na', null);
+        const long = props.stats?.[2].label ?? '';
+
+        expect(long).toBe('A_Very_Long_Capta…');
+        expect(long.length).toBeLessThanOrEqual(18);
+    });
+
+    it('prefers the payload ship name over the slug-derived label', () => {
+        expect(buildShipBoardCardProps('bungo', boardCard, 'na', null).title).toBe('Bungo');
+    });
+});
+
+
+describe('ship standings fetchers', () => {
+    it('flags a pending list payload and normalises rows', async () => {
+        mockFetch(jest.fn().mockResolvedValue(jsonResponse({ pending: true, window_days: 60, ships: [] })));
+
+        const card = await fetchShipListOgCard('na', 10, 'Battleship', 25);
+
+        expect(card?.pending).toBe(true);
+        expect(card?.rows).toEqual([]);
+        expect(card?.windowDays).toBe(60);
+    });
+
+    it('omits wr_pct entirely for the realm-wide aggregate', async () => {
+        const fetchMock = jest.fn().mockResolvedValue(jsonResponse({ ships: [] }));
+        mockFetch(fetchMock);
+
+        await fetchShipListOgCard('eu', 9, 'AirCarrier', null);
+
+        expect(fetchMock.mock.calls[0][0]).toContain('/api/realm/eu/ships?tier=9&type=AirCarrier');
+        expect(fetchMock.mock.calls[0][0]).not.toContain('wr_pct');
+    });
+
+    it('reads the ship name off the board payload', async () => {
+        mockFetch(jest.fn().mockResolvedValue(jsonResponse({
+            window_days: 60,
+            ship: { name: 'Bungo', tier: 10 },
+            players: [{ rank: 1, player_name: 'Flandre_ScarIet', win_rate: 74.45, battles: 137, avg_damage: 149417, kills_per_battle: 1.78 }],
+        })));
+
+        const card = await fetchShipBoardOgCard(4074714832, 'na');
+
+        expect(card?.shipName).toBe('Bungo');
+        expect(card?.tier).toBe(10);
+        expect(card?.rows).toHaveLength(1);
+    });
+
+    it('returns null when the board fetch fails, so the caller renders name-only', async () => {
+        mockFetch(jest.fn().mockRejectedValue(new Error('upstream down')));
+
+        expect(await fetchShipBoardOgCard(1, 'na')).toBeNull();
     });
 });
