@@ -921,12 +921,25 @@ def _build_battle_history_payload(player, period: str, windows: int,
     table = _PDSS
     date_field = "date"
 
-    # Availability probe: which modes have ANY rollup rows for this player
-    # (across all dates, not just the current window). Drives the
-    # frontend's mode-pill visibility — we hide pills for modes the
-    # player has never had data in.
+    # Availability probe: which modes have rollup rows for this player inside
+    # THE REQUESTED WINDOW. Its one remaining consumer is the client's
+    # `battleHistoryIndicatesActivity`, which lights the tab hosting the card;
+    # every other surface that reads this payload (the pills, the strip, the
+    # 30d->60d fallback) is judged on the window, so the probe has to be too.
+    #
+    # It used to run across ALL dates, which made its width the rollup
+    # retention (BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS; prod=105, pinned in
+    # server/deploy/deploy_to_droplet.sh) rather than the window. A player
+    # whose only ranked rows sat in that retention-minus-window band
+    # therefore lit the Ranked tab onto an activity view that had nothing to
+    # draw (2026-08-24, `briansayshello` NA).
+    #
+    # Deliberately NOT season-filtered, unlike the main query below: ranked is
+    # scoped to the player's current season, so someone who played the previous
+    # season a few days ago has zero in-window battles while being genuinely
+    # ranked-active. Recency is the axis this bounds; season is not.
     available_modes = list(
-        _PDSS.objects.filter(player=player)
+        _PDSS.objects.filter(player=player, **{f"{date_field}__gte": since})
         .values_list("mode", flat=True).distinct().order_by("mode")
     )
 

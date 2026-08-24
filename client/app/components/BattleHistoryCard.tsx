@@ -187,8 +187,20 @@ export const prefetchBattleHistory = (playerName: string, realm: string, signal?
 // Single source of truth for "does this payload light the tab that hosts this
 // card?" Mode-scoped since the pill was removed (2026-07-13): the Activity tab
 // (random) lights only on in-window random battles; the Ranked tab's section
-// (ranked) also accepts recent ranked rows (available_modes) so a season-edge
-// zero-window doesn't hide a genuinely ranked-active player.
+// (ranked) also accepts `available_modes` so a season-edge zero-window doesn't
+// hide a genuinely ranked-active player — ranked totals are scoped to the
+// player's CURRENT season server-side, so someone who played the previous
+// season days ago has zero in-window battles while still being active.
+//
+// That disjunct is only sound because `available_modes` is scoped to the
+// REQUESTED WINDOW server-side (views.py `_build_battle_history_payload`).
+// It used to be a probe over all dates, making its width the rollup retention
+// (BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS; prod=105, pinned in
+// server/deploy/deploy_to_droplet.sh) while the pills, the strip and the
+// 30d->60d fallback were all judged at 60 — so a player whose last ranked
+// battles were 66 days ago lit the
+// Ranked tab onto an activity view with nothing to draw (2026-08-24,
+// `briansayshello` NA). If that probe is ever widened again, this breaks.
 export const battleHistoryIndicatesActivity = (
     payload: BattleHistoryPayload,
     mode: BattleHistoryMode = 'random',
@@ -1409,6 +1421,14 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         // the Activity tab disabled before the 30d-empty fallback could promote
         // them to 60d. That is precisely the population the fallback exists for.
         // Falls back to the main payload only if the strip never arrives.
+        // That fallback is one window NARROWER (Month, so `available_modes`
+        // covers 30 days rather than 60): on a failed strip fetch a ranked
+        // player whose rows sit in the 30-60 day band reports false and the
+        // parent opens the Ranked tab on its History sub-view instead of
+        // Activity. Accepted — History is populated for exactly that player,
+        // the ranked TAB itself gates on `hasKnownRankedGames` rather than on
+        // this signal, and it self-corrects on the next load. The random path
+        // is untouched: it never consults `available_modes`.
         if (!stripSettled) return;
         const judged = stripPayload ?? payload;
         if (!judged) return;
