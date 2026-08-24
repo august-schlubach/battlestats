@@ -3216,6 +3216,77 @@ class BattleHistoryEndpointTests(TestCase):
         # no pending header so the frontend doesn't poll unnecessarily.
         self.assertNotIn("X-Ranked-Observation-Pending", r)
 
+    def test_available_modes_excludes_a_mode_whose_rows_predate_the_window(self):
+        """`available_modes` is scoped to the REQUESTED window, not to all
+        dates the rollup happens to still hold.
+
+        Regression (2026-08-24, found on `briansayshello` NA): the probe ran
+        over every `PlayerDailyShipStats` row for the player, so its width was
+        `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` (prod 105) while every surface
+        it fed was judged at 60. A player whose only ranked rows sat in the
+        60-105 day band (all 21 of theirs landed on a single day 66 days
+        earlier) reported `ranked` as available; the client's
+        `battleHistoryIndicatesActivity` lit the Ranked tab on that disjunct,
+        the auto-flip to the ranked History sub-view never fired, and the
+        activity sub-view rendered empty with every non-active pill dimmed.
+        """
+        today = django_timezone.now().date()
+        self._seed_daily_rows({
+            42: {"battles": 4, "wins": 2, "ship_name": "Yamato",
+                 "mode": PlayerDailyShipStats.MODE_RANDOM, "date": today},
+            # 66 days back: inside the 105-day rollup retention, outside the
+            # 60-day window the client judges every pill on.
+            43: {"battles": 21, "wins": 12, "ship_name": "Dalian",
+                 "mode": PlayerDailyShipStats.MODE_RANKED, "season_id": 29,
+                 "date": today - timedelta(days=66)},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get(
+                "/api/player/api_test/battle-history/?window=sixty&mode=ranked",
+            )
+        payload = response.json()
+        # Pin the scenario: the window really is empty of ranked battles.
+        self.assertEqual(payload["totals"]["battles"], 0)
+        self.assertEqual(payload["available_modes"], ["random"])
+
+    def test_available_modes_keeps_ranked_for_an_in_window_prior_season(self):
+        """The probe drops the season filter on purpose.
+
+        The ranked query is scoped to the player's CURRENT season, so a player
+        who played the previous season a few days ago has `totals.battles == 0`
+        while being genuinely ranked-active. That season-edge case is what the
+        client's `available_modes` disjunct exists to serve, and narrowing the
+        probe to the requested window must not take it away — recency is the
+        axis being fixed, season is not.
+        """
+        today = django_timezone.now().date()
+        self.player.ranked_json = [
+            {"season_id": 29, "battles": 0, "wins": 0},
+        ]
+        self.player.save(update_fields=["ranked_json"])
+        self._seed_daily_rows({
+            43: {"battles": 10, "wins": 6, "ship_name": "Dalian",
+                 "mode": PlayerDailyShipStats.MODE_RANKED, "season_id": 28,
+                 "date": today - timedelta(days=5)},
+        })
+        with mock.patch.dict(
+            "os.environ",
+            {"BATTLE_HISTORY_API_ENABLED": "1"},
+            clear=False,
+        ):
+            response = self.client.get(
+                "/api/player/api_test/battle-history/?window=sixty&mode=ranked",
+            )
+        payload = response.json()
+        # Season-filtered out of the totals...
+        self.assertEqual(payload["totals"]["battles"], 0)
+        # ...but still recent, so the tab must stay lit.
+        self.assertIn("ranked", payload["available_modes"])
+
 
 class BattleHistoryPeriodApiTests(TestCase):
     """Daily-only battle-history API. The weekly/monthly/yearly rollup

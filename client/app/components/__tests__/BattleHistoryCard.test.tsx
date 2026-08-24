@@ -656,6 +656,74 @@ describe('BattleHistoryCard', () => {
         });
     });
 
+    test('ranked: reports availability false when the window holds no ranked rows', async () => {
+        const onAvailabilityChange = jest.fn();
+        // The ranked branch of `battleHistoryIndicatesActivity` accepts
+        // `available_modes` as a stand-in for "recent ranked rows", which is
+        // only sound because the backend scopes that probe to the REQUESTED
+        // window (views.py `_build_battle_history_payload`). It used to run
+        // across all dates, so its width was the rollup retention (105d) while
+        // the strip, the pills and the 30d->60d fallback were all judged at 60.
+        // A player whose last ranked battles were 66 days ago then lit the
+        // Ranked tab onto an activity view with nothing to draw
+        // (2026-08-24, `briansayshello` NA).
+        mockByMode({ available_modes: ['random'] }, {
+            ranked: {
+                totals: {
+                    battles: 0, wins: 0, losses: 0, win_rate: 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [],
+                by_day: [],
+            },
+        });
+        render(
+            <BattleHistoryCard
+                embedded
+                mode="ranked"
+                playerName="briansayshello"
+                realm="na"
+                onAvailabilityChange={onAvailabilityChange}
+            />,
+        );
+        await waitFor(() => {
+            expect(onAvailabilityChange).toHaveBeenCalledWith(false, ['random']);
+        });
+    });
+
+    test('ranked: stays available on a season-edge zero-window', async () => {
+        const onAvailabilityChange = jest.fn();
+        // The counterweight to the test above. Ranked totals are scoped to the
+        // player's CURRENT season server-side, so someone who played the
+        // previous season a few days ago has zero in-window battles while being
+        // genuinely ranked-active. The probe is deliberately not season-filtered
+        // so this case keeps the tab lit.
+        mockByMode({ available_modes: ['random', 'ranked'] }, {
+            ranked: {
+                totals: {
+                    battles: 0, wins: 0, losses: 0, win_rate: 0,
+                    damage: 0, avg_damage: 0, frags: 0, xp: 0,
+                    planes_killed: 0, survived_battles: 0, survival_rate: 0,
+                },
+                by_ship: [],
+                by_day: [],
+            },
+        });
+        render(
+            <BattleHistoryCard
+                embedded
+                mode="ranked"
+                playerName="seasonedge"
+                realm="na"
+                onAvailabilityChange={onAvailabilityChange}
+            />,
+        );
+        await waitFor(() => {
+            expect(onAvailabilityChange).toHaveBeenCalledWith(true, ['random', 'ranked']);
+        });
+    });
+
     test('renders nothing when the API returns 404 (capture API disabled)', async () => {
         mockFetchSharedJson.mockRejectedValueOnce(new Error('404 not found'));
         const { container } = render(<BattleHistoryCard playerName="x" realm="na" />);

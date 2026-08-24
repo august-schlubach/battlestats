@@ -189,6 +189,42 @@ second — and falls back to the rounded rate when neither is present. The deriv
 fallback does NOT round to a whole win: it would be rounding a figure that is
 already lossy.
 
+## BattleHistoryCard — what lights the Ranked tab (2026-08-24, v5.4.6)
+
+`battleHistoryIndicatesActivity(payload, mode)` is the one predicate that decides
+whether the tab hosting a card stays up. Random lights only on in-window battles.
+Ranked additionally accepts `available_modes.includes('ranked')`, and that
+disjunct is **not** slack — ranked totals are scoped to the player's CURRENT
+season server-side (`views.py` `_current_ranked_season_context`, which filters the
+rollup rows by `season_id`), so a player who played the previous season three days
+ago has zero in-window battles while being genuinely ranked-active. Without the
+disjunct every season rollover would dark the tab for the whole ranked population.
+
+**The rule the disjunct depends on: `available_modes` must stay scoped to the
+requested window.** Until 2026-08-24 it was a distinct-`mode` probe over ALL dates
+for the player, so its width was the rollup retention
+(`BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS`; prod=105, pinned in
+`server/deploy/deploy_to_droplet.sh`) while every surface it fed —
+the pills, the strip, the 30d→60d fallback — was judged at 60. Anyone whose only
+ranked rows sat in the **60–105 day band** got a lit Ranked tab, no auto-flip to
+the History sub-view, and an activity view with nothing to draw: Month selected
+and empty (undimmed only because the active pill is exempt from the empty-window
+rule), Day/Week/60d all dimmed. Found on `briansayshello` NA — 21 ranked battles,
+all on 2026-06-19, 66 days out. A population, not a one-off.
+
+The probe is now bounded by the same `since` as the main query, and is
+**deliberately NOT season-filtered** — recency is the axis it bounds; season is
+the axis the disjunct exists to forgive. Both halves are pinned:
+`test_available_modes_excludes_a_mode_whose_rows_predate_the_window` and
+`test_available_modes_keeps_ranked_for_an_in_window_prior_season`
+(`test_incremental_battles.py`), plus the two matching card-level tests in
+`BattleHistoryCard.test.tsx`. Widening that probe again re-opens the defect.
+
+`available_modes` has exactly one live consumer: this predicate. The mode pill it
+originally fed was removed 2026-07-13 (`2899753`), and `PlayerDetailInsightsTabs`
+takes the value only to ignore it (`_availableModes`, "no longer steers the
+fallback").
+
 ## BattleHistoryCard — the window pill is sticky (2026-08-19)
 
 The Day / Week / Month / 60d pill row on the Activity tab is remembered in
