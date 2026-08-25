@@ -364,6 +364,24 @@ journalctl -u battlestats-traffic-digest.service -n 50 --no-pager
 there as a next-elapse tomorrow rather than next Monday, and nothing else would reveal it
 until the extra email arrived.
 
+### The conversion as actually performed, 2026-08-25 (v5.5.0)
+
+1. `server/deploy/deploy_to_droplet.sh battlestats.online` — the deploy builds a **dated
+   release directory from git**, so `current/server/scripts/` held `weekly_traffic_email.py`
+   and nothing else. The retired daily script survives only inside older release directories,
+   where nothing invokes it; no hand-deletion was needed.
+2. Both unit files rewritten in place (originals kept at
+   `/root/battlestats-traffic-digest.{service,timer}.daily.bak`), `daemon-reload`,
+   `systemctl restart …timer`.
+3. `list-timers` read **NEXT = Mon 2026-08-31 10:30 UTC**, previously Wed 08-26 10:33. The
+   `Persistent=true` catch-up did **not** fire on reload: the last trigger, Tue 08-25 10:34,
+   is after the Monday 08-24 elapse, so systemd had no missed run to make up. Converting on a
+   day earlier in the week than the last daily run would have sent one immediate catch-up.
+4. `client/deploy/deploy_to_droplet.sh battlestats.online` — mandatory after any version bump;
+   `NEXT_PUBLIC_APP_VERSION` is captured at build time. Footer verified reading 5.5.0.
+5. One live `systemctl start` of the service: `[ok] sent: [battlestats] traffic week of
+   2026-08-17: 325 visitors, 622 visits, 669 views`, 7s wall.
+
 The script itself ships with the ordinary backend deploy: `server/deploy/deploy_to_droplet.sh`
 rsyncs all of `server/`, so `scripts/weekly_traffic_email.py` lands under
 `/opt/battlestats-server/current/server/scripts/` with no deploy-script change. Only the two
