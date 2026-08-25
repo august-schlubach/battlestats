@@ -57,7 +57,7 @@ cd server && python manage.py populate_shiptool_codes [--dry-run]      # run on 
 ```
 
 - **Background enrichment** runs on the Celery `background` worker, self-chaining, kickstarted by Beat. Pool maintenance and the daily/weekly reclassify bucket families: `agents/runbooks/runbook-enrichment-pool-maintenance-2026-06-09.md`, `agents/runbooks/runbook-post-deploy-verification-2026-08-07.md`.
-- **Two unattended emails** run off **systemd timers** on the droplet (not cron, not Beat), both stdlib-only and fail-loud: the ops digest (11:30 UTC, **exception-only** — a deterministic Python verdict decides whether to mail at all) and the traffic digest (10:30 UTC, from Umami). `agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md`, `agents/runbooks/runbook-daily-traffic-email-2026-08-09.md`.
+- **Two unattended emails** run off **systemd timers** on the droplet (not cron, not Beat), both stdlib-only and fail-loud: the ops digest (11:30 UTC, **exception-only** — a deterministic Python verdict decides whether to mail at all) and the traffic digest (**Mondays 10:30 UTC**, the completed Mon-Sun week from Umami; weekly since 2026-08-25). `agents/runbooks/runbook-ops-email-exception-only-2026-08-09.md`, `agents/runbooks/runbook-weekly-traffic-email-2026-08-09.md`.
 
 ## Architecture
 

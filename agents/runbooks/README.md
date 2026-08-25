@@ -144,7 +144,7 @@ The in-process LangGraph/CrewAI runtime and its LangSmith/LangMem memory layer w
 - `runbook-audience-growth-instrumentation-2026-07-29.md` — arrivals, not retention, are the constraint; the durable visitor id.
 - `runbook-locale-adoption-measurement-2026-08-10.md` — measuring sustained non-English usage; count `visit_id`, never `session_id`.
 - `runbook-ops-email-exception-only-2026-08-09.md` — the exception-only ops digest and its deterministic verdict.
-- `runbook-daily-traffic-email-2026-08-09.md` — the morning traffic digest and the Umami session-row trap.
+- `runbook-weekly-traffic-email-2026-08-09.md` — the Monday traffic digest, the Umami session-row trap, and why weekly visitors are not the sum of daily visitors.
 - `runbook-droplet-outbound-mail-2026-08-06.md` — the outbound SMTP path. **Never delete the sysop routing rule.**
 - `runbook-health-sweep-remediation-2026-08-06.md` — the two-week health sweep and its findings.
 

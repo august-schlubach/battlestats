@@ -84,7 +84,7 @@ OPS_KEYS=(ANTHROPIC_MODEL)
 declare -A OPS_PASS_ENTRY=( [ANTHROPIC_MODEL]="battlestats/anthropic-model" )
 OPS_CONSUMERS=(
   "${REPO_ROOT}/server/scripts/daily_ops_email.py"
-  "${REPO_ROOT}/server/scripts/daily_traffic_email.py"
+  "${REPO_ROOT}/server/scripts/weekly_traffic_email.py"
 )
 
 # Docs that are allowed to state live values, and are therefore checked.

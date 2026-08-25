@@ -1,15 +1,22 @@
-# Runbook: Daily Web-Traffic Email
+# Runbook: Weekly Web-Traffic Email
 
 _Created: 2026-08-09_
-_Context: The operator asked for a morning email summarizing the previous day's site traffic: visitors, sessions, new vs returning, and events triggered. This documents the Umami schema facts the report rests on, one of which contradicts the obvious reading of the data._
+_Converted from daily to weekly: 2026-08-25_
+_Context: The operator asked for a morning email summarizing site traffic: visitors, sessions, new vs returning, and events triggered. This documents the Umami schema facts the report rests on, one of which contradicts the obvious reading of the data._
 _QA: Every schema claim below was read from the live Umami Postgres on the production droplet, read-only (SELECT and `\d` only). The rendered sample is real production output from the finished script, not hand-assembled._
 
 ## Purpose
 
-`server/scripts/daily_traffic_email.py` mails a summary of the previous **UTC** day's web
-traffic at **10:30 UTC**, driven by a droplet **systemd timer**. It is the analytics sibling
-of `daily_ops_email.py` (11:30 UTC, the player-pipeline digest) and shares its contract:
-stdlib only, no venv, secrets from an env file, fail-loud, `--dry-run`.
+`server/scripts/weekly_traffic_email.py` mails a summary of the last completed **Monday-to-
+Sunday UTC week** at **10:30 UTC on Mondays**, driven by a droplet **systemd timer**. It is
+the analytics sibling of `daily_ops_email.py` (11:30 UTC daily, the player-pipeline digest)
+and shares its contract: stdlib only, no venv, secrets from an env file, fail-loud,
+`--dry-run`.
+
+**It ran daily from 2026-08-09 to 2026-08-25.** The conversion changed the window and the
+comparison baseline; it changed none of the Umami semantics below, which is why most of this
+runbook is unamended. Section "The weekly window" is the new material, and it is where the
+arithmetic hazard lives.
 
 This is deliberately an **OS-level timer, not Celery Beat**. Three tasks in this repo have
 already been truncated by Beat soft-time-limits (`recapture_lapsed_players_task`,
@@ -20,6 +27,54 @@ The scheduler is a systemd timer rather than a crontab line because that is what
 existing ops digest uses (`battlestats-ops-digest.timer` →
 `battlestats-ops-digest.service`); there is no battlestats line in root's crontab at all.
 Matching it buys `Persistent=true` catch-up after a reboot and journal capture.
+
+## The weekly window
+
+### Derivation: most-recent-Monday minus seven, never now-minus-seven
+
+`parse_week()` computes **the most recent Monday at or before now, minus seven days**. On the
+Monday 10:30 UTC run that is last Mon-Sun. On a Wednesday catch-up run after a reboot it is
+**still** last Mon-Sun, because the timer carries `Persistent=true` and a missed run fires
+late. "Now minus seven days" would have silently reported Wed-Tue instead, and nothing in the
+email would have said so. `--week=YYYY-MM-DD` accepts any date inside a week and normalises
+to that week's Monday.
+
+### The arithmetic hazard: distinct counts do not sum
+
+This is the one thing a reader of this report must understand.
+
+| Metric | SQL | Sums across days? |
+|---|---|---|
+| Visitors | `count(DISTINCT session_id)` | **No.** A visitor active on three days is one weekly visitor and three daily ones. |
+| Visits | `count(DISTINCT visit_id)` | **No.** Same reason, plus a visit straddling midnight carries one `visit_id` in both days. |
+| Pageviews | `count(*) WHERE event_type = 1` | Yes. |
+| Custom events | `count(*) WHERE event_type = 2` minus beacons | Yes. |
+| New visitors | `count(DISTINCT session_id) FILTER (sess_first inside the bucket)` | **Yes** — first-ever-seen falls on exactly one day, and necessarily a day that visitor was active on. |
+
+So the headline comes from a **whole-week query** (`totals`), never from adding up the daily
+rows. On the fixture in the test suite the daily visitor column adds to 151 against a true
+weekly 141; at production volume the gap is the returning-visitor rate, roughly a third. A
+report that summed would have overstated its headline every week and drifted as the audience
+matured — the same class of error as the durable-session trap below.
+
+`totals` computes the reported week and the prior week in **one pass**, bucketed by a `CASE`
+aliased **`bucket`**: `window` is a reserved word in Postgres and an unquoted alias there is a
+syntax error only the live database would find.
+
+The email states the distinction in the Totals legend and again under the day-by-day table,
+because the reader's instinct is to add the column and find a different number.
+
+### The self-check
+
+Three columns are computed twice, by two independently-windowed queries: pageviews, custom
+events, and new visitors. `compute()` compares them and records any disagreement in
+`daily["discrepancies"]`; `render()` prints each one in red under the day-by-day table. A
+mismatch means a window boundary is wrong somewhere.
+
+It is **recorded, not asserted**. A self-check that raised would replace a report carrying a
+visible discrepancy with no report at all, which is strictly worse. Visitors and visits are
+deliberately absent from the check: they genuinely do not sum, which is the whole reason the
+headline is queried whole-week.
 
 ## The finding that shapes the whole report
 
@@ -55,22 +110,21 @@ inactivity. That is the "session" of ordinary analytics usage.
 
 | Email term | SQL | Umami dashboard equivalent |
 |---|---|---|
-| Visitors | `count(DISTINCT session_id)` over the day's events | "Visitors" |
+| Visitors | `count(DISTINCT session_id)` over the week's events | "Visitors" |
 | Visits / sessions | `count(DISTINCT visit_id)` | "Visits" |
 | Pageviews | `count(*) WHERE event_type = 1` | "Views" |
 | Custom events (interactions) | `count(*) WHERE event_type = 2 AND event_name NOT IN INSTRUMENTATION_EVENTS` | "Events", minus page-load beacons |
 
-**Visits do not sum across days.** A visit spanning midnight carries one `visit_id` and is
-counted in both days. The report therefore averages per-day figures and never totals a
-week's `visit_id` cardinality. The email states this in the Totals footnote.
+**Visits do not sum across days.** See "The arithmetic hazard" above: the report queries the
+week whole rather than totalling seven daily cardinalities, and says so in the Totals legend.
 
 ## New vs returning
 
-- **Denominator: the day's active visitors** (`count(DISTINCT session_id)` over that day's
+- **Denominator: the week's active visitors** (`count(DISTINCT session_id)` over the week's
   events), not visits and not pageviews.
-- **New** = that visitor's `session.created_at` falls inside the day, i.e. first-ever-seen
+- **New** = that visitor's `session.created_at` falls inside the week, i.e. first-ever-seen
   by Umami — not first-seen-in-window.
-- **Returning** = first seen on an earlier day.
+- **Returning** = first seen before the week.
 
 The definition is printed in the email body, not merely encoded in the SQL, because it is
 the figure most likely to be silently wrong.
@@ -94,7 +148,7 @@ So the report uses `session_id` first-seen as the primary split, and prints the 
 lens as a **diagnostic line**: coverage, plus `new_but_known_bs_vid` — visitors counted as
 new whose `distinct_id` was already bound to an older session row. That correction is
 **reported alongside, never folded into** the headline, so the primary count stays
-comparable day to day. It reads 0 today and will begin correcting the first time an IP
+comparable week to week. It reads 0 today and will begin correcting the first time an IP
 rotation actually occurs.
 
 ## Operator IP exclusion
@@ -131,14 +185,17 @@ Left in the roster it distorted the report three ways, all of them visible in th
    event that every visitor emits. The lead paragraph opened "the event mix is dominated by
    locale-active at 75 against a prior daily mean of 2.86" — true, and about the deploy
    rather than the day.
-2. **It broke its own 7-day comparison.** The beacon shipped 2026-08-10, so the prior window
-   partly predates it and any ratio against that mean measures the rollout.
+2. **It broke its own prior-window comparison.** The beacon shipped 2026-08-10, so the prior
+   window partly predates it and any ratio against it measures the rollout. Under the weekly
+   report the comparison column is the prior **week**'s total count for that event, not a
+   daily mean; the hazard is identical and so is the fix.
 3. **It silently zeroed an engagement measure.** "Single-view visits (no second event)" tests
    `pv <= 1 AND ev = 0`. Once every page load emitted a custom event, `ev = 0` became
    unreachable and the measure would have read zero forever — as an engagement *win*.
 
-So beacons are excluded from the headline Custom events row, from **every day** of the trend
-window (excluding them from the day alone would swap one discontinuity for a worse one),
+So beacons are excluded from the headline Custom events row, from **both windows** of the
+`totals` query and from every day of the breakdown (excluding them from one side alone would
+swap one discontinuity for a worse one),
 from the engagement second-event test, from the feature-area roster, and from
 `llm_payload()`. The `events` **query itself stays unfiltered**: the split happens in
 `compute()` so the beacon's own count survives to be printed once, as a flat sentence under
@@ -156,10 +213,11 @@ thumb is whether a visitor could have chosen not to emit the event.
 
 ## Timezone
 
-Everything is a whole **UTC** day, matching the rest of the project. The report defaults to
-*yesterday UTC*; the 10:30 UTC slot is comfortably after that day closes and lands ~06:30
-in the operator's Eastern morning. `--day=YYYY-MM-DD` re-runs any past day. The slot is a
-choice, not a constraint: move the cron line if a different hour reads better.
+Everything is a whole **UTC** day and a whole Monday-to-Sunday **UTC** week, matching the
+rest of the project. The 10:30 UTC Monday slot is comfortably after the reported week closes
+and lands ~06:30 in the operator's Eastern Monday morning. `--week=YYYY-MM-DD` re-runs any
+past week. The slot is a choice, not a constraint: change `OnCalendar` if a different hour or
+weekday reads better.
 
 All SQL bounds are explicit `timestamptz` literals, and day bucketing converts **both**
 sides of every comparison to naive UTC via `AT TIME ZONE 'UTC'`, so the server's `TimeZone`
@@ -185,8 +243,12 @@ raises rather than silently misaligning results onto the wrong query.
 
 The Anthropic call writes **only the lead paragraph**. Every table, total, delta and
 percentage is computed in Python, so the model cannot produce a number that reaches a
-table. Extended thinking is disabled (default-on, it consumes the whole budget and returns
-no text — the same trap `daily_ops_email.py` documents). An API failure, a missing key, or
+table. Extended thinking is **bounded by `output_config.effort = "low"` plus `max_tokens`
+headroom, not disabled**: `max_tokens` caps thinking and response text together, which is
+what produced the original empty-response failure, but turning thinking off buys a worse bug
+— Opus 5 can then leak `<thinking>` tags into a response this script parses as JSON. (This
+paragraph said "disabled" until 2026-08-25; the code and its test never did.) An API
+failure, a missing key, or
 an empty response degrades to the full report with a one-line note; it never blocks the
 email. `--no-llm` skips the call entirely.
 
@@ -204,9 +266,16 @@ count, and pairing either against the 48 total invents a share that does not exi
 system prompt already forbade deriving ratios; the model did it anyway.
 
 The fix is `llm_payload()`, which withholds the operands rather than asking for restraint.
-The model now receives only whole-day totals, pre-computed deltas, per-event counts with
-each event's own prior mean, and **rank-ordered labels with no counts attached** for routes,
-referrers and countries. `pages`, `routes`, `referrers` and `countries` rows never reach it.
+The model now receives only whole-week totals, pre-computed deltas against the prior week,
+per-event counts with each event's own prior-week count, and **rank-ordered labels with no
+counts attached** for routes, referrers and countries. `pages`, `routes`, `referrers` and
+`countries` rows never reach it.
+
+**The per-day series is withheld on exactly the same grounds.** Seven `(day, visitors,
+visits)` triples is a standing invitation to write "Tuesday was 40 of the week's 141", which
+is the identical cross-denominator fabrication in a new costume. The model gets the busiest
+and the quietest day as **labels** — `"Fri 2026-08-21"` — and nothing else, and the prompt
+says in terms that they are labels, not figures.
 A test pins the payload's key set to an explicit allowlist, so adding a count back is a
 deliberate act rather than an accident. The prompt additionally bans any "X of Y"
 construction, as belt and braces.
@@ -225,7 +294,7 @@ one that already failed here once.
 | `UMAMI_DATABASE_URL` | *(unset)* | overrides the file; used by tests and staging |
 | `UMAMI_SITE_DOMAIN` | `battlestats.online` | selects the website row |
 | `PSQL_BIN` | `psql` | psql path |
-| `TRAFFIC_EMAIL_DAY` | *(unset)* | pins the reported day; `--day=` wins over it |
+| `TRAFFIC_EMAIL_WEEK` | *(unset)* | pins the reported week (any date inside it); `--week=` wins over it |
 
 `DATABASE_URL` is **not** duplicated into the ops env file. The script parses that one key
 out of `/opt/umami/.env` and imports nothing else from it, so `APP_SECRET` and the rest
@@ -243,11 +312,16 @@ Modelled directly on `battlestats-ops-digest.{service,timer}`, including
 `User=battlestats` and the deliberate `/usr/bin/python3` rather than the venv, which is
 what keeps the stdlib-only property honest.
 
+**The unit names do not change.** `battlestats-traffic-digest.{service,timer}` are already
+cadence-neutral, and renaming them would leave the *old* timer enabled and firing daily until
+someone remembered to disable it: an orphan daily email forever. Only `OnCalendar`, the
+`Description` lines and `ExecStart` change.
+
 `/etc/systemd/system/battlestats-traffic-digest.service`:
 
 ```ini
 [Unit]
-Description=Battlestats daily web-traffic email
+Description=Battlestats weekly web-traffic email
 After=network-online.target
 Wants=network-online.target
 
@@ -257,9 +331,9 @@ User=battlestats
 Group=battlestats
 WorkingDirectory=/opt/battlestats-server/current/server
 EnvironmentFile=/etc/battlestats-ops-email.env
-# Deliberately /usr/bin/python3, not the venv: daily_traffic_email.py is
+# Deliberately /usr/bin/python3, not the venv: weekly_traffic_email.py is
 # stdlib-only by design and running it this way keeps that property honest.
-ExecStart=/bin/bash -lc 'exec /usr/bin/python3 scripts/daily_traffic_email.py'
+ExecStart=/bin/bash -lc 'exec /usr/bin/python3 scripts/weekly_traffic_email.py'
 TimeoutStartSec=900
 ```
 
@@ -267,10 +341,10 @@ TimeoutStartSec=900
 
 ```ini
 [Unit]
-Description=Send the Battlestats web-traffic summary each morning
+Description=Send the Battlestats web-traffic summary each Monday morning
 
 [Timer]
-OnCalendar=*-*-* 10:30:00 UTC
+OnCalendar=Mon *-*-* 10:30:00 UTC
 Persistent=true
 RandomizedDelaySec=300
 
@@ -281,74 +355,133 @@ WantedBy=timers.target
 ```bash
 systemctl daemon-reload
 systemctl enable --now battlestats-traffic-digest.timer
+systemctl list-timers battlestats-traffic-digest.timer --no-pager   # NEXT must be a Monday
 systemctl start battlestats-traffic-digest.service   # one immediate live run
 journalctl -u battlestats-traffic-digest.service -n 50 --no-pager
 ```
 
+`list-timers` is the check that matters after the conversion: a stale `OnCalendar` shows up
+there as a next-elapse tomorrow rather than next Monday, and nothing else would reveal it
+until the extra email arrived.
+
 The script itself ships with the ordinary backend deploy: `server/deploy/deploy_to_droplet.sh`
-rsyncs all of `server/`, so `scripts/daily_traffic_email.py` lands under
+rsyncs all of `server/`, so `scripts/weekly_traffic_email.py` lands under
 `/opt/battlestats-server/current/server/scripts/` with no deploy-script change. Only the two
-unit files are manual, one time.
+unit files are manual, one time. **rsync does not delete**, so the retired
+`daily_traffic_email.py` stays on the droplet after the rename; it is harmless (nothing
+invokes it) but should be removed by hand to keep the directory honest.
 
 ## Operating it
 
 ```bash
-# preview yesterday without sending anything (including on failure)
-python3 daily_traffic_email.py --dry-run
+# preview last completed week without sending anything (including on failure)
+python3 weekly_traffic_email.py --dry-run
 
-# a specific past day, no API call
-python3 daily_traffic_email.py --dry-run --no-llm --day=2026-08-08
+# a specific past week, no API call. Any date inside the week works.
+python3 weekly_traffic_email.py --dry-run --no-llm --week=2026-08-17
 ```
 
 `--dry-run` sends nothing at all, failure mail included: a dry run is how this is exercised
 by hand and must not be able to page the operator.
 
+**Runtime**, measured on the droplet against the week of 2026-08-17 (325 visitors, 622 visits):
+**9.0s wall including the Anthropic call**, against `TimeoutStartSec=900`. The weekly windows
+made `totals` scan fourteen days and put `identity`'s correlated `EXISTS` over 325 sessions
+rather than ~29; neither is anywhere near binding. Re-measure if the audience grows an order
+of magnitude.
+
 Any unhandled error still mails a `FAILED`-tagged message carrying the traceback and exits
 non-zero for the cron log. This path was exercised for real during development (the
 `json_agg` line-count bug produced a genuine FAILED email).
 
-## Sample output (2026-08-08, real production data)
+## Sample output (week of 2026-08-17, real production data)
 
 ```
-battlestats.online traffic: 2026-08-08 (UTC)
+battlestats.online traffic: week of 2026-08-17 to 2026-08-23 (UTC)
 
 TOTALS
-  Visitors             29   vs prev day -29 (-50%)     vs 7d mean -12.3 (-29.8%)
-  Visits/sessions      48   vs prev day -13 (-21.3%)   vs 7d mean +4.6 (+10.6%)
-  Pageviews            74   vs prev day -19 (-20.4%)   vs 7d mean +4.9 (+7.1%)
-  Custom events       107   vs prev day -52 (-32.7%)   vs 7d mean -6.7 (-5.9%)
+  Visitors                 325   vs prior week +44 (+15.7%)   daily mean 46.4
+  Visits/sessions          622   vs prior week +44 (+7.6%)    daily mean 88.9
+  Pageviews                669   vs prior week -56 (-7.7%)    daily mean 95.6
+  Events (interactions)   1440   vs prior week +85 (+6.3%)    daily mean 205.7
 
-NEW VS RETURNING (denominator: the day's active visitors)
-  new 13 (44.8%); returning 16 (55.2%); total 29
-  bs-vid coverage 15/29; 0 "new" visitors were known browsers on a rotated address
+DAY BY DAY (visitors / new / visits / pageviews / events)
+  Mon 2026-08-17   57   31   81    88   148
+  Tue 2026-08-18   74   50   92    95   264
+  Wed 2026-08-19   77   50  103    88   245
+  Thu 2026-08-20   59   31   81    89   228
+  Fri 2026-08-21   70   40   94   117   251
+  Sat 2026-08-22   58   28  101   113   185
+  Sun 2026-08-23   50   25   71    79   119
+
+NEW VS RETURNING (denominator: the week's active visitors)
+  new 255 (78.5%); returning 70 (21.5%); total 325
+  bs-vid coverage 158/325; 0 "new" visitors were known browsers on a rotated address
 
 ENGAGEMENT
-  1.54 pageviews/visit; average visit 4m 08s; 25/48 single-view
+  1.08 pageviews/visit; average visit 2m 12s; 409/622 single-view
 ```
+
+**Read the visitors column against the header.** The daily column adds to 445; the week is
+325. That 120-visitor gap is not an error, it is the returning visitors being counted once
+instead of once per active day, and it is the reason the headline is a separate query. The
+same week's New column sums to exactly 255 and the whole-week query says 255; pageviews sum
+to 669 against a headline 669, events to 1440 against 1440. All three self-checks reconciled
+on this run, which is the evidence that the week and day boundaries agree.
+
+**The new/returning share is window-dependent and is not comparable to the daily email's.**
+The last daily report read `new 13 (44.8%)`; this weekly one reads `new 255 (78.5%)`. Nothing
+about the audience changed. The numerator sums across the days and the denominator does not,
+so widening the window raises the share monotonically — a 30-day window would read higher
+still. Read it week against week, never against a remembered daily figure. The email says so
+in the New vs returning legend, because this is the number the runbook has always called the
+one most likely to be silently wrong.
 
 ## Tests
 
-`server/warships/tests/test_daily_traffic_email.py` — 92 tests. The script is loaded by
-path (it is a cron entrypoint, not a Django module); `run_queries` and `send_email` are
-both mocked. Coverage: the delta and mean arithmetic, the new/returning denominator, the
-event-family rollup, path percent-decoding, HTML escaping, the rendered legends, the SQL's
-ranking and timezone discipline, the `psql` transport's error paths, config precedence, and
-the FAILED path including its `--dry-run` suppression.
+`server/warships/tests/test_weekly_traffic_email.py` — 125 tests. The script is loaded by
+path (it is a timer entrypoint, not a Django module); `run_queries` and `send_email` are
+both mocked. Coverage: the delta arithmetic, the new/returning denominator, the event-family
+rollup, path percent-decoding, HTML escaping, the rendered legends, the SQL's ranking and
+timezone discipline, the `psql` transport's error paths, config precedence, and the FAILED
+path including its `--dry-run` suppression.
+
+The weekly conversion added, in `WeekWindowTests`, `DailyBreakdownTests` and the render/payload
+classes:
+
+- **the window derivation**, including three catch-up runs (Mon / Wed / Sun of the following
+  week) all resolving to the same reported week, and the following Monday advancing exactly
+  seven days;
+- **`test_visitors_are_never_summed_from_the_daily_rows`**, which pins the fixture's daily
+  visitor column at 151 against a weekly 141 so a future refactor cannot quietly start
+  summing;
+- **zero-fill**: a day the trend query omits entirely still renders as a zero row in calendar
+  position, with its weekday label;
+- **the self-check**, both branches — a clean week prints no alarm, a broken new-visitor
+  count prints the mismatch in HTML and text;
+- **`bucket` not `window`**, guarding the reserved-word syntax error;
+- **the daily series never reaching the model**: no weekday name and no in-week date appears
+  anywhere in the payload blob, only the busiest/quietest labels.
 
 The shared fixture carries a `locale-active` row **at the head of the event roster**, where
 the SQL's visitor ordering really puts it, so every existing assertion about totals,
 rankings and families now also asserts the beacon split. `InstrumentationEventTests` pins
-the rest: held out of the roster, the families, the trend SQL, the engagement SQL and the
-model payload; kept in `beacon_rows`; rendered once as prose and never as a `<td>`.
+the rest: held out of the roster, the families, both `totals` windows, the trend SQL, the
+engagement SQL and the model payload; kept in `beacon_rows`; rendered once as prose and
+never as a `<td>`.
 
 ## Known gaps
 
-- **Sessions straddling midnight** are counted in both days (0–2/day at current volume).
+- **A traffic anomaly can now sit unseen for up to six days.** This is the cost of the
+  cadence and was accepted knowingly. The daily ops digest (11:30 UTC, exception-only) is the
+  place to put a traffic guard if that ever bites; nothing of the sort exists today.
+- **Sessions straddling midnight** are counted in both days of the day-by-day table (0–2/day
+  at current volume). They are counted once in the weekly headline, which is queried whole.
 - **`avg_visit_seconds`** is last-event-minus-first-event within a visit, so a single-event
   visit measures zero and drags the mean down. The email says so.
 - **"Single-view visits" is stricter than Umami's bounce rate** and will read lower than the
   dashboard. It counts visits with at most one pageview **and zero custom events**
-  (`pv <= 1 AND ev = 0`); Umami's bounce ignores custom events. On 2026-08-08 that is 25 of
+  (`pv <= 1 AND ev = 0`); Umami's bounce ignores custom events. On 2026-08-08 that was 25 of
   48, where the pageview-only test would have said 33. The stricter form is deliberate: a
   visitor who landed once but then filtered the ship leaderboard did not bounce. `ev` counts
   **interactions only** — see the beacon section above for why that qualifier is what keeps

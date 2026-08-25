@@ -2689,15 +2689,17 @@
                 "daily-snapshot-engine-removed"
             ]
         },
-        "agents/runbooks/runbook-daily-traffic-email-2026-08-09.md": {
+        "agents/runbooks/runbook-weekly-traffic-email-2026-08-09.md": {
             "kind": "runbook",
             "status": "active",
             "lifecycle": "evergreen",
             "section": "operations",
             "owner": "platform",
             "aliases": [
+                "weekly traffic email",
                 "daily traffic email",
                 "web traffic digest",
+                "umami weekly summary",
                 "umami daily summary",
                 "visitors and sessions email",
                 "new vs returning visitors",
@@ -2708,6 +2710,8 @@
                 "umami",
                 "email",
                 "cron",
+                "systemd",
+                "weekly",
                 "traffic",
                 "sessions",
                 "visitors",
