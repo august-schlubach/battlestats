@@ -423,10 +423,12 @@ N is twelve CJK visitors over three days. Directionally strong, not statisticall
 here justifies dropping the selector, and the discoverability finding of section 2 is untouched:
 the selector is still how a visitor overrides, and one click still outranks detection forever.
 
-## 6. The daily traffic email carries this readout
+## 6. The weekly traffic email carries this readout
 
-`server/scripts/daily_traffic_email.py` (timer `battlestats-traffic-digest`, 10:30 UTC) grew a
-**Language** section on 2026-08-10, so the numbers above arrive daily without anyone running SQL.
+`server/scripts/weekly_traffic_email.py` (timer `battlestats-traffic-digest`, Mondays 10:30 UTC)
+grew a **Language** section on 2026-08-10, so the numbers above arrive without anyone running
+SQL. It was a daily email until 2026-08-25; the section's semantics did not change with the
+cadence, only its window — the denominators are now the week's visitors rather than the day's.
 It prints two tables that must never be read as one:
 
 - **UI locale in effect**, from `locale-active`. Denominator: beacon-reporting visitors, *not* the
@@ -448,10 +450,10 @@ quiet on its own from 2026-08-11 onward.
 
 The Language section is the **only** place in that email where `locale-active` appears as a figure.
 From 2026-08-12 the beacon is classed as instrumentation (`INSTRUMENTATION_EVENTS`) and held out of
-the headline custom-event count, the trend window, the engagement second-event test and the event
-ranking: an event every visitor emits on every page load cannot be outranked, and the 2026-08-11
+the headline custom-event count, both windows of the totals query, the engagement second-event
+test and the event ranking: an event every visitor emits on every page load cannot be outranked, and the 2026-08-11
 lead duly opened on it instead of on anything a visitor did. See
-`runbook-daily-traffic-email-2026-08-09.md`. Its raw count is still printed once, as prose, under
+`runbook-weekly-traffic-email-2026-08-09.md`. Its raw count is still printed once, as prose, under
 Events triggered.
 
 The model that writes the lead paragraph gets **only the two pre-computed percentages**, never the
@@ -472,7 +474,7 @@ Verified against the working tree at `worktree-locale-beacon` and prod Umami on 
 | ko/ja dictionaries at 67/76 keys after `footer.lastViewed`; 93/103 after the 08-11 round | `dictionaries.test.ts` coverage line |
 | the other 9 are documented omissions, not a backlog | `ko.ts` NEEDS-NATIVE-CHECK block; research doc |
 | beacon behaviour (7 cases) | `app/components/__tests__/LocaleBeacon.test.tsx` |
-| email Language section, both denominators | `test_daily_traffic_email.py` `LocaleTests` + `RenderTests` |
+| email Language section, both denominators | `test_weekly_traffic_email.py` `LocaleTests` + `RenderTests` |
 | the email section against real prod data | dry run on the droplet, 2026-08-10, day 2026-08-09 — exercised the **unmeasured** branch only, since that day predates the beacon; the populated branch is fixture-tested and first runs live on 2026-08-11 |
 
 Added 2026-08-11 with the autodetect build:

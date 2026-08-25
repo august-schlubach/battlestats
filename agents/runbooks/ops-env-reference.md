@@ -181,15 +181,15 @@ Player request path:
 - `OPS_EMAIL_HEARTBEAT_DOW` (code default **`mon`**) — weekday for the unconditional all-clear heartbeat, subject `[battlestats] ops heartbeat: all clear`. Empty string disables it. It exists because a script cannot detect its own non-execution: the staleness rules cover the snapshot files, but only a periodic unconditional send proves the timer and the SMTP path are alive. Disabling it makes prolonged silence unverifiable — a deliberate choice, not a default to drift into.
 - `OPS_ALERT_<NAME>` — per-threshold override; the names are the keys of `DEFAULT_THRESHOLDS` in `daily_ops_email.py`. The one most likely to need it is `OPS_ALERT_RECAPTURE_MAX_AGE_HOURS` (default **24**), which has only 40–80 min of healthy margin against the 11:30–11:35 timer window; set **26** if it nags. Thresholds were derived from the observed prod corpus (64 observation-floor snapshots, 39 crawl passes, 113 recapture runs) — re-derive rather than nudge if the workload regime shifts again, as it did on 2026-06-20/21. Runbook: `runbook-ops-email-exception-only-2026-08-09.md`.
 
-**Daily traffic digest** (2026-08-09, `daily_traffic_email.py`, `battlestats-traffic-digest.timer` at 10:30 UTC). Reads the Umami Postgres directly via `psql`; sends through the same `warships.opsmail` path and the same `/etc/battlestats-ops-email.env` credentials.
+**Weekly traffic digest** (2026-08-09, weekly since 2026-08-25; `weekly_traffic_email.py`, `battlestats-traffic-digest.timer` at **Mon 10:30 UTC**, reporting the completed Mon-Sun UTC week). Reads the Umami Postgres directly via `psql`; sends through the same `warships.opsmail` path and the same `/etc/battlestats-ops-email.env` credentials.
 
 - `TRAFFIC_EMAIL_ENV_FILE` (code default **`/etc/battlestats-ops-email.env`**) — mail + Anthropic credentials, shared with the ops digest.
 - `UMAMI_ENV_FILE` (code default **`/opt/umami/.env`**) — where `DATABASE_URL` is read from. That file is `battlestats:battlestats` **0640**, so the report renders as the app user; **no root required**.
 - `UMAMI_DATABASE_URL` (**unset** by default) — overrides the value read from `UMAMI_ENV_FILE`.
 - `UMAMI_SITE_DOMAIN` (code default **`battlestats.online`**) — resolves the `website_id`. **Three sites share this database** (Battlestats, Oturu `oturu.online`, Metro `tamezz.com`); every query scopes by that id, so a wrong domain silently reports a neighbour's traffic rather than erroring.
-- `PSQL_BIN` (code default **`psql`**), `TRAFFIC_EMAIL_DAY` (**unset**; ISO date to re-render a past day, for backfill or debugging).
+- `PSQL_BIN` (code default **`psql`**), `TRAFFIC_EMAIL_WEEK` (**unset**; ISO date anywhere inside a week, to re-render that past week for backfill or debugging; normalised to its Monday. Replaced `TRAFFIC_EMAIL_DAY` on 2026-08-25 — the old name is no longer read at all).
 
-Runbook: `runbook-daily-traffic-email-2026-08-09.md`.
+Runbook: `runbook-weekly-traffic-email-2026-08-09.md`.
 
 Local-dev only: `BATTLESTATS_DISABLE_LIVE_REFRESH` (serve stale snapshots, no live WG refresh).
 

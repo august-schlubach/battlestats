@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Daily battlestats web-traffic email (previous UTC day).
+"""Weekly battlestats web-traffic email (the completed Mon-Sun UTC week).
 
-Runs unattended on the production droplet from a systemd timer at 10:30 UTC,
-i.e. after the previous UTC day has closed and an hour before the ops digest.
-An OS-level timer deliberately, never Celery Beat: three tasks in this repo have
-already been truncated by Beat soft-time-limits, and a report that silently
-half-runs is worse than none. Reads the Umami analytics Postgres directly,
-computes every number in Python/SQL, and emails a summary: totals with
-day-over-day and 7-day-average context, new vs returning visitors, top pages
+Runs unattended on the production droplet from a systemd timer at 10:30 UTC on
+Mondays, i.e. after the reported week has closed. An OS-level timer
+deliberately, never Celery Beat: three tasks in this repo have already been
+truncated by Beat soft-time-limits, and a report that silently half-runs is
+worse than none. Reads the Umami analytics Postgres directly, computes every
+number in Python/SQL, and emails a summary: weekly totals against the prior
+week, a day-by-day breakdown of the week, new vs returning visitors, top pages
 ranked by visitors, referrers, and the custom-event roster this app emits.
+
+The reported week is derived as "the most recent Monday at or before now, minus
+seven days", NOT as "now minus seven days". The difference matters because the
+timer is Persistent=true: a catch-up run on Wednesday after a reboot must still
+report the same completed Mon-Sun week the Monday run would have, rather than
+silently sliding the window three days.
 
 Sibling of `daily_ops_email.py` (the 11:30 UTC pipeline digest). Same contract:
 
@@ -31,17 +37,25 @@ METRIC VOCABULARY (Umami v2.20 semantics, verified against the live schema):
     reused forever after. `session.created_at` is therefore FIRST-EVER-SEEN, not
     "a session that started today". One live row was observed spanning
     2026-07-30 -> 2026-08-09 with 24 visits.
-  * Visitors      = COUNT(DISTINCT session_id) over the day's events.
+  * Visitors      = COUNT(DISTINCT session_id) over the week's events. This is
+    the reason the weekly headline is queried over the whole week rather than
+    summed from the daily rows: a visitor active on three days is ONE weekly
+    visitor and THREE daily ones. Only pageviews and events, being count(*), sum.
   * Visits        = COUNT(DISTINCT visit_id). Umami opens a new visit_id after
     30 minutes of inactivity. This is the "session" in ordinary analytics usage.
+    It does not sum across days either, for the same reason plus the midnight
+    straddle: one visit spanning midnight carries one visit_id in both days.
   * Pageviews     = event_type 1. Custom events = event_type 2, minus the
     page-load beacons in INSTRUMENTATION_EVENTS: everywhere this report counts
     custom events as visitor ACTIONS it counts interactions only. See that
     constant for why, and the Events triggered section for where the beacons
     are still printed.
-  * New visitor   = a visitor whose session.created_at falls inside the day.
-    Returning     = first seen on an earlier day. Denominator is the day's
+  * New visitor   = a visitor whose session.created_at falls inside the week.
+    Returning     = first seen before the week. Denominator is the week's
     active visitors, not visits. See NEW_VS_RETURNING_NOTE below for the caveat.
+    New visitors is the one distinct count that DOES sum across the daily rows,
+    because first-ever-seen lands on exactly one day; compute() checks that
+    identity against the weekly query and says so if it ever breaks.
 
 Operator IP exclusion is handled at Umami INGEST level (`IGNORE_IP` in
 /opt/umami/.env). These queries inherit it for free and must not re-filter.
@@ -50,7 +64,9 @@ Flags:
   --dry-run          Render to stdout; do not send.
   --no-llm           Skip the Anthropic lead paragraph (also the automatic
                      fallback when the API errors or returns nothing).
-  --day=YYYY-MM-DD   Report on an explicit UTC day instead of yesterday.
+  --week=YYYY-MM-DD  Report on the week containing this UTC date instead of the
+                     most recently completed one. Any date in the week works;
+                     it is normalised to that week's Monday.
 """
 
 from __future__ import annotations
@@ -79,8 +95,13 @@ DEFAULT_PSQL = "psql"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 
-# Days of history pulled for the trend table and the 7-day mean.
-TREND_DAYS = 7
+# A reported week is Monday 00:00 UTC through the following Monday 00:00 UTC.
+WEEK_DAYS = 7
+
+# Weekday labels for the day-by-day table. A literal tuple rather than
+# strftime("%a") on purpose: strftime consults LC_TIME, and the label a systemd
+# unit renders must not depend on the locale the droplet happens to carry.
+WEEKDAY_LABELS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 # Custom events that fire unconditionally on every page load rather than in
 # response to something a visitor chose to do. `locale-active` is this entire
@@ -88,9 +109,9 @@ TREND_DAYS = 7
 # because the locale runbook needs English as the denominator. Counted as an
 # interaction it is a second pageview tally wearing an event's clothes, and it
 # entered the roster on 2026-08-10, so it both wins any ranking by count and
-# breaks its own 7-day comparison at its own ship date: the 2026-08-11 report
-# led on "locale-active at 75 against a prior daily mean of 2.86", which
-# describes the deploy, not the day. Everything it measures is already reported,
+# breaks its own prior-window comparison at its own ship date: the 2026-08-11
+# report led on "locale-active at 75 against a prior daily mean of 2.86", which
+# describes the deploy, not the period. Everything it measures is already reported,
 # against its proper denominator, in the Language section. So it is excluded
 # from the headline Custom events row, from the engagement second-event test,
 # from the feature roster, and from the figures the model is shown; it is still
@@ -104,14 +125,18 @@ _BEACON_NAMES = ", ".join(INSTRUMENTATION_EVENTS)
 _BEACON_EXCLUSION_NOTE = (
     f"Custom events counts interactions only. The page-load beacons ({_BEACON_NAMES}) fire on "
     "every load rather than on anything the visitor chose, so counting them here would restate "
-    "pageviews and would measure a day against a 7-day mean predating them. Their counts are "
+    "pageviews and would measure a week against a prior week predating them. Their counts are "
     "under Events triggered; what they measure is under Language."
 )
 
 NEW_VS_RETURNING_NOTE = (
     "New = this visitor's first-ever appearance in Umami (session.created_at "
-    "falls inside the day). Returning = first seen on an earlier day. The "
-    "denominator is the day's active visitors, not visits. Caveat: a visitor is "
+    "falls inside the week). Returning = first seen before the week. The "
+    "denominator is the week's active visitors, not visits. This share is NOT "
+    "comparable to the daily email's: widening the window raises it by "
+    "construction, because a first-ever appearance is counted once while an "
+    "active visitor is deduplicated across the days they returned on. Compare "
+    "week to week, never against a remembered daily figure. Caveat: a visitor is "
     "keyed by a hash of IP + user-agent, so someone whose address rotates "
     "(mobile carriers do this constantly) reads as new. The bs-vid durable-id "
     "correction below is what catches that."
@@ -197,8 +222,11 @@ def resolve_website_sql(domain: str) -> str:
     )
 
 
-def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: datetime) -> dict:
+def build_sqls(website_id: str, week_lo: datetime, week_hi: datetime, prior_lo: datetime) -> dict:
     """The report's queries, keyed by name; insertion order is the run order.
+
+    `week_lo`..`week_hi` is the reported Mon-Sun week; `prior_lo`..`week_lo` is
+    the week before it, which supplies every comparison figure the email prints.
 
     Every boundary is bound as an explicit `timestamptz` literal, and day
     bucketing converts BOTH sides of a comparison to naive UTC
@@ -206,9 +234,9 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
     day boundary. The live server is GMT today; this does not rely on that.
     """
     w = _lit(website_id)
-    lo, hi, tlo = _lit(day_lo.isoformat()), _lit(day_hi.isoformat()), _lit(trend_lo.isoformat())
+    lo, hi, plo = _lit(week_lo.isoformat()), _lit(week_hi.isoformat()), _lit(prior_lo.isoformat())
     scope = f"we.website_id = {w}::uuid"
-    in_day = f"we.created_at >= {lo}::timestamptz AND we.created_at < {hi}::timestamptz"
+    in_week = f"we.created_at >= {lo}::timestamptz AND we.created_at < {hi}::timestamptz"
     # Applied wherever a custom event is COUNTED as a visitor action. coalesce
     # first: an unnamed event is not a beacon, and `NULL NOT IN (...)` is NULL,
     # which a FILTER reads as false and would silently drop it.
@@ -216,7 +244,29 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
     interaction = f"coalesce(we.event_name, '') NOT IN ({beacons})"
 
     return {
-        # --- per-day trend, including the target day itself ------------------
+        # --- the two whole-week windows, in one pass -------------------------
+        # These headline figures CANNOT be summed from the per-day rows below.
+        # `count(DISTINCT session_id)` over Mon-Sun is not the sum of seven
+        # daily distinct counts: a visitor active on three days is one weekly
+        # visitor and three daily ones, and visit_id has the same property plus
+        # the midnight straddle. Pageviews and events are count(*) and would
+        # sum, but are taken from here too so that every headline row comes
+        # from one window and one query.
+        # Aliased `bucket`, not `window`: WINDOW is a reserved word in Postgres.
+        "totals": f"""
+            SELECT CASE WHEN we.created_at >= {lo}::timestamptz THEN 'current'
+                        ELSE 'prior' END AS bucket,
+                   count(*) FILTER (WHERE we.event_type = 1) AS pageviews,
+                   count(*) FILTER (WHERE we.event_type = 2 AND {interaction}) AS events,
+                   count(DISTINCT we.session_id) AS visitors,
+                   count(DISTINCT we.visit_id) AS visits
+            FROM website_event we
+            WHERE {scope}
+              AND we.created_at >= {plo}::timestamptz
+              AND we.created_at <  {hi}::timestamptz
+            GROUP BY 1
+        """,
+        # --- per-day breakdown of the reported week --------------------------
         "trend": f"""
             WITH ev AS (
               SELECT date_trunc('day', we.created_at AT TIME ZONE 'UTC') AS day,
@@ -225,7 +275,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                      (s.created_at AT TIME ZONE 'UTC') AS sess_first
               FROM website_event we JOIN session s USING (session_id)
               WHERE {scope}
-                AND we.created_at >= {tlo}::timestamptz
+                AND we.created_at >= {lo}::timestamptz
                 AND we.created_at <  {hi}::timestamptz
             )
             SELECT to_char(day, 'YYYY-MM-DD') AS day,
@@ -236,7 +286,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                    count(DISTINCT session_id) FILTER (WHERE sess_first >= day) AS new_visitors
             FROM ev GROUP BY day ORDER BY day
         """,
-        # --- depth / duration for the target day -----------------------------
+        # --- depth / duration across the reported week -----------------------
         # `ev` counts interactions only. A beacon fires on every page load, so
         # counting it here would make "single-view visit (no second event)"
         # structurally impossible from 2026-08-10 onward: the measure would read
@@ -247,7 +297,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                      count(*) FILTER (WHERE we.event_type = 1) AS pv,
                      count(*) FILTER (WHERE we.event_type = 2 AND {interaction}) AS ev,
                      extract(epoch FROM max(we.created_at) - min(we.created_at)) AS dur
-              FROM website_event we WHERE {scope} AND {in_day} GROUP BY 1
+              FROM website_event we WHERE {scope} AND {in_week} GROUP BY 1
             )
             SELECT count(*) AS visits,
                    round(avg(pv)::numeric, 2) AS avg_pageviews_per_visit,
@@ -257,10 +307,10 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
         """,
         # --- new vs returning + durable-id (bs-vid) corroboration ------------
         "identity": f"""
-            WITH day_sessions AS (
+            WITH week_sessions AS (
               SELECT DISTINCT we.session_id, s.created_at AS sess_first, s.distinct_id
               FROM website_event we JOIN session s USING (session_id)
-              WHERE {scope} AND {in_day}
+              WHERE {scope} AND {in_week}
             )
             SELECT count(*) AS visitors,
                    count(*) FILTER (WHERE sess_first >= {lo}::timestamptz) AS new_visitors,
@@ -271,11 +321,11 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                        AND EXISTS (
                          SELECT 1 FROM session older
                          WHERE older.website_id = {w}::uuid
-                           AND older.distinct_id = day_sessions.distinct_id
-                           AND older.session_id <> day_sessions.session_id
+                           AND older.distinct_id = week_sessions.distinct_id
+                           AND older.session_id <> week_sessions.session_id
                            AND older.created_at < {lo}::timestamptz)
                    ) AS new_but_known_bs_vid
-            FROM day_sessions
+            FROM week_sessions
         """,
         # --- top pages, RANKED BY VISITORS (never by raw view count) ---------
         "pages": f"""
@@ -284,7 +334,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                    count(DISTINCT we.visit_id) AS visits,
                    count(*) AS pageviews
             FROM website_event we
-            WHERE {scope} AND {in_day} AND we.event_type = 1
+            WHERE {scope} AND {in_week} AND we.event_type = 1
             GROUP BY 1 ORDER BY visitors DESC, pageviews DESC LIMIT 10
         """,
         # --- route families (player pages are high-cardinality by design) ----
@@ -300,7 +350,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                    count(DISTINCT we.visit_id) AS visits,
                    count(*) AS pageviews
             FROM website_event we
-            WHERE {scope} AND {in_day} AND we.event_type = 1
+            WHERE {scope} AND {in_week} AND we.event_type = 1
             GROUP BY 1 ORDER BY visitors DESC, pageviews DESC LIMIT 8
         """,
         # --- acquisition. Own-domain referrers are internal nav, not sources.
@@ -309,7 +359,7 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
                    count(DISTINCT we.session_id) AS visitors,
                    count(DISTINCT we.visit_id) AS visits
             FROM website_event we
-            WHERE {scope} AND {in_day} AND we.event_type = 1
+            WHERE {scope} AND {in_week} AND we.event_type = 1
               AND coalesce(we.referrer_domain, '') <> coalesce(we.hostname, '')
             GROUP BY 1 ORDER BY visitors DESC LIMIT 8
         """,
@@ -317,20 +367,20 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
             SELECT coalesce(s.country, '??') AS country,
                    count(DISTINCT we.session_id) AS visitors
             FROM website_event we JOIN session s USING (session_id)
-            WHERE {scope} AND {in_day}
+            WHERE {scope} AND {in_week}
             GROUP BY 1 ORDER BY visitors DESC LIMIT 8
         """,
         "devices": f"""
             SELECT coalesce(s.device, 'unknown') AS device,
                    count(DISTINCT we.session_id) AS visitors
             FROM website_event we JOIN session s USING (session_id)
-            WHERE {scope} AND {in_day}
+            WHERE {scope} AND {in_week}
             GROUP BY 1 ORDER BY visitors DESC
         """,
         # --- UI locale actually in effect, from the locale-active beacon ------
         # Supply side. Only page loads on a build carrying the beacon report at
         # all (shipped v5.2.1, 2026-08-10), so this partitions beacon-reporting
-        # visitors, NOT the day's visitors. No LIMIT: three values exist, and a
+        # visitors, NOT the week's visitors. No LIMIT: three values exist, and a
         # truncated set would give the share below a wrong denominator.
         "locale_active": f"""
             SELECT ed.string_value AS locale,
@@ -339,45 +389,45 @@ def build_sqls(website_id: str, day_lo: datetime, day_hi: datetime, trend_lo: da
             FROM website_event we
             JOIN event_data ed
               ON ed.website_event_id = we.event_id AND ed.data_key = 'locale'
-            WHERE {scope} AND {in_day}
+            WHERE {scope} AND {in_week}
               AND we.event_type = 2 AND we.event_name = 'locale-active'
             GROUP BY 1 ORDER BY visitors DESC, locale
         """,
         # --- browser language: the demand side, captured since long before the
         # locale feature existed. One language per session, so these rows do
-        # partition the day's visitors. Folded to the primary subtag (ko-KR and
+        # partition the week's visitors. Folded to the primary subtag (ko-KR and
         # ko are one language). No LIMIT, same denominator reason as above.
         "browser_language": f"""
             SELECT lower(split_part(coalesce(nullif(s.language, ''), '??'), '-', 1)) AS lang,
                    count(DISTINCT we.session_id) AS visitors
             FROM website_event we JOIN session s USING (session_id)
-            WHERE {scope} AND {in_day}
+            WHERE {scope} AND {in_week}
             GROUP BY 1 ORDER BY visitors DESC, lang
         """,
-        # --- custom events. Ranked by visitors; prior-window mean for context.
+        # --- custom events. Ranked by visitors; prior-week count for context.
         # Deliberately unfiltered: the beacon rows are wanted, just not mixed in
         # with the interactions. compute() splits the roster in two.
         "events": f"""
-            WITH day_ev AS (
+            WITH week_ev AS (
               SELECT we.event_name,
                      count(*) AS events,
                      count(DISTINCT we.session_id) AS visitors,
                      count(DISTINCT we.visit_id) AS visits
               FROM website_event we
-              WHERE {scope} AND {in_day} AND we.event_type = 2 AND we.event_name IS NOT NULL
+              WHERE {scope} AND {in_week} AND we.event_type = 2 AND we.event_name IS NOT NULL
               GROUP BY 1
             ),
             prior AS (
-              SELECT we.event_name, count(*)::numeric / {TREND_DAYS} AS prior_daily_mean
+              SELECT we.event_name, count(*) AS prior_week_events
               FROM website_event we
               WHERE {scope} AND we.event_type = 2 AND we.event_name IS NOT NULL
-                AND we.created_at >= {tlo}::timestamptz
+                AND we.created_at >= {plo}::timestamptz
                 AND we.created_at <  {lo}::timestamptz
               GROUP BY 1
             )
             SELECT d.event_name, d.events, d.visitors, d.visits,
-                   round(coalesce(p.prior_daily_mean, 0), 2) AS prior_daily_mean
-            FROM day_ev d LEFT JOIN prior p USING (event_name)
+                   coalesce(p.prior_week_events, 0) AS prior_week_events
+            FROM week_ev d LEFT JOIN prior p USING (event_name)
             ORDER BY d.visitors DESC, d.events DESC
         """,
     }
@@ -397,11 +447,6 @@ def _num(value):
     return value
 
 
-def _mean(values: list) -> float | None:
-    nums = [v for v in (_num(x) for x in values) if v is not None]
-    return round(sum(nums) / len(nums), 1) if nums else None
-
-
 def _pct(part, whole) -> float | None:
     part, whole = _num(part), _num(whole)
     if not whole or part is None:
@@ -419,29 +464,68 @@ def _delta(cur, prev) -> dict:
 
 HEADLINE_METRICS = ("visitors", "visits", "pageviews", "events")
 
+# The headline metrics a week's daily rows genuinely add up to. count(*) sums;
+# count(DISTINCT ...) does not, because a visitor active on three days is one
+# weekly visitor and three daily ones. Named here rather than written out
+# because the daily table's legend is derived from it.
+SUMMABLE_METRICS = ("pageviews", "events")
 
-def compute(raw: dict, day: date) -> dict:
-    """Turn the raw query rows into every number the email prints."""
-    day_key = day.isoformat()
-    trend = raw.get("trend") or []
-    by_day = {r["day"]: r for r in trend}
-    blank = {m: 0 for m in HEADLINE_METRICS}
-    blank["new_visitors"] = 0
-    today = by_day.get(day_key, blank)
-    prior = [r for r in trend if r["day"] < day_key]
-    yesterday = prior[-1] if prior else None
+
+def _day_label(row: dict) -> str:
+    return f"{row.get('weekday', '')} {row.get('day', '')}".strip()
+
+
+def _week_days(trend: list[dict], week: date) -> list[dict]:
+    """The week's seven rows in calendar order, zero-filled.
+
+    A day with no traffic at all returns no row from the trend query at all.
+    Dropping it would silently shorten the table and hide the one thing most
+    worth seeing: a dead Sunday must render as a zero, not as an absence.
+    """
+    by_day = {r.get("day"): r for r in trend}
+    rows = []
+    for offset in range(WEEK_DAYS):
+        d = week + timedelta(days=offset)
+        row = by_day.get(d.isoformat()) or dict(
+            {m: 0 for m in HEADLINE_METRICS}, day=d.isoformat(), new_visitors=0
+        )
+        rows.append(dict(row, weekday=WEEKDAY_LABELS[d.weekday()]))
+    return rows
+
+
+def compute(raw: dict, week: date) -> dict:
+    """Turn the raw query rows into every number the email prints.
+
+    `week` is the Monday that opens the reported week.
+    """
+    week_end = week + timedelta(days=WEEK_DAYS - 1)
+
+    # Headline figures come from the whole-week query, NEVER from summing the
+    # daily rows: see the `totals` SQL for why that sum would be wrong for
+    # visitors and visits.
+    buckets = {r.get("bucket"): r for r in (raw.get("totals") or [])}
+    current, previous = buckets.get("current") or {}, buckets.get("prior") or {}
 
     headline = {}
     for metric in HEADLINE_METRICS:
-        cur = _num(today.get(metric)) or 0
-        mean7 = _mean([r.get(metric) for r in prior])
+        value = _num(current.get(metric)) or 0
+        prior_week = _num(previous.get(metric))
         headline[metric] = {
-            "value": cur,
-            "prev_day": _num(yesterday.get(metric)) if yesterday else None,
-            "vs_prev_day": _delta(cur, yesterday.get(metric) if yesterday else None),
-            "mean_prior_7d": mean7,
-            "vs_mean_prior_7d": _delta(cur, mean7),
+            "value": value,
+            "prior_week": prior_week,
+            "vs_prior_week": _delta(value, prior_week),
+            "daily_mean": round(value / WEEK_DAYS, 1),
         }
+
+    days = _week_days(raw.get("trend") or [], week)
+    ranked_days = sorted(days, key=lambda r: (-(_num(r.get("visitors")) or 0), r["day"]))
+    daily = {
+        "rows": days,
+        "sums": {m: sum((_num(r.get(m)) or 0) for r in days) for m in SUMMABLE_METRICS},
+        "new_visitors_sum": sum((_num(r.get("new_visitors")) or 0) for r in days),
+        "busiest": _day_label(ranked_days[0]),
+        "quietest": _day_label(ranked_days[-1]),
+    }
 
     ident = (raw.get("identity") or [{}])[0]
     visitors = _num(ident.get("visitors")) or 0
@@ -466,9 +550,29 @@ def compute(raw: dict, day: date) -> dict:
         "single_view_pct": _pct(eng.get("single_view_visits"), eng.get("visits")),
     }
 
+    # Three columns must add up, and every one of them is computed twice by two
+    # independent queries over two differently-shaped windows: pageviews and
+    # events because count(*) sums, and new visitors because a first-ever
+    # appearance falls on exactly one day, and necessarily a day that visitor
+    # was active on. Visitors and visits are absent by design; they genuinely do
+    # not sum, which is the whole reason the headline is queried whole-week.
+    #
+    # A disagreement means a window boundary is wrong somewhere. Recorded, not
+    # asserted: a self-check that killed the report would be worse than the
+    # discrepancy it caught, and the email prints the mismatch instead.
+    daily["discrepancies"] = [
+        {"metric": metric, "daily_sum": summed, "week_query": queried}
+        for metric, summed, queried in (
+            ("New visitors", daily["new_visitors_sum"], identity["new"]),
+            ("Pageviews", daily["sums"]["pageviews"], headline["pageviews"]["value"]),
+            ("Custom events", daily["sums"]["events"], headline["events"]["value"]),
+        )
+        if summed != queried
+    ]
+
     events = raw.get("events") or []
     for row in events:
-        row["vs_prior_daily_mean"] = _delta(row.get("events"), row.get("prior_daily_mean"))
+        row["vs_prior_week"] = _delta(row.get("events"), row.get("prior_week_events"))
     # Split, never blend: `rows` is what visitors chose to do and is what every
     # total, ranking and model-visible figure below is drawn from; `beacon_rows`
     # is instrumentation, kept so the number stays visible but held out of the
@@ -488,12 +592,13 @@ def compute(raw: dict, day: date) -> dict:
     locale = _locale_summary(raw)
 
     return {
-        "day": day_key,
+        "week_start": week.isoformat(),
+        "week_end": week_end.isoformat(),
         "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "headline": headline,
         "identity": identity,
         "engagement": engagement,
-        "trend": trend,
+        "daily": daily,
         "pages": pages,
         "routes": raw.get("routes") or [],
         "referrers": raw.get("referrers") or [],
@@ -544,13 +649,13 @@ def _locale_summary(raw: dict) -> dict:
         "browser_non_english_pct": _pct(browser_non_en, browser_total),
         "browser_ko_ja": browser_cjk,
         "browser_ko_ja_pct": _pct(browser_cjk, browser_total),
-        # What fraction of the day's visitors the beacon saw at all. Below 100
-        # means the UI share above is drawn from a subset of the day, for any of
-        # three reasons: a cached bundle predating the beacon, a visitor who
-        # never triggered a full page load, or the deploy day itself, where the
-        # beacon existed for only part of the day while the browser-language
-        # half covered all 24 hours. Without this the two shares look like one
-        # population measured two ways.
+        # What fraction of the week's visitors the beacon saw at all. Below 100
+        # means the UI share above is drawn from a subset of the week, for any
+        # of three reasons: a cached bundle predating the beacon, a visitor who
+        # never triggered a full page load, or a week that straddles the
+        # beacon's own ship date, where it existed for only part of the window
+        # while the browser-language half covered all of it. Without this the
+        # two shares look like one population measured two ways.
         "ui_coverage_pct": _pct(ui_total, browser_total),
     }
 
@@ -622,7 +727,7 @@ def _table(headers: list[str], rows: list[list], note: str = "") -> str:
     )
 
 
-# Below this, the UI share is drawn from too small a slice of the day to be read
+# Below this, the UI share is drawn from too small a slice of the week to be read
 # beside the browser figure without saying so. 90 rather than 100 because a few
 # visitors on stale bundles are normal and unremarkable.
 UI_COVERAGE_CAVEAT_PCT = 90
@@ -638,9 +743,9 @@ def _ui_coverage_caveat(loc: dict) -> str:
     if not loc.get("ui_visitors"):
         return ""
     return (
-        f" Note that the beacon reported for {loc['ui_visitors']} of the day's "
+        f" Note that the beacon reported for {loc['ui_visitors']} of the week's "
         f"{loc['browser_visitors']} visitors ({pct}%), so the interface figure is drawn from a "
-        "subset of this day and is not comparable to the browser figure at face value."
+        "subset of this week and is not comparable to the browser figure at face value."
     )
 
 
@@ -649,7 +754,7 @@ def _beacon_summary(ev: dict) -> str:
 
     Deliberately a sentence and not a table: a table would rank it, and the whole
     point is that a per-page-load beacon has no business at the head of a
-    ranking. No delta is printed either; a beacon's day-over-day movement is
+    ranking. No delta is printed either; a beacon's week-over-week movement is
     pageview movement, which the Totals section already reports.
     """
     rows = ev.get("beacon_rows") or []
@@ -677,21 +782,27 @@ def _h2(text: str) -> str:
     return f"<h2 style='font:600 15px/1.3 system-ui,sans-serif;margin:20px 0 4px'>{_esc(text)}</h2>"
 
 
+def _week_label(data: dict) -> str:
+    return f"{data['week_start']} to {data['week_end']}"
+
+
 def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
-    d, h, ident, eng = data["day"], data["headline"], data["identity"], data["engagement"]
+    h, ident, eng = data["headline"], data["identity"], data["engagement"]
+    span = _week_label(data)
 
     subject = (
-        f"[battlestats] traffic {d}: {h['visitors']['value']} visitors, "
-        f"{h['visits']['value']} visits, {h['pageviews']['value']} views"
+        f"[battlestats] traffic week of {data['week_start']}: "
+        f"{h['visitors']['value']} visitors, {h['visits']['value']} visits, "
+        f"{h['pageviews']['value']} views"
     )
 
     parts = [
         "<html><body style='font:14px/1.5 system-ui,-apple-system,sans-serif;"
         "color:#222;max-width:760px;margin:0 auto;padding:12px'>",
         "<h1 style='font:600 19px/1.3 system-ui,sans-serif;margin:0 0 2px'>"
-        f"battlestats.online traffic: {_esc(d)} (UTC)</h1>",
+        f"battlestats.online traffic: week of {_esc(span)} (UTC)</h1>",
         f"<div style='font-size:11px;color:#777'>generated {_esc(data['generated_at_utc'])}; "
-        "every day below is a whole UTC day</div>",
+        "a whole Monday-to-Sunday UTC week, compared against the week before it</div>",
     ]
 
     if lead:
@@ -709,15 +820,14 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
     parts.append(_h2("Totals"))
     parts.append(
         _table(
-            ["Metric", d, "Prev day", "vs prev day", "7d mean before", "vs 7d mean"],
+            ["Metric", "This week", "Prior week", "Change", "Daily mean"],
             [
                 [
                     label,
                     h[key]["value"],
-                    h[key]["prev_day"] if h[key]["prev_day"] is not None else "n/a",
-                    _fmt_delta(h[key]["vs_prev_day"]),
-                    h[key]["mean_prior_7d"] if h[key]["mean_prior_7d"] is not None else "n/a",
-                    _fmt_delta(h[key]["vs_mean_prior_7d"]),
+                    h[key]["prior_week"] if h[key]["prior_week"] is not None else "n/a",
+                    _fmt_delta(h[key]["vs_prior_week"]),
+                    h[key]["daily_mean"],
                 ]
                 for key, label in (
                     ("visitors", "Visitors (distinct devices)"),
@@ -727,9 +837,11 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
                 )
             ],
             "Visitors = distinct Umami session_id, a hash of IP + user-agent. Visits = "
-            "distinct visit_id; Umami opens a new visit after 30 minutes idle. Visits are "
-            "averaged per day, never summed: a visit straddling midnight belongs to both days. "
-            + _BEACON_EXCLUSION_NOTE,
+            "distinct visit_id; Umami opens a new visit after 30 minutes idle. Both are "
+            "counted over the whole week and are deliberately NOT the sum of the day-by-day "
+            "rows below: a visitor active on three days is one weekly visitor and three daily "
+            "ones, and a visit straddling midnight belongs to both days. Pageviews and events "
+            "do sum. " + _BEACON_EXCLUSION_NOTE,
         )
     )
 
@@ -766,7 +878,7 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
                     f"{ident['new_pct']}%" if ident["new_pct"] is not None else "n/a",
                 ],
                 [
-                    "Returning (seen on an earlier day)",
+                    "Returning (seen before this week)",
                     ident["returning"],
                     f"{ident['returning_pct']}%" if ident["returning_pct"] is not None else "n/a",
                 ],
@@ -783,29 +895,50 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
         + f"; {ident['new_but_known_bs_vid']} of the \"new\" visitors were in fact known "
         "browsers arriving on a rotated address. That correction is not folded into the "
         "table above; it is reported alongside it so the primary count stays comparable "
-        "day to day.</div>"
+        "week to week.</div>"
     )
 
-    parts.append(_h2(f"Last {len(data['trend'])} days"))
+    daily = data["daily"]
+    parts.append(_h2("Day by day"))
     parts.append(
         _table(
             ["Day", "Visitors", "New", "Visits", "Pageviews", "Events"],
             [
                 [
-                    r["day"] + ("  <-- this report" if r["day"] == d else ""),
+                    _day_label(r),
                     r["visitors"],
                     r["new_visitors"],
                     r["visits"],
                     r["pageviews"],
                     r["events"],
                 ]
-                for r in data["trend"]
+                for r in daily["rows"]
             ]
-            or [["(no data)", "", "", "", "", ""]],
-            "Events counts interactions only, on every day of the window, so the column stays "
-            "comparable across the arrival of a page-load beacon.",
+            + [
+                [
+                    "Week",
+                    h["visitors"]["value"],
+                    ident["new"],
+                    h["visits"]["value"],
+                    h["pageviews"]["value"],
+                    h["events"]["value"],
+                ]
+            ],
+            "The Week row is the whole-week query, not the column above it. New, Pageviews and "
+            "Events do add up and are checked against the column sums; Visitors and Visits do "
+            "not and will read lower than their columns, because a visitor active on several "
+            "days is counted once for the week. Events counts interactions only, on every day, "
+            "so the column stays comparable across the arrival of a page-load beacon.",
         )
     )
+    for bad in daily["discrepancies"]:
+        parts.append(
+            "<div style='font-size:12px;color:#b00;margin:-8px 0 14px'><b>Self-check "
+            f"failed:</b> {_esc(bad['metric'])} sums to {bad['daily_sum']} across the days "
+            f"above but the whole-week query counts {bad['week_query']}. These come from two "
+            "independent queries and must agree; a difference means a window boundary is "
+            "wrong. Every other figure in this email is still as queried.</div>"
+        )
 
     parts.append(_h2("Top pages"))
     parts.append(
@@ -855,7 +988,7 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
             [[r["locale"], r["visitors"], r["load_visits"]] for r in loc["ui_rows"]]
             or [["(no locale-active events)", "", ""]],
             "From the locale-active beacon, which reports the locale a page load actually ran "
-            "in. Its denominator is beacon-reporting visitors, not the day's visitors: a visitor "
+            "in. Its denominator is beacon-reporting visitors, not the week's visitors: a visitor "
             "on a cached pre-v5.2.1 bundle reports nothing.",
         )
     )
@@ -865,7 +998,7 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
             [[r["lang"], r["visitors"]] for r in loc["browser_rows"]] or [["(none)", ""]],
             "What the visitor's browser asks for, folded to the primary subtag and captured "
             "since long before the locale feature. One language per visitor, so these do "
-            "partition the day.",
+            "partition the week.",
         )
     )
     parts.append(
@@ -875,7 +1008,7 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
             f"{loc['ui_visitors']} beacon-reporting visitors "
             f"({loc['ui_non_english_pct']}%)"
             if loc["ui_non_english_pct"] is not None
-            else "no visitor reported a UI locale on this day, so the interface side is "
+            else "no visitor reported a UI locale this week, so the interface side is "
             "unmeasured rather than zero (the beacon shipped 2026-08-10)"
         )
         + f"; {loc['browser_ko_ja']} of {loc['browser_visitors']} visitors arrived with a Korean "
@@ -903,21 +1036,21 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
     )
     parts.append(
         _table(
-            ["Event", "Visitors (sort)", "Visits", "Events", "7d mean", "vs 7d mean"],
+            ["Event", "Visitors (sort)", "Visits", "Events", "Prior week", "Change"],
             [
                 [
                     r["event_name"],
                     r["visitors"],
                     r["visits"],
                     r["events"],
-                    r["prior_daily_mean"],
-                    _fmt_delta(r["vs_prior_daily_mean"]),
+                    r["prior_week_events"],
+                    _fmt_delta(r["vs_prior_week"]),
                 ]
                 for r in ev["rows"]
             ]
             or [["(no custom events)", "", "", "", "", ""]],
-            "Ranked by distinct visitors. \"7d mean\" is that event's mean daily count over "
-            "the seven days before this one; an event first emitted since then shows 0.",
+            "Ranked by distinct visitors. \"Prior week\" is that event's total count over the "
+            "week before this one; an event first emitted since then shows 0.",
         )
     )
     parts.append(_beacon_line_html(ev))
@@ -935,7 +1068,7 @@ def render(data: dict, lead: str = "", lead_error: str = "") -> dict:
 
 def render_text(data: dict, lead: str = "") -> str:
     h, ident, eng = data["headline"], data["identity"], data["engagement"]
-    out = [f"battlestats.online traffic: {data['day']} (UTC)", ""]
+    out = [f"battlestats.online traffic: week of {_week_label(data)} (UTC)", ""]
     if lead:
         out += [lead, ""]
     out.append("TOTALS")
@@ -947,12 +1080,23 @@ def render_text(data: dict, lead: str = "") -> str:
     ):
         node = h[key]
         out.append(
-            f"  {label:<21} {node['value']:>6}   vs prev day {_fmt_delta(node['vs_prev_day'])}"
-            f"   vs 7d mean {_fmt_delta(node['vs_mean_prior_7d'])}"
+            f"  {label:<21} {node['value']:>6}   vs prior week "
+            f"{_fmt_delta(node['vs_prior_week'])}   daily mean {node['daily_mean']}"
         )
+    out += ["", "DAY BY DAY (visitors / new / visits / pageviews / events)"]
+    out += [
+        f"  {_day_label(r):<14} {r['visitors']:>4} {r['new_visitors']:>4} {r['visits']:>4} "
+        f"{r['pageviews']:>5} {r['events']:>5}"
+        for r in data["daily"]["rows"]
+    ]
+    out += [
+        f"  SELF-CHECK FAILED: {bad['metric']} sums to {bad['daily_sum']} across the days, "
+        f"the whole-week query says {bad['week_query']}"
+        for bad in data["daily"]["discrepancies"]
+    ]
     out += [
         "",
-        "NEW VS RETURNING (denominator: the day's active visitors)",
+        "NEW VS RETURNING (denominator: the week's active visitors)",
         f"  new {ident['new']} ({ident['new_pct']}%); returning {ident['returning']} "
         f"({ident['returning_pct']}%); total {ident['visitors']}",
         f"  bs-vid coverage {ident['identified_visitors']}/{ident['visitors']}; "
@@ -973,7 +1117,7 @@ def render_text(data: dict, lead: str = "") -> str:
             f"  UI non-English {loc['ui_non_english']}/{loc['ui_visitors']} beacon-reporting "
             f"visitors ({loc['ui_non_english_pct']}%)"
             if loc["ui_non_english_pct"] is not None
-            else "  UI locale unmeasured on this day: no beacon events "
+            else "  UI locale unmeasured this week: no beacon events "
             "(the beacon shipped 2026-08-10)"
         ),
         f"  Browser ko/ja {loc['browser_ko_ja']}/{loc['browser_visitors']} visitors "
@@ -981,8 +1125,8 @@ def render_text(data: dict, lead: str = "") -> str:
     ]
     if _ui_coverage_caveat(loc):
         out.append(
-            f"  Beacon coverage {loc['ui_visitors']}/{loc['browser_visitors']} of the day's "
-            f"visitors ({loc['ui_coverage_pct']}%): the UI figure is a subset of this day"
+            f"  Beacon coverage {loc['ui_visitors']}/{loc['browser_visitors']} of the week's "
+            f"visitors ({loc['ui_coverage_pct']}%): the UI figure is a subset of this week"
         )
     out += [f"  {r['visitors']:>3}  browser {r['lang']}" for r in loc["browser_rows"]] or [
         "  (none)"
@@ -1001,10 +1145,10 @@ def render_text(data: dict, lead: str = "") -> str:
 # --------------------------------------------------------------------------- #
 # LLM lead paragraph (prose only; it never emits a figure it had to derive)
 # --------------------------------------------------------------------------- #
-SYSTEM_PROMPT = """You write the one-paragraph lead of a daily web-traffic email \
+SYSTEM_PROMPT = """You write the one-paragraph lead of a weekly web-traffic email \
 for battlestats.online, a World of Warships player and clan statistics site run \
 by a single operator. You are given a JSON object of already-computed figures for \
-one UTC day; the email renders every table itself.
+one completed Monday-to-Sunday UTC week; the email renders every table itself.
 
 Write 2-4 sentences. Voice: Data from Star Trek -- warm, analytical, precise; no \
 hype, no flattery. Use colons and semicolons, never em dashes.
@@ -1017,10 +1161,19 @@ ratio that is not already a field.
 never place two figures side by side so that one reads as a share of the other. \
 The lists named `top_*_labels` are rank-ordered labels with no counts: say "led \
 by" or "mostly", never a quantity.
-- Say what matters: whether the day is ordinary or unusual against the 7-day mean, \
-where the traffic came from, and which feature the events show people using. \
-Traffic here is tens of visitors per day; a single-day swing is normally noise. \
-Say "within the usual range" when it is, rather than inventing a trend.
+- Say what matters: whether the week is ordinary or unusual against the prior \
+week, where the traffic came from, and which feature the events show people using. \
+Traffic here is tens of visitors per day; a swing of a few percent between weeks \
+is normally noise. Say "within the usual range" when it is, rather than inventing \
+a trend.
+- `busiest_day_label` and `quietest_day_label` are labels, not figures. You may \
+name a day; you may not attach a count to it or say how much busier it was, \
+because those numbers are not in your input.
+- `prior_week_events` beside an event is THAT EVENT'S own count last week and \
+nothing else. It does not tell you how that event ranked against any other event \
+last week, so never write that an ordering, a mix or a leaderboard is unchanged, \
+the same as, or different from last week. You may say a single named event rose \
+or fell.
 - The two `language` percentages have DIFFERENT denominators and are not \
 comparable as parts of one whole. `ui_non_english_pct` is the share of \
 beacon-reporting visitors whose interface ran in Korean or Japanese; \
@@ -1035,31 +1188,39 @@ Output STRICT JSON only, no markdown fences: {"lead": "..."}"""
 
 
 def llm_payload(data: dict) -> dict:
-    """The narrowed view of the day handed to the model.
+    """The narrowed view of the week handed to the model.
 
     The model is deliberately NOT shown per-route, per-referrer or per-country
-    counts. Given them, it juxtaposes a row's count with the day's total and
+    counts. Given them, it juxtaposes a row's count with the period's total and
     writes a share that does not exist: an early live run produced "traffic
     remained mostly direct (36 of 48 visits)" and "40 visits on /player/*" out of
-    48, both false, because those columns do not partition the day's visits (one
+    48, both false, because those columns do not partition the period's visits (one
     visit spans several routes, and a referrer is recorded once per visit while
     the visit's later pageviews carry none). Instructing the model not to derive
     ratios did not stop it; withholding the operands does.
 
-    What remains is either a whole-day total, a pre-computed delta, or a label
+    What remains is either a whole-week total, a pre-computed delta, or a label
     with no number attached, so a cross-denominator ratio has no operands to be
-    built from.
+    built from. The per-day series is withheld on exactly the same grounds: seven
+    (day, visitors, visits) triples is a standing invitation to write "Tuesday
+    was 40 of the week's 120", so the model gets the busiest and quietest day as
+    LABELS and nothing else.
 
     Instrumentation beacons are withheld for the same reason. `top_event_names`
     is drawn from data["events"]["rows"], which compute() has already stripped of
     INSTRUMENTATION_EVENTS, so the lead cannot open on "the event mix is
     dominated by locale-active" -- a true sentence about a beacon that says
-    nothing about the day. Telling the model the event is uninteresting would not
+    nothing about the week. Telling the model the event is uninteresting would not
     hold; not showing it does.
     """
     return {
-        "day": data["day"],
+        "week_start": data["week_start"],
+        "week_end": data["week_end"],
         "headline": data["headline"],
+        # Labels, no counts: see the docstring on why the daily series itself
+        # never reaches the model.
+        "busiest_day_label": data["daily"]["busiest"],
+        "quietest_day_label": data["daily"]["quietest"],
         "identity": {
             k: data["identity"][k]
             for k in ("visitors", "new", "returning", "new_pct", "returning_pct")
@@ -1072,7 +1233,7 @@ def llm_payload(data: dict) -> dict:
             {
                 "event_name": r.get("event_name"),
                 "events": r.get("events"),
-                "prior_daily_mean": r.get("prior_daily_mean"),
+                "prior_week_events": r.get("prior_week_events"),
             }
             for r in data["events"]["rows"][:3]
         ],
@@ -1106,7 +1267,7 @@ def call_anthropic(model: str, api_key: str, data: dict) -> str:
         "messages": [
             {
                 "role": "user",
-                "content": "Figures for the day. Write the lead.\n\n"
+                "content": "Figures for the week. Write the lead.\n\n"
                 + json.dumps(data, indent=2, default=str),
             }
         ],
@@ -1147,17 +1308,30 @@ def call_anthropic(model: str, api_key: str, data: dict) -> str:
 # --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
-def parse_day(argv: list[str]) -> date:
+def week_start(day: date) -> date:
+    """The Monday of the week containing `day`."""
+    return day - timedelta(days=day.weekday())
+
+
+def parse_week(argv: list[str]) -> date:
+    """The Monday opening the week to report on.
+
+    The default is the most recent Monday at or before now, minus seven days,
+    which is the last COMPLETED week. It is deliberately not "now minus seven
+    days": the timer is Persistent=true, so a catch-up run on Wednesday after a
+    reboot must report the same Mon-Sun week the Monday run would have, not a
+    window slid three days later. Any date inside a week selects that week.
+    """
     for arg in argv:
-        if arg.startswith("--day="):
-            return date.fromisoformat(arg.split("=", 1)[1])
-    override = cfg("TRAFFIC_EMAIL_DAY")
+        if arg.startswith("--week="):
+            return week_start(date.fromisoformat(arg.split("=", 1)[1]))
+    override = cfg("TRAFFIC_EMAIL_WEEK")
     if override:
-        return date.fromisoformat(override)
-    return (datetime.now(timezone.utc) - timedelta(days=1)).date()
+        return week_start(date.fromisoformat(override))
+    return week_start(datetime.now(timezone.utc).date()) - timedelta(days=WEEK_DAYS)
 
 
-def gather(day: date) -> dict:
+def gather(week: date) -> dict:
     dsn = read_umami_dsn(cfg("UMAMI_ENV_FILE", DEFAULT_UMAMI_ENV_FILE))
     psql_bin = cfg("PSQL_BIN", DEFAULT_PSQL)
     domain = cfg("UMAMI_SITE_DOMAIN", DEFAULT_SITE_DOMAIN)
@@ -1167,13 +1341,13 @@ def gather(day: date) -> dict:
         raise RuntimeError(f"no Umami website row for domain {domain!r}")
     website_id = site[0]["website_id"]
 
-    day_lo = datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
-    day_hi = day_lo + timedelta(days=1)
-    trend_lo = day_lo - timedelta(days=TREND_DAYS)
+    week_lo = datetime.combine(week, datetime.min.time(), tzinfo=timezone.utc)
+    week_hi = week_lo + timedelta(days=WEEK_DAYS)
+    prior_lo = week_lo - timedelta(days=WEEK_DAYS)
 
-    sqls = build_sqls(website_id, day_lo, day_hi, trend_lo)
+    sqls = build_sqls(website_id, week_lo, week_hi, prior_lo)
     results = run_queries(dsn, list(sqls.values()), psql_bin)
-    return compute(dict(zip(sqls.keys(), results)), day)
+    return compute(dict(zip(sqls.keys(), results)), week)
 
 
 def main() -> int:
@@ -1182,8 +1356,8 @@ def main() -> int:
     no_llm = "--no-llm" in args
 
     load_env_file(cfg("TRAFFIC_EMAIL_ENV_FILE", DEFAULT_ENV_FILE))
-    day = parse_day(args)
-    data = gather(day)
+    week = parse_week(args)
+    data = gather(week)
 
     lead, lead_error = "", ""
     if not no_llm:
@@ -1221,7 +1395,7 @@ def main() -> int:
     return 0
 
 
-FAILURE_SUBJECT = "[battlestats] daily traffic email FAILED"
+FAILURE_SUBJECT = "[battlestats] weekly traffic email FAILED"
 
 
 def emit_failure(tb: str, dry_run: bool = False) -> None:
@@ -1237,7 +1411,7 @@ def emit_failure(tb: str, dry_run: bool = False) -> None:
         return
     try:
         body = (
-            "<html><body><h2>battlestats daily traffic email FAILED</h2><pre>"
+            "<html><body><h2>battlestats weekly traffic email FAILED</h2><pre>"
             + _esc(tb)
             + "</pre></body></html>"
         )
