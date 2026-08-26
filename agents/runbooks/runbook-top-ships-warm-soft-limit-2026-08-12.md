@@ -189,6 +189,11 @@ does `cache.delete()` + `REFRESH MATERIALIZED VIEW CONCURRENTLY` against a Redis
 survived the deploy intact (uptime 10 days across many deploys; RDB persistence on). That is
 **out of scope here** — tracked separately — but the two compound.
 
+> **Followed up 2026-08-26.** That second feeder turned out to have the *same* defect as
+> this one: twelve serial warmers under one 540s limit, zero completions in the retained
+> journal. Fixed the same way — the orchestrator now computes nothing and dispatches
+> instead. See `runbook-startup-warm-fanout-2026-08-26.md`.
+
 ## Remediation plan
 
 Ordered by risk. Each step is independently shippable and independently verifiable.

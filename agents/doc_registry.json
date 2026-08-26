@@ -3862,6 +3862,30 @@
                 "top-ships-warm-orchestrator-replaced"
             ]
         },
+        "agents/runbooks/runbook-startup-warm-fanout-2026-08-26.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "startup warm fanout",
+                "startup_warm_caches_task",
+                "startup cache warm",
+                "startup warm soft limit"
+            ],
+            "tags": [
+                "warmers",
+                "soft-limit",
+                "celery",
+                "background-queue",
+                "fan-out",
+                "deploy"
+            ],
+            "archive_on": [
+                "startup-warm-orchestrator-replaced"
+            ]
+        },
         "agents/runbooks/runbook-player-page-charts-and-roster-2026-08-15.md": {
             "kind": "runbook",
             "status": "active",

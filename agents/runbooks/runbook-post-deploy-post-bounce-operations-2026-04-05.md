@@ -140,16 +140,32 @@ So after a bounce:
 4. no full startup warm chain is automatically queued,
 5. any deploy-specific cache invalidation requires explicit follow-up warming.
 
-### What the disabled startup warm chain would have done
+### The startup warm chain (CORRECTED 2026-08-26 - it is NOT disabled)
 
-If startup warming were enabled, the sequence in `startup_warm_all_caches` would run sequentially for each realm (the `warm_landing_page_content` step was removed in 3.0):
+> **This section was wrong.** It claimed the chain was "deliberately disabled on
+> production". It is not, and item 4 above ("no full startup warm chain is
+> automatically queued") is wrong for the same reason.
+> `WARM_CACHES_ON_STARTUP=1` is **pinned** in `server/deploy/deploy_to_droplet.sh:699`
+> and the live value in `/etc/battlestats-*.env` read `"1"` on **2026-08-26**. The
+> production journal shows `startup_warm_caches_task` dispatched on every gunicorn
+> restart. Do not plan a deploy on the assumption that nothing warms.
+
+Four warmers run for each realm (the `warm_landing_page_content` step was removed in 3.0):
 
 1. `warm_hot_entity_caches`
 2. `bulk_load_entity_caches`
 3. `warm_player_distributions`
 4. `warm_player_correlations`
 
-That chain is deliberately disabled on production because it is broader and heavier than most deploys need.
+Until **2026-08-26** all twelve ran *sequentially inline*, in one task, under a single
+540s soft limit - and so never finished once: the retained 7-day journal held 4
+dispatches, 4 `SoftTimeLimitExceeded` and zero completions, with `na` never warmed at
+all. `startup_warm_caches_task` is now a pure dispatcher that fans the twelve out to
+the per-realm warmer tasks, each with its own budget and its own lock. See
+`runbook-startup-warm-fanout-2026-08-26.md`.
+
+Note this chain is *redundant* rather than load-bearing: the deploy does not flush
+Redis, and all four warmers have their own Beat lanes.
 
 ## Manual Post-Deploy Operations By Change Type
 

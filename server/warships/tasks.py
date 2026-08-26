@@ -129,6 +129,10 @@ SHIPS_BUCKET_WARM_LOCK_TIMEOUT = 15 * 60
 # staggered rather than dumped in one burst.
 SHIPS_BUCKET_WARM_SPACING_SECONDS = int(
     os.getenv("SHIPS_BUCKET_WARM_SPACING_SECONDS", "20"))
+# Same reasoning for the twelve startup warmers (3 realms x 4 warmers): they
+# land on the same -c 3 `background` pool and hit a 2-vCPU managed Postgres.
+STARTUP_WARM_SPACING_SECONDS = int(
+    os.getenv("STARTUP_WARM_SPACING_SECONDS", "20"))
 HOT_ENTITY_CACHE_WARM_LOCK_TIMEOUT = 30 * 60
 CLAN_BATTLE_SUMMARY_REFRESH_DISPATCH_TIMEOUT = 10 * 60
 # Clan roster idle refresh: bulk account/info pass that corrects every member's
@@ -3182,20 +3186,85 @@ def prune_battle_observations_task(self):
     ignore_result=True,
 )
 def startup_warm_caches_task():
-    """Run all startup cache warmers as a Celery task instead of a subprocess.
+    """Dispatch the per-realm startup cache warmers.
 
     Dispatched by gunicorn's when_ready hook so the warm runs inside an existing
     background worker rather than spawning a new Python process (~170-500 MB).
-    """
-    call_command('startup_warm_all_caches', '--delay', '0')
 
-    # Kick off the continuous enrichment chain after startup warmers finish.
-    # The task's own lock prevents duplicates if it's already running.
+    PURE DISPATCHER — this task computes nothing (2026-08-26). It used to call
+    `startup_warm_all_caches` inline, walking three realms x four warmers
+    serially under one 540s soft limit. It never once finished: 4 dispatches
+    over the retained 7-day journal, 4 SoftTimeLimitExceeded, zero completions.
+    The 2026-08-26 run spent 268s on asia's hot entities, 5s bulk-loading, 58s
+    on distributions, then died 209s into asia's correlations — so `eu` and
+    `na` were never reached, and `na` (the default realm) has never been warmed
+    by this path at all. asia alone exceeds the budget, so no limit increase
+    makes the packed form viable; the work has to be split.
+
+    Same defect and same remedy as `warm_realm_top_ships_task` (2026-08-12).
+    Each subtask gets its own budget, so one slow warmer costs one warmer rather
+    than every warmer behind it. It also stops bypassing the per-realm locks:
+    the inline path called the bare `warm_*` functions, so a startup warm could
+    run on top of a Beat warm of the same realm. Dispatched through the tasks,
+    a redundant startup warm now skips itself instead of duplicating the work.
+
+    Note the four warmers are ALSO on their own Beat lanes (hot entities and
+    bulk load on intervals, distributions and correlations daily), so this path
+    is a post-restart accelerator, not the sole source of these caches. Nothing
+    here is load-bearing enough to justify blocking on.
+    """
+    dispatched = 0
+    failed = 0
+
+    # Warmer order mirrors the old serial sequence: cheapest and most
+    # user-visible first, so a saturated `background` pool (-c 3) drains the
+    # warmers that matter to a first page load ahead of the population-level
+    # aggregations. Spacing staggers arrival so twelve DB-heavy tasks don't
+    # burst against a 2-vCPU managed Postgres at once.
+    warmers = (
+        warm_hot_entity_caches_task,
+        bulk_load_entity_caches_task,
+        warm_player_distributions_task,
+        warm_player_correlations_task,
+    )
+
+    # Realm-inner, warmer-outer, with the default realm first: every realm gets
+    # its hot-entity warm before any realm's correlation warm, and `na` -- the
+    # realm this task has never once reached -- is no longer last in line.
+    from warships.models import VALID_REALMS
+
+    realms = [DEFAULT_REALM] + sorted(VALID_REALMS - {DEFAULT_REALM})
+
+    spacing = 0
+    for warmer in warmers:
+        for realm in realms:
+            try:
+                warmer.apply_async(
+                    kwargs={"realm": realm},
+                    countdown=spacing * STARTUP_WARM_SPACING_SECONDS)
+                dispatched += 1
+            except Exception:
+                # One broker hiccup must not cost the warmers behind it.
+                failed += 1
+                logger.exception(
+                    "Failed to dispatch %s for realm=%s",
+                    warmer.name, realm)
+            spacing += 1
+
+    # Kick off the continuous enrichment chain. This used to sit AFTER the
+    # inline warm, so the soft-limit kill meant it never ran; Beat's
+    # `player-enrichment-kickstart` covered the same ground, which is why the
+    # loss was survivable. The task's own lock prevents duplicates.
     try:
         enrich_player_data_task.apply_async(countdown=30)
         logger.info("Dispatched enrichment kickstart after startup warm")
     except Exception:
         logger.exception("Failed to dispatch enrichment kickstart")
+
+    result = {"status": "completed",
+              "dispatched": dispatched, "failed": failed}
+    logger.info("startup_warm_caches_task: %s", result)
+    return result
 
 
 # Lock must outlive the per-realm reclassify hard time_limit so a slow run can't
