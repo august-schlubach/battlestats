@@ -341,6 +341,10 @@ CELERY_TASK_ROUTES = {
     'warships.tasks.warm_clan_battle_summaries_task': {'queue': 'background'},
     'warships.tasks.warm_all_clan_tier_distributions_task': {'queue': 'background'},
     'warships.tasks.warm_player_ranked_wr_battles_correlation_task': {'queue': 'background'},
+    # Routed as a PAIR with its ranked sibling: this one was unrouted until
+    # 2026-08-26 and so ran a ~400s population aggregation on `default`,
+    # the request-adjacent lane shared with crawl dispatchers and watchdogs.
+    'warships.tasks.warm_player_clan_battle_wr_battles_correlation_task': {'queue': 'background'},
     'warships.tasks.warm_ships_by_pct_task': {'queue': 'background'},
     'warships.tasks.warm_ships_bucket_task': {'queue': 'background'},
     'warships.tasks.warm_top_ships_treemap_task': {'queue': 'background'},

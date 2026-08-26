@@ -40,6 +40,28 @@ SHIP_PCT_WARM_TASK_OPTS = {
     "soft_time_limit": 27 * 60,   # 27 min soft
     "ignore_result": True,
 }
+# A single population correlation is one irreducible aggregation, not a batch
+# that can be split: measured on prod over 72h to 2026-08-26 it takes 389-500s on
+# EVERY realm (eu 468s, asia 389s, na 429/500s) against TASK_OPTS' 540s soft
+# limit, so it soft-limited on roughly two thirds of runs -- eu 1/8, asia 1/3,
+# na 2/4. This is the OPPOSITE call from startup_warm_caches_task, which was
+# twelve separable operations and was split rather than given headroom.
+# Every killed run is censored at 540s, so the true tail is unknown; 780s is
+# ~1.56x the slowest SUCCESSFUL run, not a hair over it.
+# Invariant: soft < hard <= lock TTL, and _run_locked_task's TTL is
+# RESOURCE_TASK_LOCK_TIMEOUT (900s).
+CORRELATION_METRIC_WARM_TASK_OPTS = {
+    "time_limit": 14 * 60,        # 840s hard
+    "soft_time_limit": 13 * 60,   # 780s soft
+    "ignore_result": True,
+}
+# The combined warmer runs all three correlations serially, so it needs more than
+# any one of them. Its lock is CORRELATION_WARM_LOCK_TIMEOUT (1200s).
+PLAYER_CORRELATIONS_WARM_TASK_OPTS = {
+    "time_limit": 17 * 60,        # 1020s hard
+    "soft_time_limit": 15 * 60,   # 900s soft
+    "ignore_result": True,
+}
 # The lapsed-player recapture sweep is one serial pass over RECAPTURE_LAPSED_LIMIT
 # candidates: a 20-45s ordering query plus ~1 WG call + RECAPTURE_LAPSED_DELAY per
 # 100 players. At the prod limit (30k) that is ~470-520s for the slower realms, so
@@ -1454,39 +1476,55 @@ def snapshot_ship_top_players_task(self, realm=DEFAULT_REALM):
     return result
 
 
-@app.task(bind=True, **TASK_OPTS)
+@app.task(bind=True, **CORRELATION_METRIC_WARM_TASK_OPTS)
 def warm_player_ranked_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_ranked_wr_battles_population_correlation
 
     logger.info(
         "Starting warm_player_ranked_wr_battles_correlation_task realm=%s", realm)
     try:
-        return _run_locked_task(
+        result = _run_locked_task(
             "warm_player_ranked_wr_battles_correlation",
-            "population",
+            # Realm-scoped since 2026-08-26. This was the literal string
+            # "population", so _task_lock_key produced ONE key for all three
+            # realms and the warms serialized globally; a realm that lost the
+            # race returned {"status": "skipped"}, which Celery logs as
+            # `succeeded` -- so the loss was invisible to the ops digest.
+            realm,
             self.request.id,
             lambda: warm_player_ranked_wr_battles_population_correlation(
                 realm=realm),
         )
+        if isinstance(result, dict) and result.get("status") != "skipped":
+            logger.info("Finished warm_player_ranked_wr_battles_correlation_task realm=%s", realm)
+        return result
     finally:
         cache.delete(
             _player_ranked_wr_battles_correlation_refresh_dispatch_key(realm=realm))
 
 
-@app.task(bind=True, **TASK_OPTS)
+@app.task(bind=True, **CORRELATION_METRIC_WARM_TASK_OPTS)
 def warm_player_clan_battle_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_clan_battle_wr_battles_population_correlation
 
     logger.info(
         "Starting warm_player_clan_battle_wr_battles_correlation_task realm=%s", realm)
     try:
-        return _run_locked_task(
+        result = _run_locked_task(
             "warm_player_clan_battle_wr_battles_correlation",
-            "population",
+            # Realm-scoped since 2026-08-26. This was the literal string
+            # "population", so _task_lock_key produced ONE key for all three
+            # realms and the warms serialized globally; a realm that lost the
+            # race returned {"status": "skipped"}, which Celery logs as
+            # `succeeded` -- so the loss was invisible to the ops digest.
+            realm,
             self.request.id,
             lambda: warm_player_clan_battle_wr_battles_population_correlation(
                 realm=realm),
         )
+        if isinstance(result, dict) and result.get("status") != "skipped":
+            logger.info("Finished warm_player_clan_battle_wr_battles_correlation_task realm=%s", realm)
+        return result
     finally:
         cache.delete(
             _player_clan_battle_wr_battles_correlation_refresh_dispatch_key(realm=realm))
@@ -1886,13 +1924,14 @@ def warm_player_distributions_task(self, realm=DEFAULT_REALM):
 
     try:
         result = warm_player_distributions(realm=realm)
-        logger.info("Finished warm_player_distributions_task: %s", result)
+        logger.info("Finished warm_player_distributions_task realm=%s: %s",
+                    realm, result)
         return result
     finally:
         cache.delete(lock_key)
 
 
-@app.task(bind=True, **TASK_OPTS)
+@app.task(bind=True, **PLAYER_CORRELATIONS_WARM_TASK_OPTS)
 def warm_player_correlations_task(self, realm=DEFAULT_REALM):
     from warships.data import warm_player_correlations
 
@@ -1907,7 +1946,8 @@ def warm_player_correlations_task(self, realm=DEFAULT_REALM):
 
     try:
         result = warm_player_correlations(realm=realm)
-        logger.info("Finished warm_player_correlations_task: %s", result)
+        logger.info("Finished warm_player_correlations_task realm=%s: %s",
+                    realm, result)
         return result
     finally:
         cache.delete(lock_key)
@@ -1939,7 +1979,8 @@ def warm_hot_entity_caches_task(self, player_limit=None, clan_limit=None, force_
             force_refresh=bool(force_refresh),
             realm=realm,
         )
-        logger.info("Finished warm_hot_entity_caches_task: %s", result)
+        logger.info("Finished warm_hot_entity_caches_task realm=%s: %s",
+                    realm, result)
         return result
     finally:
         cache.delete(lock_key)
@@ -1959,7 +2000,8 @@ def bulk_load_entity_caches_task(self, realm=DEFAULT_REALM):
 
     try:
         result = bulk_load_entity_caches(realm=realm)
-        logger.info("Finished bulk_load_entity_caches_task: %s", result)
+        logger.info("Finished bulk_load_entity_caches_task realm=%s: %s",
+                    realm, result)
         return result
     finally:
         cache.delete(lock_key)

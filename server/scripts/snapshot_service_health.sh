@@ -63,13 +63,36 @@ fi
 # that it NEVER succeeds: the nightly rollup failed 5 of 5 nights. So carry both
 # numbers and let the evaluator ask "did this ever succeed in the window?".
 celery_raw=""
+realm_ok_raw=""
 for unit in $CELERY_UNITS; do
     fail_lines="$(journalctl -u "$unit" -g "raised unexpected" \
                   --since "$SINCE" --no-pager -o cat -q 2>/dev/null || true)"
-    ok_counts="$(journalctl -u "$unit" -g "succeeded in" \
-                 --since "$SINCE" --no-pager -o cat -q 2>/dev/null \
+    # ONE sweep serves both success tallies. Adding a third journalctl call per
+    # unit would cost a sixth pass over a 4 GB journal on 2 vCPU, and this writer
+    # already burns ~90s per run.
+    ok_sweep="$(journalctl -u "$unit" -g 'succeeded in|Finished [a-z_0-9]+ realm=' \
+                --since "$SINCE" --no-pager -o cat -q 2>/dev/null || true)"
+    ok_counts="$(printf '%s\n' "$ok_sweep" \
+                 | grep -a 'succeeded in' \
                  | grep -aoE 'warships\.tasks\.[a-z_0-9]+' \
                  | sort | uniq -c || true)"
+    # Per-realm SUCCESS counts, from the tasks' own completion lines.
+    #
+    # Successes, not failures: attributing a failure to a realm would mean
+    # parsing exception paths, and `succeeded in` cannot be used either because
+    # a lock-skip returns {"status": "skipped"} and Celery logs THAT as
+    # succeeded. The tasks emit `Finished <task> realm=<r>` only when they did
+    # real work, so this counts warms rather than no-ops.
+    #
+    # Reuses the sweep above: one more grep, no extra journalctl call.
+    realm_ok="$(printf '%s\n' "$ok_sweep" \
+                | grep -aoE 'Finished [a-z_0-9]+ realm=[a-z]+' \
+                | sed -E 's/Finished ([a-z_0-9]+) realm=([a-z]+)/\1 \2/' \
+                | sort | uniq -c || true)"
+    while read -r rcount rtask rrealm; do
+        [ -n "${rcount:-}" ] || continue
+        realm_ok_raw="${realm_ok_raw}warships.tasks.${rtask}|${rrealm}|${rcount}"$'\n'
+    done <<< "$realm_ok"
     counts="$(printf '%s\n' "$fail_lines" \
               | grep -aoE 'warships\.tasks\.[a-z_0-9]+.*raised unexpected: [A-Za-z_]+' \
               | sed -E 's/(warships\.tasks\.[a-z_0-9]+).*raised unexpected: ([A-Za-z_]+).*/\1 \2/' \
@@ -90,7 +113,7 @@ gunicorn_errors_raw="$(journalctl -u "$GUNICORN_UNIT" -g "Error handling request
                        | sed -E 's/.*Error handling request //; s/\?.*//' \
                        | sort | uniq -c | sort -rn || true)"
 
-export SINCE WINDOW_HOURS journal_readable celery_raw gunicorn_timeouts gunicorn_errors_raw
+export SINCE WINDOW_HOURS journal_readable celery_raw realm_ok_raw gunicorn_timeouts gunicorn_errors_raw
 
 # Assemble with python3 so the JSON is escaped correctly and validated by
 # construction; a hand-built heredoc would break on the first odd path.
@@ -123,6 +146,15 @@ for line in (os.environ.get("celery_raw") or "").splitlines():
     })
 celery.sort(key=lambda r: (-r["count"], r["task"]))
 
+realm_ok = []
+for line in (os.environ.get("realm_ok_raw") or "").splitlines():
+    parts = line.split("|")
+    if len(parts) != 3:
+        continue
+    task, realm, count = parts
+    realm_ok.append({"task": task, "realm": realm, "count": int(count)})
+realm_ok.sort(key=lambda r: (r["task"], r["realm"]))
+
 paths = []
 for line in (os.environ.get("gunicorn_errors_raw") or "").splitlines():
     line = line.strip()
@@ -143,6 +175,9 @@ snapshot = {
     # False means every count below is meaningless, NOT that the box is healthy.
     "journal_readable": (os.environ.get("journal_readable") == "true"),
     "celery_task_failures": celery,
+    # Per-(task, realm) successes. Absent in older writers; the evaluator
+    # treats a missing key as "not measured" rather than as zero.
+    "celery_realm_successes": realm_ok,
     "celery_failure_total": sum(r["count"] for r in celery),
     "gunicorn_worker_timeouts": _int(os.environ.get("gunicorn_timeouts")),
     "gunicorn_error_paths": paths,

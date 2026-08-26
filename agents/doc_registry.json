@@ -3886,6 +3886,31 @@
                 "startup-warm-orchestrator-replaced"
             ]
         },
+        "agents/runbooks/runbook-correlation-warm-budget-and-per-realm-alerting-2026-08-26.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "backend",
+            "aliases": [
+                "correlation warm budget",
+                "per-realm alerting",
+                "warm_player_correlations_task",
+                "celery realm blind spot"
+            ],
+            "tags": [
+                "warmers",
+                "soft-limit",
+                "celery",
+                "background-queue",
+                "ops-digest",
+                "alerting",
+                "locks"
+            ],
+            "archive_on": [
+                "correlation-warm-budgets-superseded"
+            ]
+        },
         "agents/runbooks/runbook-player-page-charts-and-roster-2026-08-15.md": {
             "kind": "runbook",
             "status": "active",

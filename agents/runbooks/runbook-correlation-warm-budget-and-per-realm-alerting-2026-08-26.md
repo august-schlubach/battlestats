@@ -1,0 +1,339 @@
+# Runbook: Correlation Warm Budgets and Per-Realm Alerting
+
+_Created: 2026-08-26_
+_Context: Follow-on tranche from `runbook-startup-warm-fanout-2026-08-26.md`. Verifying that fix surfaced three defects it did not cause: an unrouted correlation task, correlation warmers whose budget is smaller than their measured work, and an ops digest that cannot see a per-realm failure._
+_QA: Every timing is read from the production journal 2026-08-25..26. The failure-rate table is read from the live snapshot `2026-08-26_1100Z.json`. Read-only throughout._
+
+## QA Notes
+
+_Reviewed 2026-08-26 against `/home/august/code/battlestats`. 23 assertions checked, 7 corrected._
+
+### Resolved
+- **`warm_player_correlations_task` cited at `tasks.py:1892`** -> actual: `server/warships/tasks.py:1896` -> §2 citation corrected.
+- **Celery axis cited at `daily_ops_email.py:609-633`** -> actual: the block opens at `server/scripts/daily_ops_email.py:608` -> §3 citation corrected to 608-633.
+- **D2 assumed the per-metric correlation lock is per-realm** -> actual: it is **not**. Both tasks call `_run_locked_task(<name>, "population", ...)` (`server/warships/tasks.py:1462`, `:1481`) and `_task_lock_key` builds `warships:tasks:<name>:<resource_id>:lock` (`server/warships/tasks.py:752`). `resource_id` is the literal string `"population"`, identical for every realm, so **ranked and clan-battle correlation warms are globally serialized across realms** — unlike the combined task, which keys on realm (`_correlation_warm_lock_key`, `server/warships/tasks.py:~171`). Raising the hard limit to 840s against a 900s TTL means one realm can hold that lock for nearly the whole TTL and the other two skip. -> D2 now carries this as a blocking constraint and Open Question 1; the budget change alone would make cross-realm starvation *worse*.
+- **§3's success counts were read as "runs that did work"** -> actual: `_run_locked_task` returns `{"status": "skipped", "reason": "already-running"}` on a held lock (`server/warships/tasks.py:757`), Celery logs that as `succeeded in ...`, and the writer counts **every** `succeeded in` line (`server/scripts/snapshot_service_health.sh:69-72`). So `succeeded` means "did not raise", not "did work", and a task that always skips reads as perfectly healthy. -> added to §3 as a second, independent masking mechanism. Combined with the finding above, the 3 successes in §3's table are an upper bound.
+- **D3 step 1 said "include the realm in the existing success log line"** -> actual: two of its targets have **no** success log line to amend. `warm_player_ranked_wr_battles_correlation_task` (`server/warships/tasks.py:1458`) and `warm_player_clan_battle_wr_battles_correlation_task` (`:1477`) `return _run_locked_task(...)` directly and never log completion. -> D3 step 1 now says the line must be **added** for those two.
+- **D3 did not name its targets** -> enumerated from `server/warships/tasks.py`: `:1889` distributions, `:1910` correlations, `:1942` hot entity, `:1962` bulk load, plus the two above. `warm_recently_viewed_players_task` (`:1982`) is **excluded** — its Beat entry was removed 2026-06-20 (`server/warships/signals.py`, "Recently-Viewed Player Warmer: REMOVED"). -> target list written into D3.
+- **"must not add a sixth journal pass"** -> actual: the writer makes 5 `journalctl` invocations textually (`server/scripts/snapshot_service_health.sh:51,67,69,86,88`), two of them inside a loop over 6 units, so ~15 calls per run. -> wording corrected to "must reuse the existing per-unit sweep rather than adding a third call inside the unit loop".
+
+### Unverified
+- The ~90s CPU cost of the snapshot writer per run: inherited from `runbook-health-sweep-remediation-2026-08-26.md`, not re-measured here. It bounds how much journal work D3 may add, so it is worth re-measuring if D3 grows.
+- That D2's budgets will actually stop the soft-limits: the durations are measured, but whether the 389-500s spread has a tail beyond 780s cannot be known from successful runs alone — every killed run is censored at 540s.
+
+### Open Questions
+1. ~~**Should D2 ship without realm-scoping the per-metric correlation lock?**~~ **ANSWERED 2026-08-26: option (a).** Realm-scope the lock first, then raise the budgets. `_run_locked_task(<name>, "population", ...)` becomes `_run_locked_task(<name>, realm, ...)` at `server/warships/tasks.py:1466` and `:1485` — the only two `"population"` call sites. This permits three concurrent ~450s aggregations against the 2-vCPU Postgres, bounded by the `background` pool’s `-c 3` cap and Beat’s per-realm striping. Step 2 is unblocked.
+
+## Purpose
+
+Three defects, one theme: **per-realm striped work is failing on one realm and
+nothing says so.** This runbook records the measurements, the design for each
+fix, and the two items that are decisions rather than code.
+
+Read this before changing any correlation warmer budget, and before assuming
+the ops digest's "no alert" means "all realms healthy". It does not.
+
+## Findings
+
+### 1. `warm_player_clan_battle_wr_battles_correlation_task` is unrouted
+
+`CELERY_TASK_ROUTES` (`server/battlestats/settings.py:310`) routes its sibling
+`warm_player_ranked_wr_battles_correlation_task` to `background` (line 343) but
+has **no entry** for `warm_player_clan_battle_wr_battles_correlation_task`
+(`server/warships/tasks.py:1477`). With `CELERY_TASK_DEFAULT_QUEUE = 'default'`
+(`settings.py:309`) it lands on `default` — the request-adjacent lane shared
+with crawl dispatchers and watchdogs.
+
+This is the identical defect class the project already fixed and pinned in
+`test_ship_standings_warm_chain_routes_to_background`: three warmers were
+unrouted, landed on `default`, and on 2026-07-13 a warm chain sat
+received-but-unexecuted for 3.5h. `background` is the designed home for warmers.
+
+**Risk:** a ~400s population aggregation competing with request-adjacent work.
+
+### 2. The correlation warmers' budget is smaller than their measured work
+
+`warm_player_ranked_wr_battles_correlation_task` warms **one** correlation and
+nothing else. It carries `TASK_OPTS` — 540s soft / 600s hard
+(`server/warships/tasks.py:24-28`). Measured on the production journal over 72h
+to 2026-08-26:
+
+| realm | succeeded | duration when it succeeded |
+|---|---|---|
+| `eu` | 1 / 8 | 468s |
+| `asia` | 1 / 3 | 389s |
+| `na` | 2 / 4 | 429s, 500s |
+
+**389–500s of work against a 540s limit, on every realm.** This is not an `eu`
+problem and not a packing problem — the budget is mis-sized for irreducible
+work, and it tips over on roughly two thirds of runs everywhere.
+
+**This is the opposite call from the startup warm fan-out, deliberately.**
+There, twelve *separable* operations totalling ~1600s were packed into one
+budget, so splitting was available and raising the limit would have pinned a
+worker for 25 minutes. Here it is a single aggregation that legitimately costs
+~450s. The codebase already sizes budgets to such work rather than splitting it:
+`SHIP_PCT_WARM_TASK_OPTS` (30m/27m, `tasks.py:38`), `RECAPTURE_TASK_OPTS`
+(16m/15m, `tasks.py:52`) and `CLAN_TIER_DIST_WARM_TASK_OPTS` (3h/2h45m,
+`tasks.py:1988`) all exist for exactly this reason.
+
+**The binding constraint is the lock TTL, not taste.** The documented invariant
+(`tasks.py` `_reclassify_budget_seconds`, and the `RECAPTURE_TASK_OPTS` note) is:
+
+```
+soft_time_limit < time_limit <= lock TTL
+```
+
+- The two per-metric tasks lock through `_run_locked_task`, whose TTL is
+  `RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60` (900s, `tasks.py:84`).
+- The combined `warm_player_correlations_task` (`tasks.py:1896`) locks with
+  `CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60` (1200s, `tasks.py:106`).
+
+So the budgets must fit *under* those, or a slow run loses its lock mid-pass and
+a second invocation starts on top of it — the failure mode already pinned by
+`test_lock_outlives_the_hard_time_limit`.
+
+### 3. The ops digest cannot see a per-realm failure
+
+The digest's Celery axis (`server/scripts/daily_ops_email.py:608-633`) alerts
+when a task has failures **and zero successes**, keyed on the **task name**. The
+snapshot writer (`server/scripts/snapshot_service_health.sh:65-81`) tallies per
+`(unit, task, exception)` from `raised unexpected` lines and counts successes
+per task.
+
+Every per-realm striped task therefore has a blind spot: one realm failing on
+**every** run is masked by the other realms' successes. Live snapshot
+`2026-08-26_1100Z.json`, 24h window:
+
+| fail | ok | success rate | task |
+|---|---|---|---|
+| 10 | 3 | 23.1% | `warm_player_ranked_wr_battles_correlation_task` |
+| 3 | 0 | 0% | `startup_warm_caches_task` (alerted; fixed in v5.6.1) |
+| 1 | 0 | 0% | `roll_up_player_daily_ship_stats_task` (alerted; stale) |
+| 1 | 2 | **66.7%** | `warm_player_correlations_task` |
+
+That last row **is** the blind spot: `eu` fails every run, `na` and `asia`
+succeed, and 2-of-3 reads as healthy.
+
+**A second, independent masking mechanism (found in QA): a lock-skip counts as a
+success.** `_run_locked_task` returns `{"status": "skipped", "reason":
+"already-running"}` when the lock is held (`tasks.py:757`); Celery logs that as
+`succeeded in ...`, and the writer counts every `succeeded in` line
+(`snapshot_service_health.sh:69-72`). So `succeeded` means *did not raise*, not
+*did work* — a task that only ever skips reads as perfectly healthy. The 3
+successes in the table above are therefore an upper bound.
+
+**A failure-rate threshold does not fix this, and I checked before assuming it
+would.** Any threshold low enough to stay quiet on genuinely flaky warmers
+(<50%) is also quiet on 66.7%, which is precisely the signature of one realm of
+three failing every time. Rate is the wrong axis; realm is the right one.
+
+**Realm cannot be recovered from the current journal format.** `Starting <task>
+realm=X` is the task's own `logger.info` and carries **no task id**; only
+Celery's `received`/`succeeded`/`Soft time limit` lines carry ids. Worse, the
+soft-limit line is emitted by `MainProcess`, not the `ForkPoolWorker` that
+logged `Starting`, so even worker-affinity pairing breaks for exactly the case
+that matters. Pairing these positionally produced a confidently wrong reading
+during the v5.6.1 verification; see that runbook's "Reading this journal
+correctly".
+
+## Decisions
+
+### D1 — Route the clan-battle correlation task to `background`
+
+One entry in `CELERY_TASK_ROUTES`, beside its sibling. Pinned by a test in
+`server/warships/tests/test_task_routing.py` asserting **both** correlation
+tasks route to `background`, so the pair cannot drift again.
+
+### D2 — Size the correlation budgets to the measured work, under the lock TTL
+
+Two new constants in `server/warships/tasks.py`, each respecting its own lock:
+
+| constant | soft | hard | lock TTL | applies to |
+|---|---|---|---|---|
+| `CORRELATION_METRIC_WARM_TASK_OPTS` | 780s (13m) | 840s (14m) | 900s | `warm_player_ranked_wr_battles_correlation_task`, `warm_player_clan_battle_wr_battles_correlation_task` |
+| `PLAYER_CORRELATIONS_WARM_TASK_OPTS` | 900s (15m) | 1020s (17m) | 1200s | `warm_player_correlations_task` |
+
+780s gives ~1.56x headroom over the worst measured success (500s). The combined
+task runs all three correlations serially, so it gets more.
+
+**Not chosen:** fanning `warm_player_correlations_task` out into three
+sub-warmers. That was my first instinct, from the fan-out shipped hours earlier.
+The measurement in §2 refutes it — ranked alone needs ~450s, so a fan-out
+relocates the failure instead of removing it. Recorded because the same wrong
+instinct will recur.
+
+**Deliberately not done:** raising `RESOURCE_TASK_LOCK_TIMEOUT`. It is shared by
+many unrelated tasks; the budgets fit under the existing TTLs.
+
+**BLOCKING CONSTRAINT found in QA — the per-metric lock is not realm-scoped.**
+Both per-metric tasks call `_run_locked_task(<name>, "population", ...)`
+(`tasks.py:1462`, `:1481`), and `_task_lock_key` (`tasks.py:752`) builds
+`warships:tasks:<name>:<resource_id>:lock` from that literal `"population"` —
+**the same key for every realm**. The ranked and clan-battle correlation warms
+are therefore globally serialized, unlike the combined task, which keys on realm.
+
+Raising the hard limit to 840s against the 900s TTL means one realm can hold that
+lock for nearly the entire TTL, so the other two realms skip — and skips count as
+successes (§3), making the digest *quieter* while coverage gets *worse*. This
+budget change must not ship on its own. See Open Question 1.
+
+### D3 — Attribute successes per realm, and alert on a realm that never succeeds
+
+Invert the problem. Do **not** try to attribute *failures* to a realm — that
+means parsing exception paths, and the `SoftTimeLimitExceeded` handler is
+exactly where the 2026-08-26 F2 trap lived (an atomic unwind substitutes a
+different exception before the handler runs). Attribute **successes** instead,
+which is a pure success-path change with no exception-handling risk.
+
+1. **`server/warships/tasks.py`** — emit the realm on the success path of each
+   per-realm warmer. Success path only; no `except` clause is touched. Targets,
+   enumerated in QA:
+
+   | line | task | action |
+   |---|---|---|
+   | `:1889` | `warm_player_distributions_task` | amend existing `Finished` line |
+   | `:1910` | `warm_player_correlations_task` | amend existing `Finished` line |
+   | `:1942` | `warm_hot_entity_caches_task` | amend existing `Finished` line |
+   | `:1962` | `bulk_load_entity_caches_task` | amend existing `Finished` line |
+   | `:1458` | `warm_player_ranked_wr_battles_correlation_task` | **add** — it `return`s `_run_locked_task(...)` and logs no completion |
+   | `:1477` | `warm_player_clan_battle_wr_battles_correlation_task` | **add** — same |
+
+   `warm_recently_viewed_players_task` (`:1982`) is excluded: its Beat entry was
+   removed 2026-06-20 (`signals.py`).
+
+   A skip never reaches these lines, so per-realm success counts built from them
+   correctly exclude lock-skips — which is exactly the flaw §3 records in the
+   existing `succeeded` count.
+2. **`server/scripts/snapshot_service_health.sh`** — collect
+   `Finished <task> realm=<r>` into a `celery_realm_successes` array of
+   `{task, realm, count}`. It must reuse the existing per-unit sweep rather than
+   adding a third `journalctl` call inside the unit loop: the writer already
+   makes 5 invocations textually (`:51,67,69,86,88`), two of them inside a loop
+   over 6 units, and already costs ~90s CPU per run.
+3. **`server/scripts/daily_ops_email.py`** — new condition
+   `celery_task_realm_failing:<task>:<realm>`: a task that succeeded for at
+   least one realm but has **zero** successes for another realm in the window.
+   Requiring at least one success elsewhere is what keeps this from
+   double-reporting a task the existing zero-success rule already caught.
+
+**Known limitation, stated rather than hidden:** this detects a realm that never
+succeeds. It cannot distinguish "failed" from "never dispatched" — both look
+like zero successes. That is acceptable, and arguably correct: a striped task
+that stopped being dispatched for one realm is also worth an alert.
+
+## Implementation plan
+
+Ordered smallest-risk first; each step independently shippable and verifiable.
+
+**Step 1 — D1, the routing fix.** Add the route; extend the routing test to
+assert both correlation tasks land on `background`. Behaviour-free otherwise.
+
+**Step 2 — D2, the budgets.** **Realm-scope the per-metric lock first** (Open Question 1, answered: pass `realm`
+as `resource_id` at `tasks.py:1466` and `:1485`), then add the two constants,
+apply them to the three task decorators. Tests must pin the lock invariant (`soft < hard <= lock TTL`)
+for both new constants, mirroring `test_lock_outlives_the_hard_time_limit`. A
+test that only asserts the numbers is worthless; the invariant is the contract.
+
+**Step 3 — D3, per-realm alerting.** Success-path log line, writer field,
+evaluator condition. The evaluator change needs unit tests in
+`server/warships/tests/test_daily_ops_email.py`, which already has the fixture
+shape for this (see its `celery_task_failing:` tests around line 746).
+
+## Implementation (2026-08-26)
+
+All three steps built; **not yet deployed** at time of writing.
+
+**Step 1** — `warm_player_clan_battle_wr_battles_correlation_task` routed to
+`background` in `server/battlestats/settings.py`, beside its ranked sibling.
+Pinned as a pair by `CorrelationWarmRoutingTests`.
+
+**Step 2** — `CORRELATION_METRIC_WARM_TASK_OPTS` (780s soft / 840s hard) and
+`PLAYER_CORRELATIONS_WARM_TASK_OPTS` (900s / 1020s) added and applied to the
+three tasks. The `"population"` lock scope became `realm` at both call sites, so
+the per-metric warms no longer serialize across realms. Tests pin the lock
+invariant rather than the numbers, plus a line-number guard that fails if a lock
+scoped to the literal `"population"` ever returns.
+
+**Step 3** — the realm now appears on the success path of six tasks: amended on
+the four that already logged a completion, **added** on the two per-metric tasks
+that logged none. The added line is explicitly gated on
+`result.get("status") != "skipped"`, so a lock-skip is never counted as a warm —
+the exact flaw §3 records in the existing `succeeded` count.
+`snapshot_service_health.sh` emits `celery_realm_successes`;
+`daily_ops_email.py` gains `celery_task_realm_failing:<task>:<realm>`.
+
+**One QA constraint was violated and then fixed:** the first cut of the writer
+added a *third* `journalctl` call inside the per-unit loop, which this runbook's
+own QA notes forbid. It now folds both success tallies into a single sweep using
+`-g 'succeeded in|Finished [a-z_0-9]+ realm='`, holding the writer at 5
+invocations. Verified on prod: the alternation returns an identical
+`succeeded in` count to the plain pattern (162 = 162 over 6h), so the existing
+tally is unchanged.
+
+A second defect was caught in review and fixed: the evaluator keyed on
+`(task, realm)` while the writer tallies per `(unit, task, realm)`, and it
+*assigned* rather than accumulated — so a task seen under two units let a zero
+row erase a healthy count and invent an alert. Each task lands on one unit
+today, which is precisely why it needed a fixture rather than trust.
+
+Backend suite **1284 passed, 2 skipped** (1270 + 14 new). Writer passes `bash -n`,
+and its parse was exercised against both real line shapes plus a skip line and a
+realm-less line, which it correctly ignores.
+
+## Validation
+
+- Backend suite green (`DJANGO_SECRET_KEY=k DB_ENGINE=sqlite3 pytest
+  warships/tests/ --nomigrations`).
+- **Step 1** is proven by the route test, not by production.
+- **Step 2** is proven in production: `warm_player_ranked_wr_battles_correlation_task`
+  should stop soft-limiting. Its Beat lanes run daily per realm, so a fair read
+  needs **~48h** after deploy. Expect success durations to stay 389–500s — the
+  fix removes the kill, not the cost.
+- **Expect one day-one false positive on Step 3 and do not chase it.** The
+  window is 24h but `Finished ... realm=` lines only exist post-deploy, so the
+  first run straddles the boundary: a realm whose lane fell *before* the deploy
+  reads as zero successes while the others read as one. The "at least one
+  succeeding realm" guard covers the all-zero case, not this partial one. It
+  self-corrects within 24h.
+- **Watch for the serialization that was removed.** The global `"population"`
+  lock was accidentally preventing two realms from warming the same metric at
+  once. That is gone by design. The exposure is narrower than it looks — the
+  combined task already keyed on realm, and v5.6.1's fan-out ran concurrent
+  cross-realm correlation work successfully (425s, 497s) — but the per-metric
+  Beat lanes and the on-view dispatch sites (`tasks.py:959`, `:982`) can now
+  overlap too. Spacing will not help (20s of stagger against ~450s of work), so
+  do not add any: watch `background` queue depth and Postgres load instead.
+  Three of these holding all three slots for 780s is the signal.
+- **Step 2 needs ~48h, not one night.** The per-metric lanes run daily per
+  realm, so a single night is one sample per realm.
+- **Step 3** is proven by dry-running the digest **as the unprivileged user**,
+  which is the only way that proves anything (running it as root was the trap
+  recorded in the 2026-08-26 sweep's F4):
+  ```bash
+  sudo -u battlestats -E /usr/bin/python3 scripts/daily_ops_email.py --dry-run --no-llm
+  ```
+  from `/opt/battlestats-server/current/server`. Expect a
+  `celery_task_realm_failing:...:eu` line for the correlation warmers until
+  Step 2's effect lands.
+
+## Follow-ups (not code)
+
+1. **The `background` pool saturates on worker startup.** During the v5.6.1
+   deploy the startup dispatcher waited **4.5 minutes** for one of three slots,
+   queued behind `warm_all_clan_tier_distributions_task` grinding 22,252 asia
+   clans. Worth deciding whether that task belongs on `background` at all, or
+   whether the pool needs a fourth slot. Sizing: `ops-infra-resources.md`.
+2. **Should the startup warm exist at all?** The deploy does not flush Redis and
+   all four warmers have their own Beat lanes, so it earns its keep only after a
+   genuine cold start. Inherited from a 2026-03-29 docker-compose assumption
+   (`archive/runbook-startup-cache-warming.md`); never revisited.
+
+## Related
+
+- `runbook-startup-warm-fanout-2026-08-26.md` — the tranche this follows
+- `runbook-top-ships-warm-soft-limit-2026-08-12.md` — where the fan-out remedy
+  is right, and the lock-outlives-limit invariant
+- `runbook-health-sweep-remediation-2026-08-26.md` — F3 originates here; F4
+  built the digest axis this extends
+- `runbook-celery-queue-strategy.md` — the queue map D1 restores

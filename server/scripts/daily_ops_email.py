@@ -430,6 +430,9 @@ def gather_service_health(bench_dir: str, now: datetime | None = None) -> dict:
         "journal_readable": latest.get("journal_readable"),
         "journal_readable_present": "journal_readable" in latest,
         "celery_task_failures": latest.get("celery_task_failures") or [],
+        # None (not []) when the writer predates this field, so the
+        # evaluator can tell "not measured" from "measured, all zero".
+        "celery_realm_successes": latest.get("celery_realm_successes"),
         "celery_failure_total": latest.get("celery_failure_total"),
         "gunicorn_worker_timeouts": latest.get("gunicorn_worker_timeouts"),
         "gunicorn_error_paths": latest.get("gunicorn_error_paths") or [],
@@ -632,6 +635,46 @@ def _evaluate_service_health(svc: dict) -> list[dict]:
             f"{int(count)}x in the last {svc.get('window_hours') or 24}h "
             f"on {row.get('unit') or '<unknown unit>'} and succeeded 0 times",
         ))
+
+    # Per-realm: a task striped across realms that fails ONE realm every run is
+    # invisible above, because that rule keys on the task name and the other
+    # realms' successes satisfy it. Measured 2026-08-26: warm_player_correlations_task
+    # sat at 1 failure / 2 successes -- 66.7% -- while `eu` failed every run.
+    #
+    # A failure-RATE threshold cannot separate that from ordinary flakiness: any
+    # rate quiet enough for warmers that fall back to :published by design is
+    # also quiet at 66.7%. Realm is the right axis.
+    #
+    # Requiring at least one SUCCEEDING realm keeps a fully-broken task to the
+    # single condition above instead of one per realm.
+    realm_rows = svc.get("celery_realm_successes")
+    if realm_rows is not None:
+        by_task: dict[str, dict[str, int]] = {}
+        for row in realm_rows:
+            task = row.get("task")
+            realm = row.get("realm")
+            if not task or not realm:
+                continue
+            # ACCUMULATE, never assign: the writer tallies per (unit, task,
+            # realm) but this keys on (task, realm), so a task seen under two
+            # units yields two rows for the same pair. Assigning lets a zero
+            # from one unit erase a healthy count from another.
+            counts = by_task.setdefault(task, {})
+            counts[realm] = counts.get(realm, 0) + int(row.get("count") or 0)
+        for task, counts in sorted(by_task.items()):
+            if not any(counts.get(r, 0) > 0 for r in REALMS):
+                continue  # broken everywhere: the task-name rule owns it
+            for realm in REALMS:
+                if counts.get(realm, 0) > 0:
+                    continue
+                out.append(_cond(
+                    f"celery_task_realm_failing:{task}:{realm}",
+                    f"{task} completed 0 times for realm {realm} in the last "
+                    f"{svc.get('window_hours') or 24}h while succeeding on "
+                    + ", ".join(r for r in REALMS if counts.get(r, 0) > 0)
+                    + " — a striped task that is failing or no longer dispatched "
+                    "for one realm reads as healthy on the task-name axis",
+                ))
 
     # gunicorn: a worker timeout is a 500 with an empty body, never routine.
     timeouts = svc.get("gunicorn_worker_timeouts")

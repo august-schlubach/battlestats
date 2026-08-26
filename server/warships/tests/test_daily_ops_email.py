@@ -865,3 +865,100 @@ class ServiceHealthConditions(OpsAlertTestCase):
         """
         self.rewrite_service_health(journal_readable=False)
         self.assertIn("journal_unreadable:service-health", self.codes())
+
+
+class CeleryPerRealmConditions(OpsAlertTestCase):
+    """Per-realm striped tasks: one realm failing every run must not hide.
+
+    The existing Celery axis keys on the TASK NAME and alerts only on zero
+    successes, so a task striped across three realms that fails `eu` every
+    single run reads as 2-of-3 healthy and says nothing. Measured on the live
+    snapshot 2026-08-26_1100Z: `warm_player_correlations_task` sat at 1 failure
+    / 2 successes -- 66.7% -- which is exactly that signature.
+
+    A failure-RATE threshold cannot fix it: any rate low enough to stay quiet on
+    genuinely flaky warmers is also quiet on 66.7%. Realm is the right axis, and
+    the writer supplies it as per-realm SUCCESS counts, because attributing
+    failures would mean parsing exception paths (where the 2026-08-26 F2 trap
+    lived) while a success is a plain success-path log line.
+
+    Runbook: agents/runbooks/runbook-correlation-warm-budget-and-per-realm-alerting-2026-08-26.md
+    """
+
+    TASK = "warships.tasks.warm_player_correlations_task"
+
+    def test_a_realm_that_never_succeeds_trips(self):
+        self.rewrite_service_health(
+            celery_realm_successes=[
+                {"task": self.TASK, "realm": "na", "count": 2},
+                {"task": self.TASK, "realm": "asia", "count": 2},
+                {"task": self.TASK, "realm": "eu", "count": 0},
+            ],
+        )
+        self.assertIn(f"celery_task_realm_failing:{self.TASK}:eu", self.codes())
+
+    def test_a_realm_absent_from_the_rows_trips(self):
+        """Never dispatched and always failed both read as zero successes.
+
+        That conflation is deliberate: a striped task that silently stopped
+        being dispatched for one realm is just as broken as one that fails.
+        """
+        self.rewrite_service_health(
+            celery_realm_successes=[
+                {"task": self.TASK, "realm": "na", "count": 2},
+                {"task": self.TASK, "realm": "asia", "count": 2},
+            ],
+        )
+        self.assertIn(f"celery_task_realm_failing:{self.TASK}:eu", self.codes())
+
+    def test_all_realms_succeeding_stays_quiet(self):
+        self.rewrite_service_health(
+            celery_realm_successes=[
+                {"task": self.TASK, "realm": r, "count": 1}
+                for r in ("na", "eu", "asia")
+            ],
+        )
+        self.assertEqual(self.codes(), [])
+
+    def test_a_task_with_no_successes_anywhere_does_not_double_report(self):
+        """The zero-success rule already owns that case; this must not pile on.
+
+        Requiring at least one succeeding realm is what keeps a fully-broken
+        task to ONE condition instead of one per realm.
+        """
+        self.rewrite_service_health(
+            celery_realm_successes=[
+                {"task": self.TASK, "realm": r, "count": 0}
+                for r in ("na", "eu", "asia")
+            ],
+        )
+        self.assertEqual(
+            [c for c in self.codes() if c.startswith("celery_task_realm_failing")],
+            [])
+
+    def test_an_older_writer_without_the_field_stays_quiet(self):
+        """A writer predating this field must not manufacture alerts."""
+        self.rewrite_service_health(celery_realm_successes=None)
+        self.assertEqual(
+            [c for c in self.codes() if c.startswith("celery_task_realm_failing")],
+            [])
+
+    def test_rows_for_the_same_realm_on_two_units_are_summed(self):
+        """The writer tallies per (unit, task, realm); the evaluator keys on
+        (task, realm). Assigning instead of accumulating makes the last row win,
+        so a zero from one unit erases a healthy count from another and invents
+        an alert. Each task lands on one unit today, which is exactly why this
+        needs a fixture rather than trust.
+        """
+        self.rewrite_service_health(
+            celery_realm_successes=[
+                {"task": self.TASK, "realm": "na", "count": 1},
+                {"task": self.TASK, "realm": "eu", "count": 2},
+                # same (task, realm) seen again on a second unit, zero there
+                {"task": self.TASK, "realm": "eu", "count": 0},
+                {"task": self.TASK, "realm": "asia", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            [c for c in self.codes() if c.startswith("celery_task_realm_failing")],
+            [], "eu succeeded twice on one unit; a zero row must not erase it")
