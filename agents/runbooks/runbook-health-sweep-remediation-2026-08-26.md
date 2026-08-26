@@ -53,13 +53,13 @@ There is **no clock skew**. The droplet reads UTC; a session showing 08-25 is si
 
 ## TL;DR
 
-| # | Finding | Severity | Fix cost | Deploy needed |
+| # | Finding | Severity | Status | Deploy needed |
 |---|---|---|---|---|
-| F1 | `player-suggestions` 500s: an unescaped `_` defeats the trigram index | **HIGH** | small code | backend + client rebuild |
-| F2 | `roll_up_player_daily_ship_stats_task` fails every night; sweeper never completes | **MEDIUM** | code | backend |
-| F3 | Background cache warmers hitting the 540 s soft limit, 93× in 6 days | LOW | code or config | backend |
-| F4 | Ops digest structurally blind to F1, F2 and F3 | **MEDIUM** | code | backend |
-| F5 | Client deploy restarts logged as unit failures | COSMETIC | ops only | **ops (droplet-side)** |
+| F1 | `player-suggestions` 500s: an unescaped `_` defeats the trigram index | **HIGH** | fixed `648f221` | backend + client rebuild |
+| F2 | `roll_up_player_daily_ship_stats_task` fails every night; sweeper never completes | **MEDIUM** | implemented | backend |
+| F3 | Background cache warmers hitting the 540 s soft limit, 93× in 6 days | LOW | open, deferred | backend |
+| F4 | Ops digest structurally blind to F1, F2 and F3 | **MEDIUM** | implemented | backend |
+| F5 | Client deploy restarts logged as unit failures | COSMETIC | half done | **ops (droplet-side)** |
 
 **Recommended order: F1 (done, needs deploy) → F4 → F2 → F3 → F5.**
 
@@ -179,7 +179,32 @@ Deploy backend, then **rebuild the client** — mandatory after any version bump
 
 ## F2 — the nightly rollup sweeper never completes
 
-**Status: OPEN.**
+**Status: IMPLEMENTED 2026-08-26, NOT DEPLOYED.**
+
+Both halves shipped. The aggregation moved into Postgres
+(`rebuild_daily_ship_stats_for_date`), and the task became truncation-safe with
+per-day logging (`roll_up_player_daily_ship_stats_task`).
+
+**Measured on production, read-only, 2026-08-26** — the new group-by over a full real day
+(2026-08-25: 230,597 events collapsing to 211,811 groups) under `EXPLAIN (ANALYZE, BUFFERS)`:
+
+```
+HashAggregate (actual rows=211811 loops=1)
+  Group Key: player_id, ship_id, mode, season_id
+  ->  Bitmap Heap Scan on warships_battleevent (actual rows=230597)
+        ->  Bitmap Index Scan on battle_event_detected_brin
+Execution Time: 2342.690 ms
+```
+
+**2.34 s for the day the old code could not finish inside 540 s.** The aggregate spills to
+disk (41 batches, ~40 MB temp) and is still that fast; there is no case for raising the
+budget. Rows are streamed out in `_ROLLUP_CHUNK_SIZE` batches so a busy day never
+materialises ~230K model instances at once.
+
+Existing rollup coverage passes unchanged — 184 tests across `test_incremental_battles.py`
+and `test_ship_list_rollup_source.py`, including `test_rebuild_carries_phase7_combat_columns`
+and the aggregate-sum equivalence tests. Four new tests pin the truncation contract. Full
+backend suite: 1262 passed / 2 skipped.
 
 ### Evidence
 
@@ -401,7 +426,10 @@ is not to start mailing a daily status report.
 
 ## F5 — client deploy restarts are logged as failures
 
-**Status: OPEN, cosmetic.**
+**Status: HALF IMPLEMENTED 2026-08-26.** `SuccessExitStatus=143` is in
+`client/deploy/bootstrap_droplet.sh`, so a future bootstrap is correct. **The live droplet
+is unchanged** and will keep mislabelling deploys until step 2 below is run by hand; that is
+a production mutation and is left for an explicit acknowledgement.
 
 `battlestats-client.service: Main process exited, code=exited, status=143` followed by
 `Failed with result 'exit-code'`, five times in six days. **143 = 128 + 15 = SIGTERM.**
@@ -491,13 +519,32 @@ systemctl show <unit>.service -p ExecMainStatus -p Result
 Two greps that will hang past a 120 s timeout on this journal: any multi-unit pattern sweep
 over the full window, and anything piped rather than filtered server-side with `-g`.
 
+## Implementation log
+
+| date | what | commit | deployed |
+|---|---|---|---|
+| 2026-08-26 | F1 escaping fix | `648f221` | no |
+| 2026-08-26 | F4 service-health snapshot + digest gatherer | `b8264bc` | no |
+| 2026-08-26 | F2 DB-side rollup + truncation-safe task | this branch | no |
+| 2026-08-26 | F5 `SuccessExitStatus=143` in bootstrap (droplet untouched) | this branch | no |
+
+Branch `worktree-sweep-remediation-2026-08-26`, built on `648f221`. Backend suite
+**1262 passed / 2 skipped**. **Nothing is deployed**: `VERSION` is unbumped, no env changed,
+no droplet mutated. The only production contact throughout was read-only — `EXPLAIN`,
+`SELECT`, `journalctl`, and one run of the new snapshot writer into `/tmp`.
+
 ## Follow-ups
 
 - [ ] F1 deployed and the 500s confirmed gone in the next window.
-- [ ] F4 shipped; verify by forcing a known-failing condition and seeing mail.
-- [ ] F2 shipped; verify the next 04:30 run logs `Finished roll_up…`.
-- [ ] F3 reassessed after F2.
-- [ ] F5 folded into a client deploy.
+- [ ] F4 deployed; confirm `battlestats-service-health.timer` is enabled and that the
+      11:00 UTC snapshot lands before the 11:30 digest reads it.
+- [ ] F2 deployed; verify the next 04:30 run logs `Finished roll_up…` and per-day
+      `rebuilt <date>: rows_written=…` lines. If it still truncates, the status will now
+      say `partial` and name the day rather than raising.
+- [ ] F5 step 2 applied to the live droplet (edit the unit, `systemctl daemon-reload`).
+- [ ] F3 reassessed after F2. It may partly resolve on its own: the warmers and the rollup
+      share the `background` worker, and the rollup currently burns 9 minutes of it nightly
+      for nothing.
 - [ ] Re-check oturu's SQLite integrity if a second corruption appears.
 - [ ] Consider whether the 2026-08-06 remediation runbook can now be archived: its F5
       (logrotate) is confirmed closed by this sweep.
