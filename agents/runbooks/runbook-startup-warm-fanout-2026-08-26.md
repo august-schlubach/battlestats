@@ -163,6 +163,45 @@ Note this is a *different* task from F3's
 in the same 48h), which the startup path does not dispatch at all. An earlier
 draft of this runbook conflated the two; they are separate defects.
 
+## Production verification (2026-08-26, v5.6.1)
+
+Deployed as **v5.6.1**, backend release `20260826103819`, gunicorn restarted
+14:39:54 UTC. Outcome — **the prediction above held exactly**:
+
+| | |
+|---|---|
+| dispatcher result | `{'status': 'completed', 'dispatched': 12, 'failed': 0}` at **14:44:33** |
+| subtasks that ran | **12 / 12**, all three realms |
+| completed | **11** |
+| soft-limited | **1** — `warm_player_correlations_task` on `eu` (14:57:35 → 15:06:35) |
+
+`eu` and `na` were warmed by this path for the first time. The other two
+correlation warms completed at **425s** and **497s** — inside the 540s budget
+but not comfortably; they are the next candidates to tip over.
+
+**The dispatcher waited 4.5 minutes for a worker slot.** It was dispatched at
+14:39:55 and did not execute until 14:44:33: the `background` pool was saturated
+within milliseconds of coming up (`3 unacknowledged, 1 ready`), the three slots
+taken by `incremental_player_refresh_task`, a Beat `warm_hot_entity_caches_task`,
+and `warm_all_clan_tier_distributions_task` grinding 22,252 asia clans. The old
+packed version would have waited in the same line and then still failed. Worth
+noting that the dispatch is not instant in practice even though the task is.
+
+### Reading this journal correctly — two mis-attributions to avoid
+
+1. **Pair by task id, not by log order.** Three correlation tasks run
+   concurrently on three workers, so `Starting realm=X` and `Finished` lines
+   interleave and *cannot* be paired positionally. Doing so during this
+   verification produced a confident but wrong "eu finished in 72s" reading.
+   Grep `warm_player_correlations_task\[<id>` and match `received` to
+   `succeeded`.
+2. **Do not identify a realm by its `tracked_population`.** The values are close
+   enough between realms to invite exactly that error.
+
+Also note a lock-skip logs `Starting ...` *before* it logs `Skipping ...` and
+never logs `Finished`, so a skipped run looks like a lost one unless you grep
+for `Skipping` too.
+
 ## Follow-ups
 
 1. **`warm_player_correlations_task` fails on `eu` every run, and the digest
