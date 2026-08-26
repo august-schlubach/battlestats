@@ -9,7 +9,7 @@ from io import StringIO
 from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
 from django.core.management import call_command
-from django.db import connection
+from django.db import DatabaseError, connection
 from django.utils import timezone as django_timezone
 
 from battlestats.celery import app
@@ -2947,17 +2947,24 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
             # left no record of whether even one day had been rebuilt.
             try:
                 result = rebuild_daily_ship_stats_for_date(day)
-            except SoftTimeLimitExceeded:
+            except (SoftTimeLimitExceeded, DatabaseError) as exc:
                 # The deadline landed mid-day. Every day is its own transaction,
                 # so the days already done are committed and the interrupted one
                 # rolled back whole; there is no partial day to repair.
                 #
-                # Close the connection rather than letting anything else touch
-                # it. Django restores autocommit while unwinding, and on a
-                # connection still in transaction that raises
-                # "can't change 'autocommit' now" — which is exactly how this
-                # task died on 2026-08-23 and 08-24, in its own error path.
-                # A closed connection is reopened clean by the next query.
+                # DatabaseError is caught alongside the soft limit deliberately,
+                # and it is not defensive padding. On 2026-08-23 and 08-24 the
+                # exception this task actually recorded was ProgrammingError,
+                # not SoftTimeLimitExceeded: the soft limit fires INSIDE
+                # rebuild_daily_ship_stats_for_date's atomic block, and
+                # atomic.__exit__ runs before this handler gets control. When
+                # that unwind cannot roll back cleanly it REPLACES the in-flight
+                # exception with "can't change 'autocommit' now: connection in
+                # transaction status ACTIVE". Catching only the soft-limit class
+                # would miss precisely the two nights that failed worst.
+                #
+                # Close the connection rather than negotiating with it; the next
+                # query reopens it clean.
                 try:
                     connection.close()
                 except Exception:  # pragma: no cover - defensive
@@ -2965,16 +2972,20 @@ def roll_up_player_daily_ship_stats_task(self, target_date_iso=None):
                         "roll_up_player_daily_ship_stats_task: connection close "
                         "failed while handling truncation", exc_info=True)
                 logger.warning(
-                    "roll_up_player_daily_ship_stats_task TRUNCATED on %s: "
-                    "days_rebuilt=%d of %d (soft time limit). The trailing "
-                    "window is self-healing, so the unfinished days are retried "
-                    "tomorrow; a run that truncates EVERY night is not.",
-                    day, len(daily_results), len(dates))
+                    "roll_up_player_daily_ship_stats_task TRUNCATED on %s by %s: "
+                    "days_rebuilt=%d of %d. The trailing window is self-healing, "
+                    "so the unfinished days are retried tomorrow; a run that "
+                    "truncates EVERY night is not.",
+                    day, type(exc).__name__, len(daily_results), len(dates),
+                    exc_info=not isinstance(exc, SoftTimeLimitExceeded))
                 return {
                     "status": "partial",
                     "days_rebuilt": len(daily_results),
                     "days_requested": len(dates),
                     "truncated_on": str(day),
+                    # Named so a truncation caused by a genuine DB fault is
+                    # distinguishable from one caused by the clock.
+                    "truncated_by": type(exc).__name__,
                     "daily": daily_results,
                 }
             daily_results.append(result)

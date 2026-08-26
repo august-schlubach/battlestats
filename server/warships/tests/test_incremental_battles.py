@@ -4422,6 +4422,83 @@ class RollUpTaskTruncationTests(TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["days_rebuilt"], 3)
 
+    def test_truncation_inside_a_real_transaction_still_reports_partial(self):
+        """The discriminating test. The other two patch the atomic block away.
+
+        On 08-23 and 08-24 the task's RECORDED exception was ProgrammingError,
+        not SoftTimeLimitExceeded — which is the tell. The soft limit fires
+        inside `rebuild_daily_ship_stats_for_date`'s `transaction.atomic()`, and
+        `atomic.__exit__` runs before the task's handler gets control. If the
+        unwind cannot roll back cleanly it REPLACES the in-flight exception, and
+        a handler that catches only SoftTimeLimitExceeded never engages on
+        exactly the nights that failed worst.
+
+        So raise it from inside a real atomic block and assert the task still
+        reports partial, whatever the unwind decides to hand upwards.
+        """
+        from celery.exceptions import SoftTimeLimitExceeded
+        from django.db import transaction
+        from warships import tasks
+
+        calls = []
+
+        def fake_rebuild(day):
+            calls.append(day)
+            with transaction.atomic():
+                # Make the transaction genuinely dirty first: an unwind with
+                # nothing to roll back is not the case that broke.
+                PlayerDailyShipStats.objects.filter(date=day).delete()
+                raise SoftTimeLimitExceeded()
+
+        with mock.patch.dict("os.environ", self.env), \
+                mock.patch("warships.incremental_battles."
+                           "rebuild_daily_ship_stats_for_date", fake_rebuild):
+            result = tasks.roll_up_player_daily_ship_stats_task()
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["days_rebuilt"], 0)
+        self.assertEqual(result["truncated_on"], str(calls[0]))
+
+    def test_the_exception_the_unwind_substitutes_is_also_caught(self):
+        """The shape that actually happened on 08-23 and 08-24.
+
+        Those two nights recorded ProgrammingError, not SoftTimeLimitExceeded:
+        the atomic unwind replaced the in-flight exception with "can't change
+        'autocommit' now". A handler catching only the soft-limit class would
+        sail straight past the worst nights, so DatabaseError is caught too and
+        the cause is named in the result rather than guessed at later.
+        """
+        from django.db.utils import ProgrammingError
+        from warships import tasks
+
+        def fake_rebuild(day):
+            raise ProgrammingError(
+                "can't change 'autocommit' now: connection in transaction "
+                "status ACTIVE")
+
+        with mock.patch.dict("os.environ", self.env), \
+                mock.patch("warships.incremental_battles."
+                           "rebuild_daily_ship_stats_for_date", fake_rebuild):
+            result = tasks.roll_up_player_daily_ship_stats_task()
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["truncated_by"], "ProgrammingError")
+
+    def test_a_soft_limit_truncation_is_named_as_such(self):
+        """Clock-driven and fault-driven truncations must stay distinguishable."""
+        from celery.exceptions import SoftTimeLimitExceeded
+        from warships import tasks
+
+        def fake_rebuild(day):
+            raise SoftTimeLimitExceeded()
+
+        with mock.patch.dict("os.environ", self.env), \
+                mock.patch("warships.incremental_battles."
+                           "rebuild_daily_ship_stats_for_date", fake_rebuild):
+            result = tasks.roll_up_player_daily_ship_stats_task()
+
+        self.assertEqual(result["truncated_by"], "SoftTimeLimitExceeded")
+
     def test_the_handler_never_touches_autocommit_on_a_live_connection(self):
         """Close the connection; never negotiate with it.
 

@@ -196,10 +196,14 @@ HashAggregate (actual rows=211811 loops=1)
 Execution Time: 2342.690 ms
 ```
 
-**2.34 s for the day the old code could not finish inside 540 s.** The aggregate spills to
-disk (41 batches, ~40 MB temp) and is still that fast; there is no case for raising the
-budget. Rows are streamed out in `_ROLLUP_CHUNK_SIZE` batches so a busy day never
-materialises ~230K model instances at once.
+**Read that as 2.34 s for the aggregation half, and only that half.** It is the half that
+used to be a Python loop over ~230K model instances, and it is now a single spill-to-disk
+HashAggregate (41 batches, ~40 MB temp) that is still this fast — so there is no case for
+raising the budget. The other half, the DELETE of ~211K rows plus ~106 batched
+`bulk_create` calls per day, is **not measured here** and may well be the larger cost. The
+new per-day log lines will settle that on the first successful run; do not quote a
+whole-task figure until they do. Rows are streamed out in `_ROLLUP_CHUNK_SIZE` batches so a
+busy day never materialises ~230K model instances at once.
 
 Existing rollup coverage passes unchanged — 184 tests across `test_incremental_battles.py`
 and `test_ship_list_rollup_source.py`, including `test_rebuild_carries_phase7_combat_columns`
@@ -328,9 +332,23 @@ Two parts. Do them together; the first alone leaves a job that still cannot fini
    combat profile's hit-ratio source — that regression has happened before and is pinned by
    `test_rebuild_carries_phase7_combat_columns`
    (`server/warships/tests/test_incremental_battles.py:1633`).
-2. **Make the task truncation-safe** — log per day, catch `SoftTimeLimitExceeded` around the
-   loop, and return a partial status naming the days completed instead of propagating. The
-   handler must not touch the connection's autocommit state while a transaction is active.
+2. **Make the task truncation-safe** — log per day, catch the truncation around the loop,
+   and return a partial status naming the days completed instead of propagating. The
+   handler must not touch the connection's autocommit state while a transaction is active;
+   close the connection instead.
+
+   **Catch `DatabaseError` as well as `SoftTimeLimitExceeded`, and note why.** The recorded
+   exception on 08-23 and 08-24 was `ProgrammingError`, *not* the soft limit. The soft limit
+   fires inside `rebuild_daily_ship_stats_for_date`'s atomic block, so `atomic.__exit__`
+   runs before the task's handler gets control, and an unwind that cannot roll back cleanly
+   **replaces** the in-flight exception. A handler catching only the soft-limit class sails
+   straight past the two nights that failed worst. The result names the cause
+   (`truncated_by`) so a clock-driven truncation stays distinguishable from a real DB fault.
+
+   Note for whoever tests this: a fake rebuild that raises *without* a real `transaction.atomic()`
+   around it does not reproduce the bug at all — the substitution only happens during a
+   genuine unwind, and that is what made the original three tests look green while proving
+   nothing about the observed failure.
 
 **Do not raise the 540 s budget.** Project history is explicit that budget raises here are
 the last lever, not the first, and a raise would only move the cliff while the input keeps
@@ -560,6 +578,14 @@ no droplet mutated. The only production contact throughout was read-only — `EX
       `rebuilt <date>: rows_written=…` lines. If it still truncates, the status will now
       say `partial` and name the day rather than raising.
 - [ ] F5 step 2 applied to the live droplet (edit the unit, `systemctl daemon-reload`).
+- [ ] **Watch `warships_playerdailyshipstats` bloat after the first successful runs.** This
+      is new in practice, not in theory: the delete-and-rebuild has effectively never
+      completed, so a working sweeper starts churning **~633K dead tuples a night**
+      (3 days × ~211K). That is by design, but it has never actually been exercised at this
+      volume, and this project has both a DB disk/CPU incident and a standing "never
+      `VACUUM FULL` a hot table" rule in its history. Check table size and that autovacuum
+      is keeping up; if it is not, shrink `BATTLE_HISTORY_ROLLUP_LOOKBACK_DAYS` before
+      reaching for anything heavier.
 - [ ] F3 reassessed after F2. It may partly resolve on its own: the warmers and the rollup
       share the `background` worker, and the rollup currently burns 9 minutes of it nightly
       for nothing.
