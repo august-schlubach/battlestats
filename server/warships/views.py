@@ -2021,6 +2021,31 @@ def ship_leaderboard(request, realm: str, ship_id: int) -> Response:
     return Response(payload)
 
 
+def _like_escape(value: str) -> str:
+    """Neutralise LIKE metacharacters so a user query matches literally.
+
+    `%` and `_` are LIKE wildcards. Interpolating a raw query into an ILIKE
+    pattern therefore does two bad things: it answers a question the user did
+    not ask (`Ur_` matching `UrX`), and it strips the pattern of any literal
+    run >= 3 characters, which is what pg_trgm needs to extract a trigram.
+    Without one, `player_name_trgm_idx` cannot be used and the plan collapses
+    into a whole-realm scan of ~1.1M rows (EXPLAIN cost 343 -> 174,354),
+    blocking the request thread past GUNICORN_TIMEOUT_SECONDS.
+
+    Callers must pair this with an explicit `ESCAPE '\\'` on every ILIKE that
+    receives the escaped pattern, or `\\_` matches a literal backslash and the
+    query silently returns nothing.
+
+    Backslash is escaped first; doing it later would double-escape the
+    replacements introduced for `%` and `_`.
+    """
+    return (
+        value.replace('\\', '\\\\')
+             .replace('%', '\\%')
+             .replace('_', '\\_')
+    )
+
+
 @api_view(["GET"])
 @throttle_classes(PUBLIC_API_THROTTLES)
 def player_name_suggestions(request) -> Response:
@@ -2034,6 +2059,8 @@ def player_name_suggestions(request) -> Response:
     if cached is not None:
         return Response(cached)
 
+    like = _like_escape(query)
+
     from django.db import connection
     if connection.vendor == 'postgresql':
         # Raw SQL with ILIKE so the pg_trgm GIN index (player_name_trgm_idx) is used.
@@ -2043,14 +2070,14 @@ def player_name_suggestions(request) -> Response:
                 """
                 SELECT name, pvp_ratio, is_hidden
                 FROM warships_player
-                WHERE name != '' AND realm = %s AND name ILIKE %s
+                WHERE name != '' AND realm = %s AND name ILIKE %s ESCAPE '\\'
                 ORDER BY
-                    CASE WHEN name ILIKE %s THEN 0 ELSE 1 END,
+                    CASE WHEN name ILIKE %s ESCAPE '\\' THEN 0 ELSE 1 END,
                     last_battle_date DESC NULLS LAST,
                     name
                 LIMIT 8
                 """,
-                [realm, f'%{query}%', f'{query}%'],
+                [realm, f'%{like}%', f'{like}%'],
             )
             columns = [col[0] for col in cursor.description]
             suggestions = [dict(zip(columns, row))
@@ -2091,6 +2118,8 @@ def clan_name_suggestions(request) -> Response:
     if cached is not None:
         return Response(cached)
 
+    like = _like_escape(query)
+
     from django.db import connection
     if connection.vendor == 'postgresql':
         with connection.cursor() as cursor:
@@ -2099,14 +2128,15 @@ def clan_name_suggestions(request) -> Response:
                 SELECT clan_id, tag, name, members_count
                 FROM warships_clan
                 WHERE realm = %s
-                  AND (name ILIKE %s OR tag ILIKE %s)
+                  AND (name ILIKE %s ESCAPE '\\' OR tag ILIKE %s ESCAPE '\\')
                 ORDER BY
-                    CASE WHEN name ILIKE %s OR tag ILIKE %s THEN 0 ELSE 1 END,
+                    CASE WHEN name ILIKE %s ESCAPE '\\'
+                              OR tag ILIKE %s ESCAPE '\\' THEN 0 ELSE 1 END,
                     members_count DESC NULLS LAST,
                     name
                 LIMIT 8
                 """,
-                [realm, f'%{query}%', f'%{query}%', f'{query}%', f'{query}%'],
+                [realm, f'%{like}%', f'%{like}%', f'{like}%', f'{like}%'],
             )
             columns = [col[0] for col in cursor.description]
             suggestions = [dict(zip(columns, row))

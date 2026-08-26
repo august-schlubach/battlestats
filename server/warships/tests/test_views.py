@@ -2134,6 +2134,54 @@ class ApiContractTests(TestCase):
             "/api/landing/player-suggestions/?q=test\x00")
         self.assertIn(response.status_code, [200, 400])
 
+    def test_like_escape_neutralises_like_wildcards(self):
+        """LIKE metacharacters in a user query must become literals.
+
+        An unescaped `_` is a single-char wildcard: it makes the query mean
+        something the user did not ask for, and it defeats the pg_trgm index
+        (no literal run >= 3 chars is left to extract a trigram from), which
+        degraded `/api/landing/player-suggestions` into a full-table scan and
+        five gunicorn WORKER TIMEOUTs between 2026-08-20 and 2026-08-24.
+        """
+        from warships.views import _like_escape
+
+        self.assertEqual(_like_escape("ur_vi"), r"ur\_vi")
+        self.assertEqual(_like_escape("50%"), r"50\%")
+        self.assertEqual(_like_escape("back\\slash"), r"back\\slash")
+        # Backslash must be escaped FIRST or it double-escapes the others.
+        self.assertEqual(_like_escape("a\\_b"), r"a\\\_b")
+        self.assertEqual(_like_escape("plain"), "plain")
+
+    def test_player_name_suggestions_underscore_is_literal(self):
+        """`Ur_` must match `Ur_Vile`, not `UrXVile`."""
+        today = timezone.now().date()
+        Player.objects.create(name="Ur_Vile", player_id=5201,
+                              last_battle_date=today)
+        Player.objects.create(name="UrXVile", player_id=5202,
+                              last_battle_date=today)
+
+        response = self.client.get(
+            "/api/landing/player-suggestions/?q=Ur_")
+
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.json()]
+        self.assertIn("Ur_Vile", names)
+        self.assertNotIn("UrXVile", names)
+
+    def test_clan_name_suggestions_underscore_is_literal(self):
+        Clan.objects.create(clan_id=9101, name="Iron_Blood",
+                            tag="IRB", members_count=40)
+        Clan.objects.create(clan_id=9102, name="IronXBlood",
+                            tag="IXB", members_count=30)
+
+        response = self.client.get(
+            "/api/landing/clan-suggestions/?q=Iron_")
+
+        self.assertEqual(response.status_code, 200)
+        names = [row["name"] for row in response.json()]
+        self.assertIn("Iron_Blood", names)
+        self.assertNotIn("IronXBlood", names)
+
     def test_clan_name_suggestions_returns_matching_clans(self):
         Clan.objects.create(clan_id=9001, name="Storm Fleet",
                             tag="STORM", members_count=40)
