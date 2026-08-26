@@ -575,14 +575,41 @@ over the full window, and anything piped rather than filtered server-side with `
 | date | what | commit | deployed |
 |---|---|---|---|
 | 2026-08-26 | F1 escaping fix | `648f221` | **YES — v5.5.1** |
-| 2026-08-26 | F4 service-health snapshot + digest gatherer | `b8264bc` | no |
-| 2026-08-26 | F2 DB-side rollup + truncation-safe task | this branch | no |
-| 2026-08-26 | F5 `SuccessExitStatus=143` in bootstrap (droplet untouched) | this branch | no |
+| 2026-08-26 | F4 service-health snapshot + digest gatherer | `b8264bc` | **YES — v5.6.0** |
+| 2026-08-26 | F2 DB-side rollup + truncation-safe task | `8461887`, `fb58934` | **YES — v5.6.0** |
+| 2026-08-26 | F5 `SuccessExitStatus=143` in bootstrap (droplet still untouched) | `8461887` | code only |
 
-Branch `worktree-sweep-remediation-2026-08-26`, built on `648f221`. Backend suite
-**1262 passed / 2 skipped**. **Nothing is deployed**: `VERSION` is unbumped, no env changed,
-no droplet mutated. The only production contact throughout was read-only — `EXPLAIN`,
-`SELECT`, `journalctl`, and one run of the new snapshot writer into `/tmp`.
+Release gate on the merged tree: **1265 passed / 2 skipped**. Backend release
+`20260826020546`, client release `20260826020929`.
+
+### v5.6.0 post-deploy verification
+
+**F4 is confirmed working in production, end-to-end.** The writer was triggered once by
+hand under systemd (exit 0, snapshot written), and the digest was then dry-run **as the
+`battlestats` user**, which is the part that matters — that account is the reason the naive
+design was impossible. Its verdict:
+
+```
+VERDICT: 2 condition(s) tripped; send=yes (alert)
+  [celery_task_failing:warships.tasks.roll_up_player_daily_ship_stats_task] ... and succeeded 0 times
+  [celery_task_failing:warships.tasks.startup_warm_caches_task]             ... and succeeded 0 times
+```
+
+The digest now names the exact failure it was blind to on 2026-08-25. The timer is
+`enabled` and `active`, next fire 11:00 UTC, half an hour ahead of the 11:30 digest.
+
+**F2 is deployed but NOT yet proven.** The 04:30 UTC run on 2026-08-26 happened *before*
+this deploy (06:07), so it ran the old code and is why `roll_up` still appears in the
+verdict above. **The first real test is the 04:30 run on 2026-08-27.** Look for a
+`Finished roll_up_player_daily_ship_stats_task` line and the new per-day
+`rebuilt <date>: rows_written=…` lines. If it truncates instead, the result now says
+`partial` and names `truncated_on` / `truncated_by` rather than raising.
+
+**Watch the writer's own cost.** Its first systemd run consumed **1 min 29 s of CPU** on a
+2-vCPU box. That is a lot for a daily snapshot, and it is inherent: six `journalctl -g`
+sweeps over a 24 h window of a 4 GB journal. Harmless once a day at 11:00, but do not raise
+its frequency without measuring, and if it ever needs to run hourly, narrow the window or
+the unit list first.
 
 ## Follow-ups
 
@@ -590,11 +617,15 @@ no droplet mutated. The only production contact throughout was read-only — `EX
       against live production. Still worth one look at the next window: confirm zero
       `WORKER TIMEOUT` on `player-suggestions` over a full day of real traffic, not just the
       minutes after the restart.
-- [ ] F4 deployed; confirm `battlestats-service-health.timer` is enabled and that the
-      11:00 UTC snapshot lands before the 11:30 digest reads it.
-- [ ] F2 deployed; verify the next 04:30 run logs `Finished roll_up…` and per-day
-      `rebuilt <date>: rows_written=…` lines. If it still truncates, the status will now
-      say `partial` and name the day rather than raising.
+- [x] **F4 deployed v5.6.0**; timer enabled and active, writer verified under systemd, and
+      the digest dry-run as the `battlestats` user trips on the right two tasks.
+- [ ] **F2's first real run is 04:30 UTC on 2026-08-27** — this deploy landed after the
+      08-26 run, so nothing has exercised the new code yet. Check for `Finished roll_up…`
+      plus the per-day `rebuilt <date>: rows_written=…` lines, and time it against the
+      540 s budget.
+- [ ] Confirm the 11:30 digest on 2026-08-27 behaves: it should alert on `roll_up` only if
+      the 04:30 run genuinely failed, and go quiet once it succeeds. The first live mail
+      from this change is the proof that exception-only still means exception-only.
 - [ ] F5 step 2 applied to the live droplet (edit the unit, `systemctl daemon-reload`).
 - [ ] **Watch `warships_playerdailyshipstats` bloat after the first successful runs.** This
       is new in practice, not in theory: the delete-and-rebuild has effectively never
