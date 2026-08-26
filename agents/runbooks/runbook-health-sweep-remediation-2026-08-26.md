@@ -55,7 +55,7 @@ There is **no clock skew**. The droplet reads UTC; a session showing 08-25 is si
 
 | # | Finding | Severity | Status | Deploy needed |
 |---|---|---|---|---|
-| F1 | `player-suggestions` 500s: an unescaped `_` defeats the trigram index | **HIGH** | fixed `648f221` | backend + client rebuild |
+| F1 | `player-suggestions` 500s: an unescaped `_` defeats the trigram index | **HIGH** | **DEPLOYED v5.5.1** | done |
 | F2 | `roll_up_player_daily_ship_stats_task` fails every night; sweeper never completes | **MEDIUM** | implemented | backend |
 | F3 | Background cache warmers hitting the 540 s soft limit, 93× in 6 days | LOW | open, deferred | backend |
 | F4 | Ops digest structurally blind to F1, F2 and F3 | **MEDIUM** | implemented | backend |
@@ -110,7 +110,22 @@ Recorded so a future reader can tell these findings apart from a platform regres
 
 ## F1 — `player-suggestions` 500s from an unescaped LIKE wildcard
 
-**Status: FIXED, committed, NOT DEPLOYED.** Commit `648f221`.
+**Status: DEPLOYED to production 2026-08-26 as v5.5.1.** Commit `648f221`, merged to `main`
+(`b5df489` is the version bump), tag `v5.5.1`. Backend release `20260826014936`, client
+release `20260826015137`.
+
+**Post-deploy verification, against live production:**
+
+| q | before | after |
+|---|---|---|
+| `ur_` | WORKER TIMEOUT → 500, empty body | `200`, 8 rows, 1.16 s cold |
+| `ur_vi` | WORKER TIMEOUT → 500, empty body | `200`, 2 rows incl. `Ur_Vile`, 0.14 s |
+| `gp_` | WORKER TIMEOUT → 500, empty body | `200`, 8 rows incl. `GP__6`, 0.39 s |
+| `ot_pq` | WORKER TIMEOUT → 500, empty body | `200`, 1 row `Not_PQ`, 0.16 s |
+
+`GP__6` matching `gp_` and `Not_PQ` matching `ot_pq` are the semantic half landing: the
+underscore is now a literal, and a double underscore matches as two literals. Zero gunicorn
+errors since the restart; footer and deployed `VERSION` both read 5.5.1.
 
 ### Evidence
 
@@ -559,7 +574,7 @@ over the full window, and anything piped rather than filtered server-side with `
 
 | date | what | commit | deployed |
 |---|---|---|---|
-| 2026-08-26 | F1 escaping fix | `648f221` | no |
+| 2026-08-26 | F1 escaping fix | `648f221` | **YES — v5.5.1** |
 | 2026-08-26 | F4 service-health snapshot + digest gatherer | `b8264bc` | no |
 | 2026-08-26 | F2 DB-side rollup + truncation-safe task | this branch | no |
 | 2026-08-26 | F5 `SuccessExitStatus=143` in bootstrap (droplet untouched) | this branch | no |
@@ -571,7 +586,10 @@ no droplet mutated. The only production contact throughout was read-only — `EX
 
 ## Follow-ups
 
-- [ ] F1 deployed and the 500s confirmed gone in the next window.
+- [x] **F1 deployed 2026-08-26 as v5.5.1**; all four previously-fatal queries verified 200
+      against live production. Still worth one look at the next window: confirm zero
+      `WORKER TIMEOUT` on `player-suggestions` over a full day of real traffic, not just the
+      minutes after the restart.
 - [ ] F4 deployed; confirm `battlestats-service-health.timer` is enabled and that the
       11:00 UTC snapshot lands before the 11:30 digest reads it.
 - [ ] F2 deployed; verify the next 04:30 run logs `Finished roll_up…` and per-day
