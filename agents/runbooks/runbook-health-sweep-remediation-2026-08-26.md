@@ -25,6 +25,21 @@ _Reviewed 2026-08-26 (UTC; the local clock reads 08-25 EDT) against `/home/augus
 ### Open Questions
 1. ~~**Does F4 warrant a new systemd unit + timer?**~~ **ANSWERED 2026-08-26 by the operator: the root-owned snapshot writer.** The mail path gains no new privilege; the alternative (adding `battlestats` to `systemd-journal`) was rejected on that basis. F4 is unblocked and implemented as described in its Remediation section.
 
+## Status as of 2026-08-26
+
+**All findings are closed except F3, which was deliberately deferred.** F1 shipped as
+v5.5.1; F2, F4 and F5's code shipped as v5.6.0; F5's droplet half was applied by hand the
+same day. Nothing here is still waiting on a decision.
+
+**Two things remain unproven rather than undone**, and they prove themselves on a clock
+rather than needing work:
+
+1. **F2's first real run is 04:30 UTC on 2026-08-27.** The deploy landed at 06:07 on 08-26,
+   after that morning's run, so the new rollup code has not executed once in production yet.
+2. **The next client deploy** is what confirms F5 behaviourally.
+
+Everything else below is the record of how it was found and why it was fixed the way it was.
+
 ## Purpose
 
 Convert the 2026-08-26 sweep into an ordered, gated work plan. Read this before touching
@@ -59,7 +74,7 @@ There is **no clock skew**. The droplet reads UTC; a session showing 08-25 is si
 | F2 | `roll_up_player_daily_ship_stats_task` fails every night; sweeper never completes | **MEDIUM** | implemented | backend |
 | F3 | Background cache warmers hitting the 540 s soft limit, 93× in 6 days | LOW | open, deferred | backend |
 | F4 | Ops digest structurally blind to F1, F2 and F3 | **MEDIUM** | implemented | backend |
-| F5 | Client deploy restarts logged as unit failures | COSMETIC | half done | **ops (droplet-side)** |
+| F5 | Client deploy restarts logged as unit failures | COSMETIC | **DONE, live** | done |
 
 **Recommended order: F1 (done, needs deploy) → F4 → F2 → F3 → F5.**
 
@@ -477,10 +492,26 @@ is not to start mailing a daily status report.
 
 ## F5 — client deploy restarts are logged as failures
 
-**Status: HALF IMPLEMENTED 2026-08-26.** `SuccessExitStatus=143` is in
-`client/deploy/bootstrap_droplet.sh`, so a future bootstrap is correct. **The live droplet
-is unchanged** and will keep mislabelling deploys until step 2 below is run by hand; that is
-a production mutation and is left for an explicit acknowledgement.
+**Status: COMPLETE 2026-08-26.** Both halves done: `SuccessExitStatus=143` is in
+`client/deploy/bootstrap_droplet.sh` (shipped in v5.6.0) **and** applied to the live unit at
+`/etc/systemd/system/battlestats-client.service`, followed by `systemctl daemon-reload`.
+
+- `systemctl show battlestats-client -p SuccessExitStatus` → **143**. `systemd-analyze
+  verify` is clean; the unit is `enabled` and `active`.
+- **No restart, no downtime.** `ActiveEnterTimestamp` still reads the v5.6.0 client deploy
+  (06:10:58 UTC), which is the check that proves nothing bounced: `daemon-reload` only
+  changes how the *next* exit is classified.
+- The live file was made byte-identical to what bootstrap now generates, comment block
+  included, so a future rebuild does not produce a puzzling diff. Backup of the original
+  kept at `/root/battlestats-client.service.bak-2026-08-26`.
+
+**The one way this fix silently does nothing, checked explicitly.** `SuccessExitStatus=143`
+matches an exit *code*. If the process were **killed by** a signal, systemd would report
+`code=killed, signal=TERM`, that numeric form would not match, and the correct spelling
+would be `SuccessExitStatus=SIGTERM`. Verified against the journal before trusting it: all
+five occurrences are `code=exited, status=143/n/a`, so npm exits normally with 143 and the
+numeric form is right. Behavioural confirmation arrives free at the next client deploy —
+it should no longer log `Failed with result 'exit-code'`.
 
 `battlestats-client.service: Main process exited, code=exited, status=143` followed by
 `Failed with result 'exit-code'`, five times in six days. **143 = 128 + 15 = SIGTERM.**
@@ -577,7 +608,7 @@ over the full window, and anything piped rather than filtered server-side with `
 | 2026-08-26 | F1 escaping fix | `648f221` | **YES — v5.5.1** |
 | 2026-08-26 | F4 service-health snapshot + digest gatherer | `b8264bc` | **YES — v5.6.0** |
 | 2026-08-26 | F2 DB-side rollup + truncation-safe task | `8461887`, `fb58934` | **YES — v5.6.0** |
-| 2026-08-26 | F5 `SuccessExitStatus=143` in bootstrap (droplet still untouched) | `8461887` | code only |
+| 2026-08-26 | F5 `SuccessExitStatus=143`, bootstrap **and** live unit | `8461887` | **YES — both halves** |
 
 Release gate on the merged tree: **1265 passed / 2 skipped**. Backend release
 `20260826020546`, client release `20260826020929`.
@@ -626,7 +657,9 @@ the unit list first.
 - [ ] Confirm the 11:30 digest on 2026-08-27 behaves: it should alert on `roll_up` only if
       the 04:30 run genuinely failed, and go quiet once it succeeds. The first live mail
       from this change is the proof that exception-only still means exception-only.
-- [ ] F5 step 2 applied to the live droplet (edit the unit, `systemctl daemon-reload`).
+- [x] **F5 step 2 applied to the live droplet 2026-08-26** — unit edited, `daemon-reload`
+      done, `SuccessExitStatus` reads 143, no restart. Behavioural proof lands at the next
+      client deploy.
 - [ ] **Watch `warships_playerdailyshipstats` bloat after the first successful runs.** This
       is new in practice, not in theory: the delete-and-rebuild has effectively never
       completed, so a working sweeper starts churning **~633K dead tuples a night**
