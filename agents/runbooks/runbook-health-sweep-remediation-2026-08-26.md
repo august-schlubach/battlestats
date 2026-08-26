@@ -206,6 +206,24 @@ and `test_ship_list_rollup_source.py`, including `test_rebuild_carries_phase7_co
 and the aggregate-sum equivalence tests. Four new tests pin the truncation contract. Full
 backend suite: 1262 passed / 2 skipped.
 
+**Verified on Postgres, not only SQLite.** The default harness runs SQLite, which would not
+have exercised the part of this change most likely to be driver-specific: a server-side
+cursor streaming the group-by while `bulk_create` writes to another table on the same
+connection, inside one transaction. Production runs psycopg3, and this project has been
+bitten before by a psycopg2/psycopg3 divergence that CI could not see. The whole suite was
+therefore re-run against a throwaway **PostgreSQL 18** container — **1262 passed / 2
+skipped**, the 34 rollup-specific tests among them. Re-run it that way if you touch this
+query:
+
+```bash
+docker run -d --rm --name bs-pg-verify -e POSTGRES_PASSWORD=verify \
+    -e POSTGRES_USER=verify -e POSTGRES_DB=verify -p 55432:5432 postgres:18
+cd server && DJANGO_SECRET_KEY=k DB_ENGINE=postgresql DB_NAME=verify DB_USER=verify \
+    DB_PASSWORD=verify DB_HOST=127.0.0.1 DB_PORT=55432 \
+    python -m pytest warships/tests/ -q
+docker stop bs-pg-verify
+```
+
 ### Evidence
 
 `roll_up_player_daily_ship_stats_task` failed on **every night in the journal window**:
