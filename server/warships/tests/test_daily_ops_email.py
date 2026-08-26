@@ -110,6 +110,31 @@ def write_healthy_tree(root: Path, now: datetime) -> None:
         (rc_dir / f"{ts:%Y-%m-%d_%H%M}Z_{realm}.json").write_text(json.dumps(
             healthy_recapture(realm, ts, advanced, clanless)))
 
+    # service health: written by a root-owned timer shortly before the digest.
+    sh_dir = root / "service-health"
+    sh_dir.mkdir(parents=True, exist_ok=True)
+    sh_ts = now - timedelta(hours=1)
+    (sh_dir / f"{sh_ts:%Y-%m-%d_%H%M}Z.json").write_text(json.dumps(
+        healthy_service_health(sh_ts)))
+
+
+def healthy_service_health(ts, **overrides):
+    """A clean service-health snapshot: nothing failing, journal readable."""
+    d = {
+        "captured_at": ts.isoformat(),
+        "window_hours": 24,
+        "since": (ts - timedelta(hours=24)).isoformat(),
+        "journal_readable": True,
+        "celery_task_failures": [],
+        "celery_failure_total": 0,
+        "gunicorn_worker_timeouts": 0,
+        "gunicorn_error_paths": [],
+        "gunicorn_error_total": 0,
+        "status": "ok",
+    }
+    d.update(overrides)
+    return d
+
 
 def healthy_recapture(realm, ts, advanced=740, clanless=96):
     return {
@@ -167,7 +192,15 @@ class OpsAlertTestCase(SimpleTestCase):
             "observation": doe.gather_observation(str(self.bench), now),
             "crawl_yield": doe.gather_crawl_yield(str(self.bench), now),
             "recapture": doe.gather_recapture(str(self.bench), now),
+            "service_health": doe.gather_service_health(str(self.bench), now),
         }
+
+    def rewrite_service_health(self, **overrides):
+        d = self.bench / "service-health"
+        for f in d.glob("*.json"):
+            obj = json.loads(f.read_text())
+            obj.update(overrides)
+            f.write_text(json.dumps(obj))
 
     def codes(self):
         return [c["code"] for c in doe.evaluate(self.gather())]
@@ -624,13 +657,17 @@ class ThresholdTests(SimpleTestCase):
                 self.assertIsInstance(doe.thr(name), float)
 
     def test_evaluate_is_pure_and_deterministic(self):
+        # One condition per snapshot family, all four of them: an empty tree must
+        # report every family as missing rather than silently covering three.
         data = {"observation": {"available": 0, "unreadable": []},
                 "crawl_yield": {"available": 0, "unreadable": []},
-                "recapture": {"available": 0, "unreadable": []}}
+                "recapture": {"available": 0, "unreadable": []},
+                "service_health": {"available": 0, "unreadable": []}}
         first = doe.evaluate(data)
         second = doe.evaluate(data)
         self.assertEqual([c["code"] for c in first], [c["code"] for c in second])
-        self.assertEqual(len(first), 3)
+        self.assertEqual(len(first), 4)
+        self.assertIn("snapshots_missing:service-health", [c["code"] for c in first])
 
     def test_alert_subject_fits_the_header_limit(self):
         conds = [{"code": f"some_quite_long_condition_code:{i}", "detail": "x"} for i in range(12)]
@@ -699,3 +736,132 @@ class AnthropicCallShapeTests(SimpleTestCase):
         source = _SCRIPT.read_text()
         self.assertIn('payload.get("stop_reason") == "refusal"', source)
         self.assertIn("model declined the request", source)
+
+
+class ServiceHealthConditions(OpsAlertTestCase):
+    """F4, 2026-08-26: the digest used to be blind to the whole services axis.
+
+    It evaluated only observation-floor, crawl-yield and recapture-lapsed, all of
+    which are benchmark JSON. So on 2026-08-25 it reported "all clear" while
+    `roll_up_player_daily_ship_stats_task` had failed five consecutive nights and
+    `/api/landing/player-suggestions` was returning 500s. Nothing was
+    mis-thresholded; the signal simply had no way in. These tests pin the way in.
+    """
+
+    def test_healthy_tree_still_trips_nothing(self):
+        """The new family must not make a healthy tree noisy."""
+        self.assertEqual(self.codes(), [])
+
+    def test_a_task_that_never_succeeds_trips(self):
+        """One failure a night, zero successes: the rollup's exact signature."""
+        self.rewrite_service_health(
+            celery_task_failures=[{
+                "unit": "battlestats-celery-background",
+                "task": "warships.tasks.roll_up_player_daily_ship_stats_task",
+                "exception": "SoftTimeLimitExceeded",
+                "count": 1,
+                "succeeded": 0,
+            }],
+            celery_failure_total=1,
+        )
+        self.assertIn(
+            "celery_task_failing:warships.tasks.roll_up_player_daily_ship_stats_task",
+            self.codes(),
+        )
+
+    def test_a_flaky_but_completing_task_does_not_trip(self):
+        """The calibration that keeps this digest worth reading.
+
+        Measured on a real 24h window, alerting on "failed at least once" trips 8
+        conditions, 7 of them cache warmers that fail a fraction of their runs
+        and fall back to the durable :published copy by design. A digest that
+        fires every morning stops being read, and then the morning that matters
+        looks like all the others. Failing *some* runs is not the same as failing
+        *every* run, and only the latter is a broken task.
+        """
+        self.rewrite_service_health(
+            celery_task_failures=[{
+                "unit": "battlestats-celery-background",
+                "task": "warships.tasks.warm_player_ranked_wr_battles_correlation_task",
+                "exception": "SoftTimeLimitExceeded",
+                "count": 10,
+                "succeeded": 42,
+            }],
+            celery_failure_total=10,
+        )
+        self.assertEqual(self.codes(), [])
+
+    def test_a_missing_success_count_still_trips(self):
+        """An older writer omits `succeeded`; unknown must not read as healthy."""
+        self.rewrite_service_health(
+            celery_task_failures=[{
+                "unit": "battlestats-celery-background",
+                "task": "warships.tasks.roll_up_player_daily_ship_stats_task",
+                "exception": "SoftTimeLimitExceeded",
+                "count": 1,
+            }],
+            celery_failure_total=1,
+        )
+        self.assertIn(
+            "celery_task_failing:warships.tasks.roll_up_player_daily_ship_stats_task",
+            self.codes(),
+        )
+
+    def test_the_alert_names_the_task_and_the_exception(self):
+        """A bare count sends the reader back to a journal they cannot read."""
+        self.rewrite_service_health(
+            celery_task_failures=[{
+                "unit": "battlestats-celery-background",
+                "task": "warships.tasks.roll_up_player_daily_ship_stats_task",
+                "exception": "SoftTimeLimitExceeded",
+                "count": 5,
+                "succeeded": 0,
+            }],
+            celery_failure_total=5,
+        )
+        detail = " ".join(c["detail"] for c in doe.evaluate(self.gather()))
+        self.assertIn("roll_up_player_daily_ship_stats_task", detail)
+        self.assertIn("SoftTimeLimitExceeded", detail)
+        self.assertIn("battlestats-celery-background", detail)
+
+    def test_gunicorn_worker_timeouts_trip(self):
+        self.rewrite_service_health(gunicorn_worker_timeouts=5)
+        self.assertIn("gunicorn_worker_timeouts", self.codes())
+
+    def test_gunicorn_error_paths_are_named(self):
+        self.rewrite_service_health(
+            gunicorn_worker_timeouts=5,
+            gunicorn_error_paths=[
+                {"path": "/api/landing/player-suggestions", "count": 5}],
+            gunicorn_error_total=5,
+        )
+        detail = " ".join(c["detail"] for c in doe.evaluate(self.gather()))
+        self.assertIn("/api/landing/player-suggestions", detail)
+
+    def test_missing_family_is_itself_a_condition(self):
+        """Absent evidence must never read as good news."""
+        for f in (self.bench / "service-health").glob("*.json"):
+            f.unlink()
+        self.assertIn("snapshots_missing:service-health", self.codes())
+
+    def test_stale_snapshot_trips(self):
+        stale = self.now - timedelta(hours=40)
+        for f in (self.bench / "service-health").glob("*.json"):
+            f.unlink()
+        (self.bench / "service-health" / f"{stale:%Y-%m-%d_%H%M}Z.json").write_text(
+            json.dumps(healthy_service_health(stale)))
+        self.assertIn("snapshot_stale:service-health", self.codes())
+
+    def test_unreadable_snapshot_trips(self):
+        (self.bench / "service-health" / "9999-01-01_0000Z.json").write_text("{ not json")
+        self.assertIn("snapshot_unreadable:service-health", self.codes())
+
+    def test_an_unreadable_journal_trips_instead_of_reading_as_healthy(self):
+        """Zero failures from a journal we could not open is not zero failures.
+
+        This is the exact trap F4 exists to close. The writer runs as root, but
+        if it ever loses journal access every count arrives as 0, which would
+        otherwise render as a clean bill of health.
+        """
+        self.rewrite_service_health(journal_readable=False)
+        self.assertIn("journal_unreadable:service-health", self.codes())

@@ -34,7 +34,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from django.db import connection, transaction
-from django.db.models import F, Q
+from django.db.models import Count, F, Max, Min, Q, Sum, Value
+from django.db.models.functions import Coalesce
 
 
 logger = logging.getLogger(__name__)
@@ -1424,6 +1425,11 @@ def _utc_day_bounds(target_date) -> Tuple[datetime, datetime]:
 # rebuild over a trailing window, so anything the rebuild omits is not merely
 # stale — it is zeroed on live rows. `data.py`'s ship-combat hit-ratio brackets
 # read these, and BattleEvent is the only other copy.
+# Rows streamed from the group-by and inserted per bulk_create call. Bounds peak
+# memory so a busy day does not materialise ~230K model instances at once, and
+# keeps any single INSERT statement a sane size.
+_ROLLUP_CHUNK_SIZE = 2000
+
 _PHASE7_ROLLUP_COLUMNS: Dict[str, str] = {
     "main_shots": "main_shots_delta",
     "main_hits": "main_hits_delta",
@@ -1456,82 +1462,99 @@ def rebuild_daily_ship_stats_for_date(target_date) -> Dict[str, Any]:
 
     day_start, next_day_start = _utc_day_bounds(target_date)
 
+    # Aggregation happens in Postgres, not in Python. It used to load a whole
+    # calendar day of BattleEvent rows into memory and total them in a dict,
+    # under a comment reading "~40K today — safe" and a TODO to rewrite this as a
+    # DB-side group-by "if BattleEvent grows past ~200K/day". Measured on
+    # production 2026-08-26 the day range was 209K–292K rows, so that trigger had
+    # been crossed and stayed crossed. With a 3-day trailing window the old shape
+    # asked for roughly three-quarters of a million model instances inside a 540s
+    # soft limit, and the task failed every night from at least 08-21 to 08-25.
+    #
+    # Grouping key is (player, ship, mode, season_id): one (player, date, ship)
+    # can carry separate rows for randoms and for ranked in different seasons.
+    # SQL GROUP BY treats NULL season_id as its own group, matching the tuple
+    # equality the Python version relied on.
+    aggregates = {
+        "battles": Coalesce(Sum("battles_delta"), Value(0)),
+        "wins": Coalesce(Sum("wins_delta"), Value(0)),
+        "losses": Coalesce(Sum("losses_delta"), Value(0)),
+        "frags": Coalesce(Sum("frags_delta"), Value(0)),
+        # damage/xp/planes_killed are nullable, so SUM can return NULL for a
+        # group; the Python version coerced with `or 0` and the column is
+        # NOT NULL. Coalesce keeps that contract.
+        "damage": Coalesce(Sum("damage_delta"), Value(0)),
+        "xp": Coalesce(Sum("xp_delta"), Value(0)),
+        "planes_killed": Coalesce(Sum("planes_killed_delta"), Value(0)),
+        # `survived` is nullable and the old loop used truthiness, so NULL and
+        # False both counted as not-survived. filter=Q(survived=True) is the
+        # exact equivalent; Q(survived__isnull=False) would count losses.
+        "survived_battles": Count("id", filter=Q(survived=True)),
+        "first_event_at": Min("detected_at"),
+        "last_event_at": Max("detected_at"),
+        # The old rule was "first non-empty name in detected_at order". For one
+        # ship_id the name is effectively constant, and '' sorts below any real
+        # name, so MAX yields a non-empty name whenever one exists.
+        "ship_name_agg": Max("ship_name"),
+        "events_seen": Count("id"),
+    }
+    for column, delta_attr in _PHASE7_ROLLUP_COLUMNS.items():
+        # Phase-7 widening columns. Omitting these let every nightly
+        # delete+rebuild reset them to the model default of 0, silently
+        # emptying the ship combat profile's hit-ratio source.
+        aggregates[column] = Coalesce(Sum(delta_attr), Value(0))
+
+    grouped = (
+        BattleEvent.objects
+        .filter(detected_at__gte=day_start, detected_at__lt=next_day_start)
+        .values("player_id", "ship_id", "mode", "season_id")
+        .annotate(**aggregates)
+        .order_by()  # clear any default ordering; it would join the GROUP BY
+    )
+
+    written = 0
+    events_seen = 0
     with transaction.atomic():
         deleted, _ = PlayerDailyShipStats.objects.filter(
             date=target_date,
         ).delete()
 
-        # NOTE: this loads one calendar day of BattleEvent rows into Python
-        # (~40K today — safe). A single day stays small, but a multi-day
-        # backfill via rebuild_player_daily_ship_stats would load proportionally
-        # more. TODO(2026-Q3): if BattleEvent grows past ~200K/day or backfills
-        # span many days, rewrite this as a DB-side values().annotate() group-by
-        # (Count(filter=survived) for survived, grouped by
-        # player/ship/mode/season_id).
-        events = BattleEvent.objects.filter(
-            detected_at__gte=day_start,
-            detected_at__lt=next_day_start,
-        ).order_by("detected_at")
-
-        rows: Dict[tuple, Dict[str, Any]] = {}
-        for event in events:
-            # Phase 3 ranked rollup: key by (player, ship, mode, season_id)
-            # so a single (player, date, ship_id) can carry separate
-            # rollup rows for random-mode AND ranked-mode in different
-            # active seasons. season_id is NULL for randoms — Python's
-            # tuple equality treats None as a distinct key correctly.
-            event_mode = getattr(event, "mode", "random")
-            event_season_id = getattr(event, "season_id", None)
-            key = (event.player_id, event.ship_id, event_mode, event_season_id)
-            row = rows.get(key)
-            if row is None:
-                row = {
-                    "player_id": event.player_id,
-                    "date": target_date,
-                    "ship_id": event.ship_id,
-                    "ship_name": event.ship_name or "",
-                    "mode": event_mode,
-                    "season_id": event_season_id,
-                    "battles": 0, "wins": 0, "losses": 0, "frags": 0,
-                    "damage": 0, "xp": 0, "planes_killed": 0,
-                    "survived_battles": 0,
-                    **{col: 0 for col in _PHASE7_ROLLUP_COLUMNS},
-                    "first_event_at": event.detected_at,
-                    "last_event_at": event.detected_at,
-                }
-                rows[key] = row
-            row["battles"] += event.battles_delta or 0
-            row["wins"] += event.wins_delta or 0
-            row["losses"] += event.losses_delta or 0
-            row["frags"] += event.frags_delta or 0
-            row["damage"] += event.damage_delta or 0
-            row["xp"] += event.xp_delta or 0
-            row["planes_killed"] += event.planes_killed_delta or 0
-            # Phase-7 widening columns. Omitting these let every nightly
-            # delete+rebuild reset them to the model default of 0, silently
-            # emptying the ship combat profile's hit-ratio source.
-            for col, delta_attr in _PHASE7_ROLLUP_COLUMNS.items():
-                row[col] += getattr(event, delta_attr, 0) or 0
-            if event.survived:
-                row["survived_battles"] += 1
-            row["last_event_at"] = event.detected_at
-            if event.ship_name and not row["ship_name"]:
-                row["ship_name"] = event.ship_name
-
-        if rows:
-            PlayerDailyShipStats.objects.bulk_create([
-                PlayerDailyShipStats(**row) for row in rows.values()
-            ])
+        batch: list = []
+        for group in grouped.iterator(chunk_size=_ROLLUP_CHUNK_SIZE):
+            events_seen += group["events_seen"]
+            batch.append(PlayerDailyShipStats(
+                player_id=group["player_id"],
+                date=target_date,
+                ship_id=group["ship_id"],
+                ship_name=group["ship_name_agg"] or "",
+                mode=group["mode"],
+                season_id=group["season_id"],
+                battles=group["battles"],
+                wins=group["wins"],
+                losses=group["losses"],
+                frags=group["frags"],
+                damage=group["damage"],
+                xp=group["xp"],
+                planes_killed=group["planes_killed"],
+                survived_battles=group["survived_battles"],
+                first_event_at=group["first_event_at"],
+                last_event_at=group["last_event_at"],
+                **{col: group[col] for col in _PHASE7_ROLLUP_COLUMNS},
+            ))
+            if len(batch) >= _ROLLUP_CHUNK_SIZE:
+                PlayerDailyShipStats.objects.bulk_create(batch)
+                written += len(batch)
+                batch = []
+        if batch:
+            PlayerDailyShipStats.objects.bulk_create(batch)
+            written += len(batch)
 
     return {
         "status": "completed",
         "date": str(target_date),
         "rows_deleted": deleted,
-        "rows_written": len(rows),
-        "events_seen": events.count() if rows else BattleEvent.objects.filter(
-            detected_at__gte=day_start,
-            detected_at__lt=next_day_start,
-        ).count(),
+        "rows_written": written,
+        "events_seen": events_seen,
     }
 
 

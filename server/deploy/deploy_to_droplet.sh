@@ -1383,6 +1383,41 @@ RandomizedDelaySec=300
 WantedBy=timers.target
 EOF
 
+# Service-health snapshot (F4, 2026-08-26). Runs as ROOT, deliberately: the ops
+# digest runs as ${APP_USER}, which is in no group but its own and therefore
+# cannot open the journal at all. So the digest cannot see Celery failures or
+# gunicorn 5xx by itself — it reported "all clear" for five straight days while a
+# nightly task failed every night. This writer reads the journal and leaves a
+# JSON snapshot the digest consumes like every other family.
+#
+# No User= line: root is the point. No RandomizedDelaySec either — it must land
+# BEFORE the 11:30 digest, and a 300s jitter on both could invert the order.
+install -d -m 0755 "${APP_ROOT}/shared/bin"
+install -m 0755 "${REMOTE_RELEASE}/server/scripts/snapshot_service_health.sh" \
+    "${APP_ROOT}/shared/bin/snapshot_service_health.sh"
+
+cat > /etc/systemd/system/battlestats-service-health.service <<EOF
+[Unit]
+Description=Battlestats service-health snapshot (Celery failures + backend 5xx)
+
+[Service]
+Type=oneshot
+ExecStart=${APP_ROOT}/shared/bin/snapshot_service_health.sh
+TimeoutStartSec=600
+EOF
+
+cat > /etc/systemd/system/battlestats-service-health.timer <<'EOF'
+[Unit]
+Description=Snapshot Battlestats service health before the ops digest
+
+[Timer]
+OnCalendar=*-*-* 11:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 # Enable the new crawls unit on first install so it auto-starts on reboot.
 # Idempotent — `systemctl enable` is a no-op when the unit is already enabled.
@@ -1398,6 +1433,9 @@ systemctl enable --now battlestats-cleanup-entity-visits.timer 2>/dev/null || tr
 # Outbound mail: the feedback notifier, and the ops digest that has been
 # deployed since July with nothing scheduling it.
 systemctl enable --now battlestats-feedback-notify.timer 2>/dev/null || true
+# Must be enabled alongside the digest: without it the digest alerts every day
+# on snapshots_missing:service-health, which is the correct behaviour but noisy.
+systemctl enable --now battlestats-service-health.timer 2>/dev/null || true
 systemctl enable --now battlestats-ops-digest.timer 2>/dev/null || true
 # configure_local_rabbitmq already ran before `manage.py migrate` above — the
 # env file and broker credentials are finalized at this point.

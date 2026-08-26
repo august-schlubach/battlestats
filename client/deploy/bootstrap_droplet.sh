@@ -86,6 +86,11 @@ ExecStart=/usr/bin/env npm start -- --hostname 127.0.0.1 --port 3001
 Restart=always
 RestartSec=5
 TimeoutStartSec=120
+# A deploy stops this unit, so npm exits 143 (128 + SIGTERM). Without this line
+# systemd files every deploy under "Failed with result 'exit-code'", and the log
+# sweep on 2026-08-26 spent real time proving that five such "crashes" in six
+# days were simply five deploys. Treat the signal exit as the clean stop it is.
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target

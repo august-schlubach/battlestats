@@ -374,6 +374,17 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "recapture_no_data_max": 500,      # observed 2 .. 23 of 30,000 scanned
     "recapture_chunk_errors_max": 0,   # observed 0 on all 113 runs
     "recapture_advanced_min": 10,      # lowest observed 33 (an off-cycle NA run)
+    # --- service health (F4, 2026-08-26) ---
+    # The writer runs at 11:00 UTC and the digest at 11:31, so a healthy age is
+    # ~0.5h. 24h fires only on a genuinely missed run, matching obs/recapture.
+    "service_health_max_age_hours": 24.0,
+    # A task that raised even once in 24h is worth naming: these are periodic
+    # tasks, so one failure is one whole missed run, not a sampled error rate.
+    # The finding that motivated this (roll_up) was exactly one failure a night.
+    "celery_task_failures_min": 1,
+    # Worker timeouts are never routine: each one is a 500 with an empty body.
+    # 1 would be honest but flaps on a single cold-cache request, so 2 in 24h.
+    "gunicorn_worker_timeouts_min": 2,
 }
 
 # Family cadence labels used in alert text.
@@ -381,7 +392,51 @@ FAMILY_CADENCE = {
     "observation-floor": "daily 04:30 UTC",
     "crawl-yield": "per-realm, one completed clan-walk pass every few days",
     "recapture-lapsed": "daily 10:10/10:30/10:50 UTC per realm",
+    "service-health": "daily 11:00 UTC, shortly before this digest",
 }
+
+
+def gather_service_health(bench_dir: str, now: datetime | None = None) -> dict:
+    """Latest service-health snapshot: Celery task failures and backend 5xx.
+
+    Added 2026-08-26 (F4). Unlike the other three families this one is not about
+    data quality at all — it is about whether the machinery that produces the
+    data is running. It exists because this digest reported "all clear" for at
+    least five consecutive days while a nightly Celery task failed every single
+    night and the API returned 500s, and no threshold anywhere could have caught
+    that: the digest read only benchmark JSON and never asked systemd anything.
+
+    It still reads only JSON. The snapshot is written by a ROOT-owned timer
+    (`scripts/snapshot_service_health.sh`), because this script runs as the
+    unprivileged `battlestats` user, which cannot open the journal at all. Do not
+    "simplify" this by shelling out to journalctl from here; it returns nothing
+    but a permissions error, and a zero count reads as health.
+    """
+    now = now or utcnow()
+    snaps, bad = _load_dir(bench_dir, "service-health")
+    if not snaps:
+        return {"available": 0, "unreadable": bad}
+    latest = snaps[-1]
+    return {
+        "available": len(snaps),
+        "unreadable": bad,
+        "captured_at": latest.get("captured_at"),
+        "latest_age_hours": round(_age_hours(latest["_ts"], now), 2),
+        "window_hours": latest.get("window_hours"),
+        # Carried explicitly, not via a .get default: a snapshot that LACKS the
+        # key must be distinguishable from one that says False. A missing key
+        # means an older writer; False means we genuinely could not read the
+        # journal, and then every count below is meaningless.
+        "journal_readable": latest.get("journal_readable"),
+        "journal_readable_present": "journal_readable" in latest,
+        "celery_task_failures": latest.get("celery_task_failures") or [],
+        "celery_failure_total": latest.get("celery_failure_total"),
+        "gunicorn_worker_timeouts": latest.get("gunicorn_worker_timeouts"),
+        "gunicorn_error_paths": latest.get("gunicorn_error_paths") or [],
+        "gunicorn_error_total": latest.get("gunicorn_error_total"),
+        "status": latest.get("status"),
+        "failed_buckets": latest.get("failed_buckets"),
+    }
 
 
 def thr(name: str) -> float:
@@ -452,9 +507,11 @@ def evaluate(data: dict) -> list[dict]:
     obs = data.get("observation") or {}
     crawl = data.get("crawl_yield") or {}
     recap = data.get("recapture") or {}
+    svc = data.get("service_health") or {}
 
     # ---- 1. unreadable snapshot files (any family) --------------------------
-    for fam, node in (("observation-floor", obs), ("crawl-yield", crawl), ("recapture-lapsed", recap)):
+    for fam, node in (("observation-floor", obs), ("crawl-yield", crawl),
+                      ("recapture-lapsed", recap), ("service-health", svc)):
         for bad in node.get("unreadable") or []:
             out.append(_cond(f"snapshot_unreadable:{fam}", bad))
 
@@ -498,6 +555,99 @@ def evaluate(data: dict) -> list[dict]:
         ))
     else:
         out.extend(_evaluate_recapture(recap))
+
+    # ---- 5. service health (F4) --------------------------------------------
+    if not svc.get("available"):
+        out.append(_cond(
+            "snapshots_missing:service-health",
+            f"no service-health snapshots found ({FAMILY_CADENCE['service-health']})",
+        ))
+    else:
+        out.extend(_evaluate_service_health(svc))
+
+    return out
+
+
+def _evaluate_service_health(svc: dict) -> list[dict]:
+    """Liveness and shape first, then counts — the same order as every family.
+
+    The ordering matters more here than anywhere else. Every number in this
+    family is a count of bad things, so the failure mode of a broken snapshot is
+    a run of zeros, which is indistinguishable from perfect health. Staleness and
+    journal access are therefore checked BEFORE any count is believed.
+    """
+    out: list[dict] = []
+
+    age = svc.get("latest_age_hours")
+    limit = thr("service_health_max_age_hours")
+    if isinstance(age, (int, float)) and age > limit:
+        out.append(_cond(
+            "snapshot_stale:service-health",
+            f"newest snapshot is {age:.1f}h old (limit {limit:.0f}h; "
+            f"{FAMILY_CADENCE['service-health']}, healthy age at run time is ~0.5h)",
+        ))
+
+    _check_generic_shape(out, "service-health", {
+        "status": svc.get("status"),
+        "failed_buckets": svc.get("failed_buckets"),
+    })
+
+    # An explicit False means the writer could not open the journal, so every
+    # count below is a zero it invented. A MISSING key is an older writer that
+    # predates this field; treat that as unknown rather than as a failure.
+    if svc.get("journal_readable_present") and not svc.get("journal_readable"):
+        out.append(_cond(
+            "journal_unreadable:service-health",
+            "the snapshot writer could not read the journal, so its zero counts "
+            "mean 'not measured', NOT 'nothing failed' — check that the writer "
+            "still runs as root",
+        ))
+        # Counts are known-meaningless; do not also alert on them.
+        return out
+
+    # Celery: the discriminator is "never succeeded", NOT "failed at least once".
+    #
+    # Measured against a real 24h window on 2026-08-26, alerting on any failure
+    # trips 8 conditions, 7 of which are cache warmers that fail a fraction of
+    # their runs and fall back to the durable :published copy exactly as designed.
+    # A digest that fires every morning is a digest nobody reads, and then the one
+    # morning it matters is indistinguishable from the rest. A task that failed
+    # every single run in the window is a different animal: the nightly rollup
+    # failed 5 of 5 nights and produced nothing at all.
+    #
+    # `succeeded` missing (an older writer) is treated as unknown, and unknown
+    # falls back to alerting: better a spurious alert than a silent regression.
+    floor = int(thr("celery_task_failures_min"))
+    for row in svc.get("celery_task_failures") or []:
+        count = row.get("count")
+        if not isinstance(count, (int, float)) or count < floor:
+            continue
+        ok = row.get("succeeded")
+        if isinstance(ok, (int, float)) and ok > 0:
+            continue  # flaky, not broken: it is still completing runs
+        task = row.get("task") or "<unknown task>"
+        out.append(_cond(
+            f"celery_task_failing:{task}",
+            f"{task} raised {row.get('exception') or 'an exception'} "
+            f"{int(count)}x in the last {svc.get('window_hours') or 24}h "
+            f"on {row.get('unit') or '<unknown unit>'} and succeeded 0 times",
+        ))
+
+    # gunicorn: a worker timeout is a 500 with an empty body, never routine.
+    timeouts = svc.get("gunicorn_worker_timeouts")
+    t_floor = thr("gunicorn_worker_timeouts_min")
+    if isinstance(timeouts, (int, float)) and timeouts >= t_floor:
+        paths = svc.get("gunicorn_error_paths") or []
+        named = ", ".join(
+            f"{p.get('path')} x{p.get('count')}" for p in paths[:5] if p.get("path")
+        )
+        out.append(_cond(
+            "gunicorn_worker_timeouts",
+            f"{int(timeouts)} worker timeouts in the last "
+            f"{svc.get('window_hours') or 24}h (limit {t_floor:.0f}); each is a 500 "
+            f"with an empty body"
+            + (f" — {named}" if named else ""),
+        ))
 
     return out
 
@@ -1002,6 +1152,7 @@ def main() -> int:
         "observation": gather_observation(bench_dir, now),
         "crawl_yield": gather_crawl_yield(bench_dir, now),
         "recapture": gather_recapture(bench_dir, now),
+        "service_health": gather_service_health(bench_dir, now),
     }
 
     # ---- the verdict: deterministic Python, never the LLM ------------------
@@ -1018,7 +1169,8 @@ def main() -> int:
         print(f"[ok] all clear at {now.isoformat()}Z: no conditions tripped; no email sent "
               f"(obs={data['observation'].get('available', 0)} snaps, "
               f"crawl={data['crawl_yield'].get('available', 0)}, "
-              f"recapture={data['recapture'].get('available', 0)})")
+              f"recapture={data['recapture'].get('available', 0)}, "
+              f"service={data['service_health'].get('available', 0)})")
         return 0
 
     alerting = bool(conditions)
