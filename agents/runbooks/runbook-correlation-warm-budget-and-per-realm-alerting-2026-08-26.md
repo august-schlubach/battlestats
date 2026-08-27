@@ -6,23 +6,22 @@ _QA: Every timing is read from the production journal 2026-08-25..26. The failur
 
 ## QA Notes
 
-_Reviewed 2026-08-26 against `/home/august/code/battlestats`. 23 assertions checked, 7 corrected._
+_Reviewed 2026-08-27 against `/home/august/code/battlestats`. 41 assertions checked, 9 corrected._
 
 ### Resolved
-- **`warm_player_correlations_task` cited at `tasks.py:1892`** -> actual: `server/warships/tasks.py:1896` -> §2 citation corrected.
-- **Celery axis cited at `daily_ops_email.py:609-633`** -> actual: the block opens at `server/scripts/daily_ops_email.py:608` -> §3 citation corrected to 608-633.
-- **D2 assumed the per-metric correlation lock is per-realm** -> actual: it is **not**. Both tasks call `_run_locked_task(<name>, "population", ...)` (`server/warships/tasks.py:1462`, `:1481`) and `_task_lock_key` builds `warships:tasks:<name>:<resource_id>:lock` (`server/warships/tasks.py:752`). `resource_id` is the literal string `"population"`, identical for every realm, so **ranked and clan-battle correlation warms are globally serialized across realms** — unlike the combined task, which keys on realm (`_correlation_warm_lock_key`, `server/warships/tasks.py:~171`). Raising the hard limit to 840s against a 900s TTL means one realm can hold that lock for nearly the whole TTL and the other two skip. -> D2 now carries this as a blocking constraint and Open Question 1; the budget change alone would make cross-realm starvation *worse*.
-- **§3's success counts were read as "runs that did work"** -> actual: `_run_locked_task` returns `{"status": "skipped", "reason": "already-running"}` on a held lock (`server/warships/tasks.py:757`), Celery logs that as `succeeded in ...`, and the writer counts **every** `succeeded in` line (`server/scripts/snapshot_service_health.sh:69-72`). So `succeeded` means "did not raise", not "did work", and a task that always skips reads as perfectly healthy. -> added to §3 as a second, independent masking mechanism. Combined with the finding above, the 3 successes in §3's table are an upper bound.
-- **D3 step 1 said "include the realm in the existing success log line"** -> actual: two of its targets have **no** success log line to amend. `warm_player_ranked_wr_battles_correlation_task` (`server/warships/tasks.py:1458`) and `warm_player_clan_battle_wr_battles_correlation_task` (`:1477`) `return _run_locked_task(...)` directly and never log completion. -> D3 step 1 now says the line must be **added** for those two.
-- **D3 did not name its targets** -> enumerated from `server/warships/tasks.py`: `:1889` distributions, `:1910` correlations, `:1942` hot entity, `:1962` bulk load, plus the two above. `warm_recently_viewed_players_task` (`:1982`) is **excluded** — its Beat entry was removed 2026-06-20 (`server/warships/signals.py`, "Recently-Viewed Player Warmer: REMOVED"). -> target list written into D3.
-- **"must not add a sixth journal pass"** -> actual: the writer makes 5 `journalctl` invocations textually (`server/scripts/snapshot_service_health.sh:51,67,69,86,88`), two of them inside a loop over 6 units, so ~15 calls per run. -> wording corrected to "must reuse the existing per-unit sweep rather than adding a third call inside the unit loop".
+- **Roughly every `tasks.py` line citation in this runbook was stale** -> actual: implementing this runbook's own plan added ~22 lines to `server/warships/tasks.py`, moving nearly everything past line 38. `RECAPTURE_TASK_OPTS` 52->74, `RESOURCE_TASK_LOCK_TIMEOUT` 84->106, `CORRELATION_WARM_LOCK_TIMEOUT` 106->128, `CLAN_TIER_DIST_WARM_TASK_OPTS` 1988->2030, `_task_lock_key` 752->361, the `_run_locked_task` skip-return 757->514, the ranked task 1458->1480, the clan-battle task 1477->1507, the combined task 1896->1935, the realm-scoped lock sites 1466/1485->1493/1520, and all six D3 target rows. -> every citation re-resolved by symbol. **The general lesson: a runbook that cites line numbers is falsified by its own implementation, so citations must be re-resolved after the code lands, not before.**
+- **N1 said "dispatcher to the three per-metric tasks"** -> actual: only **two** exist, `warm_player_ranked_wr_battles_correlation_task` (`server/warships/tasks.py:1480`) and `warm_player_clan_battle_wr_battles_correlation_task` (`:1507`). All three *data-layer* sub-warmers exist (`server/warships/data.py:3116`, `:3459`, `:3646`) but wr-survival has no task wrapper. -> N1 now requires creating `warm_player_wr_survival_correlation_task` first.
+- **The "~1350s cold combined run" was stated as fact** -> actual: it extrapolates the ranked sub-warm's 389-500s to all three. `warm_player_clan_battle_wr_battles_correlation_task` logged **zero runs in 72h** (no Beat lane; on-view dispatch only) and wr-survival has no standalone task, so neither has ever been timed. -> restated as an extrapolation, with a note that N1 rests on the observed 900s kill rather than on this figure.
+- **N4's "the limit only truncates an already ordered list" was flagged unverified** -> actual: **verified** — the query ends `.order_by("-battles")[:limit]` (`server/warships/data.py`). -> caveat removed. But QA also found the proposed fix incomplete: slicing the warmed `limit=25` payload serves only `limit <= 25`, while the view clamps to `[5, 50]` (`server/warships/data.py:6589`). -> N4 now specifies warming at the clamp ceiling (50) and slicing down.
+- **§5 cache-key claim carried no citations** -> actual: confirmed at `server/warships/data.py:6600` (fresh key) and `:6601` (published key), clamp at `:6589`, and the warmer's hardcoded `limit=25` at `server/warships/tasks.py:1704`. -> citations added.
 
 ### Unverified
-- The ~90s CPU cost of the snapshot writer per run: inherited from `runbook-health-sweep-remediation-2026-08-26.md`, not re-measured here. It bounds how much journal work D3 may add, so it is worth re-measuring if D3 grows.
-- That D2's budgets will actually stop the soft-limits: the durations are measured, but whether the 389-500s spread has a tail beyond 780s cannot be known from successful runs alone — every killed run is censored at 540s.
+- The per-ship cost of `compute_ship_pop_avg_damage` (§4). The task's docstring says "SECONDS on popular ships" and one run died at 540s, but neither the per-ship cost nor the size of a post-midnight `missing` set was measured. N3 should size the chunk against a measurement rather than a guess.
+- Whether the two `/api/realm/asia/top-ships/?limit=20` hits (§5) came from the frontend or a manual probe. The user-agent is truncated to `c` in the journal line and reads as `curl`. It does not change the defect, only how often it is exercised in practice.
+- Step 2's **per-metric** 780s budget. The failed sample was the combined task only; the per-metric lanes are daily per realm and need ~48h for one sample each.
 
 ### Open Questions
-1. ~~**Should D2 ship without realm-scoping the per-metric correlation lock?**~~ **ANSWERED 2026-08-26: option (a).** Realm-scope the lock first, then raise the budgets. `_run_locked_task(<name>, "population", ...)` becomes `_run_locked_task(<name>, realm, ...)` at `server/warships/tasks.py:1466` and `:1485` — the only two `"population"` call sites. This permits three concurrent ~450s aggregations against the 2-vCPU Postgres, bounded by the `background` pool’s `-c 3` cap and Beat’s per-realm striping. Step 2 is unblocked.
+1. **Does N1 supersede D2's combined-task budget, or sit alongside it?** If the combined task becomes a pure dispatcher it holds a slot for milliseconds and `PLAYER_CORRELATIONS_WARM_TASK_OPTS` becomes vestigial — worth deleting rather than leaving a misleading 900s constant. If instead it keeps doing work for some realms, the constant stays and stays wrong. **Blocks N1's shape, not its start.**
 
 ## Purpose
 
@@ -40,7 +39,7 @@ the ops digest's "no alert" means "all realms healthy". It does not.
 `CELERY_TASK_ROUTES` (`server/battlestats/settings.py:310`) routes its sibling
 `warm_player_ranked_wr_battles_correlation_task` to `background` (line 343) but
 has **no entry** for `warm_player_clan_battle_wr_battles_correlation_task`
-(`server/warships/tasks.py:1477`). With `CELERY_TASK_DEFAULT_QUEUE = 'default'`
+(`server/warships/tasks.py:1507`). With `CELERY_TASK_DEFAULT_QUEUE = 'default'`
 (`settings.py:309`) it lands on `default` — the request-adjacent lane shared
 with crawl dispatchers and watchdogs.
 
@@ -74,8 +73,8 @@ budget, so splitting was available and raising the limit would have pinned a
 worker for 25 minutes. Here it is a single aggregation that legitimately costs
 ~450s. The codebase already sizes budgets to such work rather than splitting it:
 `SHIP_PCT_WARM_TASK_OPTS` (30m/27m, `tasks.py:38`), `RECAPTURE_TASK_OPTS`
-(16m/15m, `tasks.py:52`) and `CLAN_TIER_DIST_WARM_TASK_OPTS` (3h/2h45m,
-`tasks.py:1988`) all exist for exactly this reason.
+(16m/15m, `tasks.py:74`) and `CLAN_TIER_DIST_WARM_TASK_OPTS` (3h/2h45m,
+`tasks.py:2030`) all exist for exactly this reason.
 
 **The binding constraint is the lock TTL, not taste.** The documented invariant
 (`tasks.py` `_reclassify_budget_seconds`, and the `RECAPTURE_TASK_OPTS` note) is:
@@ -85,9 +84,9 @@ soft_time_limit < time_limit <= lock TTL
 ```
 
 - The two per-metric tasks lock through `_run_locked_task`, whose TTL is
-  `RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60` (900s, `tasks.py:84`).
-- The combined `warm_player_correlations_task` (`tasks.py:1896`) locks with
-  `CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60` (1200s, `tasks.py:106`).
+  `RESOURCE_TASK_LOCK_TIMEOUT = 15 * 60` (900s, `tasks.py:106`).
+- The combined `warm_player_correlations_task` (`tasks.py:1935`) locks with
+  `CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60` (1200s, `tasks.py:128`).
 
 So the budgets must fit *under* those, or a slow run loses its lock mid-pass and
 a second invocation starts on top of it — the failure mode already pinned by
@@ -117,7 +116,7 @@ succeed, and 2-of-3 reads as healthy.
 
 **A second, independent masking mechanism (found in QA): a lock-skip counts as a
 success.** `_run_locked_task` returns `{"status": "skipped", "reason":
-"already-running"}` when the lock is held (`tasks.py:757`); Celery logs that as
+"already-running"}` when the lock is held (`tasks.py:514`); Celery logs that as
 `succeeded in ...`, and the writer counts every `succeeded in` line
 (`snapshot_service_health.sh:69-72`). So `succeeded` means *did not raise*, not
 *did work* — a task that only ever skips reads as perfectly healthy. The 3
@@ -136,6 +135,62 @@ logged `Starting`, so even worker-affinity pairing breaks for exactly the case
 that matters. Pairing these positionally produced a confidently wrong reading
 during the v5.6.1 verification; see that runbook's "Reading this journal
 correctly".
+
+### 4. The request-driven avg-damage warm packs an unbounded ship loop
+
+`warm_ship_pop_avg_damage_task` (`server/warships/tasks.py:646`) soft-limited once
+in the 24h to 2026-08-27 with **zero successes**, so it trips the digest's
+zero-success rule. Received 00:37:31, killed 00:46:31 — the full 540s.
+
+**Do not confuse it with its healthy sibling.** The *nightly bulk* warmer
+`warm_all_ship_pop_avg_damage_task` (`:670`) completed on all three realms the
+same night: eu 00:30:00→00:30:52 (52s), asia 00:55:32→00:56:40 (68s), na
+02:40:39→02:41:33 (54s). The bulk warm is fine; the **request-driven lazy** warm
+is what fails.
+
+The mechanism is the same packing shape as §2 and as the startup warm: the task
+walks `for ship_id in missing: compute_ship_pop_avg_damage(realm, ship_id)`
+serially under one `TASK_OPTS` budget, with no bound on `len(missing)` and no
+budget check between ships. Its own docstring notes the per-ship aggregate
+"takes SECONDS on popular ships".
+
+**Why it fires just after midnight.** The baseline cache is day-scoped, so all
+~900 per-ship keys rotate cold at UTC midnight, and the bulk warmer is striped
+per realm (00:30 eu, 00:55 asia, 02:40 na). A viewer landing in the gap between
+midnight and their realm's bulk warm finds *every* ship cold, so one treemap
+view queues a lazy warm over a large `missing` set. For `na` that gap is 2h40m.
+
+### 5. `/api/realm/asia/top-ships/` 500s on any non-default `limit`
+
+Both gunicorn worker timeouts in the 24h window are the same endpoint and the
+same shape, on 2026-08-26:
+
+```
+17:23:01  GET /api/realm/asia/top-ships/?limit=20   500 0     <- empty body
+17:23:07  GET /api/realm/asia/top-ships/            200 2530
+17:23:34  GET /api/realm/asia/top-ships/?limit=20   500 0
+17:23:56  GET /api/realm/asia/top-ships/            200 2530
+```
+
+The bare endpoint answers in the same second the parameterised one dies. The
+cause is in the cache key: `compute_realm_top_ships` (`server/warships/data.py`)
+builds **both** keys with the limit baked in —
+`top-ships:{mode}:win{window_end}:{limit}` and
+`top-ships:published:{mode}:{limit}` — while the warmer
+`warm_top_ships_treemap_task` (`server/warships/tasks.py`) hardcodes
+`limit=25`.
+
+So **only `limit=25` is ever warm.** The view clamps to `max(5, min(limit, 50))`,
+so the other 45 values in that range miss the fresh key *and* the durable
+`:published` fallback, and fall through to the live aggregation on the request
+thread. That is a direct breach of the load-bearing rule in CLAUDE.md: no
+request-thread blocking on a heavy DB aggregation. It blows the 25s gunicorn
+timeout and returns a 500 with an empty body.
+
+Note the parameter is unauthenticated and attacker-controlled: any caller can
+pick a limit other than 25 and force the aggregation. This is mild denial-of-
+service surface, not merely a latency bug, which is why it is worth fixing even
+though the observed hits came from a `curl` user-agent rather than the frontend.
 
 ## Decisions
 
@@ -168,7 +223,7 @@ many unrelated tasks; the budgets fit under the existing TTLs.
 
 **BLOCKING CONSTRAINT found in QA — the per-metric lock is not realm-scoped.**
 Both per-metric tasks call `_run_locked_task(<name>, "population", ...)`
-(`tasks.py:1462`, `:1481`), and `_task_lock_key` (`tasks.py:752`) builds
+(`tasks.py:1493`, `:1520`), and `_task_lock_key` (`tasks.py:361`) builds
 `warships:tasks:<name>:<resource_id>:lock` from that literal `"population"` —
 **the same key for every realm**. The ranked and clan-battle correlation warms
 are therefore globally serialized, unlike the combined task, which keys on realm.
@@ -192,14 +247,14 @@ which is a pure success-path change with no exception-handling risk.
 
    | line | task | action |
    |---|---|---|
-   | `:1889` | `warm_player_distributions_task` | amend existing `Finished` line |
-   | `:1910` | `warm_player_correlations_task` | amend existing `Finished` line |
-   | `:1942` | `warm_hot_entity_caches_task` | amend existing `Finished` line |
-   | `:1962` | `bulk_load_entity_caches_task` | amend existing `Finished` line |
-   | `:1458` | `warm_player_ranked_wr_battles_correlation_task` | **add** — it `return`s `_run_locked_task(...)` and logs no completion |
-   | `:1477` | `warm_player_clan_battle_wr_battles_correlation_task` | **add** — same |
+   | `:1927` | `warm_player_distributions_task` | amend existing `Finished` line |
+   | `:1949` | `warm_player_correlations_task` | amend existing `Finished` line |
+   | `:1982` | `warm_hot_entity_caches_task` | amend existing `Finished` line |
+   | `:2003` | `bulk_load_entity_caches_task` | amend existing `Finished` line |
+   | `:1499` | `warm_player_ranked_wr_battles_correlation_task` | **add** — it `return`s `_run_locked_task(...)` and logs no completion |
+   | `:1526` | `warm_player_clan_battle_wr_battles_correlation_task` | **add** — same |
 
-   `warm_recently_viewed_players_task` (`:1982`) is excluded: its Beat entry was
+   `warm_recently_viewed_players_task` (`:2023`) is excluded: its Beat entry was
    removed 2026-06-20 (`signals.py`).
 
    A skip never reaches these lines, so per-realm success counts built from them
@@ -230,7 +285,7 @@ Ordered smallest-risk first; each step independently shippable and verifiable.
 assert both correlation tasks land on `background`. Behaviour-free otherwise.
 
 **Step 2 — D2, the budgets.** **Realm-scope the per-metric lock first** (Open Question 1, answered: pass `realm`
-as `resource_id` at `tasks.py:1466` and `:1485`), then add the two constants,
+as `resource_id` at `tasks.py:1493` and `:1520`), then add the two constants,
 apply them to the three task decorators. Tests must pin the lock invariant (`soft < hard <= lock TTL`)
 for both new constants, mirroring `test_lock_outlives_the_hard_time_limit`. A
 test that only asserts the numbers is worthless; the invariant is the contract.
@@ -301,7 +356,7 @@ realm-less line, which it correctly ignores.
   once. That is gone by design. The exposure is narrower than it looks — the
   combined task already keyed on realm, and v5.6.1's fan-out ran concurrent
   cross-realm correlation work successfully (425s, 497s) — but the per-metric
-  Beat lanes and the on-view dispatch sites (`tasks.py:959`, `:982`) can now
+  Beat lanes and the on-view dispatch sites (`tasks.py:987`, `:1010`) can now
   overlap too. Spacing will not help (20s of stagger against ~450s of work), so
   do not add any: watch `background` queue depth and Postgres load instead.
   Three of these holding all three slots for 780s is the signal.
@@ -316,6 +371,107 @@ realm-less line, which it correctly ignores.
   from `/opt/battlestats-server/current/server`. Expect a
   `celery_task_realm_failing:...:eu` line for the correlation warmers until
   Step 2's effect lands.
+
+## Production results (2026-08-27, v5.6.2)
+
+Deployed 04:26 UTC, backend release `20260827002439`.
+
+**Step 1 — routing.** Proven by test, nothing to observe in production.
+
+**Step 3 — per-realm alerting: VERIFIED end to end.**
+- Nine realm-tagged success lines emitted (`bulk_load_entity_caches_task`,
+  `warm_hot_entity_caches_task`, `warm_player_distributions_task` × na/eu/asia).
+- `celery_realm_successes` present and correctly populated in
+  `shared/benchmarks/service-health/2026-08-27_0436Z.json`.
+- Digest dry-run **as the `battlestats` user** reads the field cleanly and
+  correctly raises no per-realm condition, because all three realms succeeded.
+- Writer cost **80s**, against the ~90s baseline — folding the realm tally into
+  the existing sweep held the budget.
+- The predicted day-one false positive **did not occur**: the startup fan-out
+  warms all three realms together, so no realm straddled the deploy boundary.
+
+**Step 2 — budgets: PARTIAL FAILURE on the first sample. Not resolved.**
+
+The three combined `warm_player_correlations_task` runs dispatched by the
+post-deploy fan-out started 04:32:08, 04:32:17 and 04:37:26. Two were killed by
+`Soft time limit (900s) exceeded` at **04:47:08 and 04:47:17** — the *new* limit,
+at exactly 900s. Zero completed.
+
+**Why the sizing was wrong, and it is instructive.** 900s was derived from the
+only combined runs that had ever succeeded (425s and 497s). Those are
+survivorship-biased: they succeeded *because* their sub-caches were already warm
+from the per-metric Beat lanes. A genuinely cold combined run is plausibly around
+**~1350s** — three correlations at roughly the ranked one's measured cost — which
+no budget under the 1200s `CORRELATION_WARM_LOCK_TIMEOUT` could accommodate.
+
+**That figure is an extrapolation, not a measurement, and QA flags it as such.**
+Only the *ranked* sub-warm has ever been timed standalone (389-500s).
+`warm_player_clan_battle_wr_battles_correlation_task` logged **zero runs** in 72h
+— it has no Beat lane and fires only on view — and no standalone task exists for
+wr-survival at all, so neither has ever been measured on its own. What IS
+measured and sufficient to refute the 900s budget: two of three combined runs
+were killed at exactly 900s. N1 does not depend on the ~1350s figure; it depends
+on the kill, and on each sub-warm fitting the 780s per-metric budget. The test comment
+`test_per_metric_budget_clears_the_measured_worst_case` names this exact hazard
+("every killed run is censored at 540s, so the true tail is unknown") and the
+sizing still walked into it.
+
+**The per-metric budget (780s) is NOT implicated by this sample** — these were
+the combined task. It remains unmeasured and still needs ~48h.
+
+**Queue interaction observed.** The nightly `roll_up` was dispatched by Beat at
+04:30:00 and did not start until **04:47:18** — a 17-minute wait behind three
+correlation warms holding all three `-c 3` slots, on a queue that peaked at 10
+messages. Deploying shortly before 04:30 UTC therefore delays the nightly
+rollup. Note `soft_time_limit` is a ceiling, not a reservation — a slot frees the
+moment the task returns — so this cost falls only on runs that would previously
+have been *killed*, and those were already burning 540 slot-seconds for nothing.
+
+## Next steps
+
+Ordered by evidence strength. **Nothing below is implemented.**
+
+**N1 — Re-fan-out the combined correlation task (supersedes part of D2).**
+The 900s budget is refuted (see Production results). The combined task should
+become a pure dispatcher to per-metric tasks after all.
+
+**Only TWO per-metric tasks exist**, not three:
+`warm_player_ranked_wr_battles_correlation_task` (`tasks.py:1480`) and
+`warm_player_clan_battle_wr_battles_correlation_task` (`tasks.py:1507`). All
+three data-layer sub-warmers exist — `warm_player_wr_survival_correlation`
+(`data.py:3116`), `..._ranked_wr_battles_...` (`data.py:3459`),
+`..._clan_battle_wr_battles_...` (`data.py:3646`) — but the wr-survival one has
+no task wrapper. N1 must **create** `warm_player_wr_survival_correlation_task`,
+route it to `background`, give it `CORRELATION_METRIC_WARM_TASK_OPTS`, and lock
+it per realm, before the dispatcher has three targets to fan out to.
+
+This is the design D2 explicitly rejected, and the reason it was rejected has
+since been removed. The objection was that the ranked correlation alone needs
+~450s against a 540s budget, so fan-out would merely relocate the failure — true
+at the time. The per-metric budget is now **780s** (§D2) and the per-metric locks
+are realm-scoped, so each sub-warm has ~1.7x the headroom it needs and no longer
+contends across realms. Fan-out now removes the failure instead of moving it.
+
+A dispatcher also escapes the 1200s lock ceiling entirely, which no single
+budget can: ~1350s of cold work cannot fit under a 1200s TTL.
+
+**N2 — Confirm the per-metric budget over ~48h.** Untouched by the failed
+sample. One night is a single sample per realm; do not call it either way sooner.
+
+**N3 — Bound the avg-damage lazy warm (§4).** Chunk `missing` across dispatches
+or check the budget between ships, so one post-midnight viewer cannot queue an
+unbounded serial walk. Same remedy family as the startup fan-out.
+
+**N4 — Warm the top-ships payload for every servable limit, or drop limit from
+the cache key (§5).** The slice claim is **verified**: the query ends
+`.order_by("-battles")[:limit]`, so the limit is a pure truncation of one ordered
+list and the top-N of a longer warmed payload is exactly the warmed top-N.
+
+But slicing the `limit=25` payload only serves requests for **limit <= 25**. The
+view clamps to `[5, 50]` (`data.py:6589`), so 26-50 would still miss. The
+complete fix is therefore to warm at the clamp ceiling (`limit=50`) and slice
+down to any requested limit, which covers the whole servable range with one
+warmed key per (realm, mode) instead of 46.
 
 ## Follow-ups (not code)
 
