@@ -8,6 +8,8 @@ _QA: Every timing is read from the production journal 2026-08-25..26. The failur
 
 _Reviewed 2026-08-27 against `/home/august/code/battlestats`. 41 assertions checked, 9 corrected._
 
+_**§6, N5 and N6 were added AFTER this review**, from production evidence that arrived the same morning. Their citations were verified inline (`server/warships/tasks.py:2995-2996`) but they have not been through a full QA pass._
+
 ### Resolved
 - **Roughly every `tasks.py` line citation in this runbook was stale** -> actual: implementing this runbook's own plan added ~22 lines to `server/warships/tasks.py`, moving nearly everything past line 38. `RECAPTURE_TASK_OPTS` 52->74, `RESOURCE_TASK_LOCK_TIMEOUT` 84->106, `CORRELATION_WARM_LOCK_TIMEOUT` 106->128, `CLAN_TIER_DIST_WARM_TASK_OPTS` 1988->2030, `_task_lock_key` 752->361, the `_run_locked_task` skip-return 757->514, the ranked task 1458->1480, the clan-battle task 1477->1507, the combined task 1896->1935, the realm-scoped lock sites 1466/1485->1493/1520, and all six D3 target rows. -> every citation re-resolved by symbol. **The general lesson: a runbook that cites line numbers is falsified by its own implementation, so citations must be re-resolved after the code lands, not before.**
 - **N1 said "dispatcher to the three per-metric tasks"** -> actual: only **two** exist, `warm_player_ranked_wr_battles_correlation_task` (`server/warships/tasks.py:1480`) and `warm_player_clan_battle_wr_battles_correlation_task` (`:1507`). All three *data-layer* sub-warmers exist (`server/warships/data.py:3116`, `:3459`, `:3646`) but wr-survival has no task wrapper. -> N1 now requires creating `warm_player_wr_survival_correlation_task` first.
@@ -191,6 +193,44 @@ Note the parameter is unauthenticated and attacker-controlled: any caller can
 pick a limit other than 25 and force the aggregation. This is mild denial-of-
 service surface, not merely a latency bug, which is why it is worth fixing even
 though the observed hits came from a `curl` user-agent rather than the frontend.
+
+### 6. A truncated rollup reads as a SUCCESS to the digest
+
+Observed 2026-08-27, the first run of the F2 rewrite (v5.6.0) to actually
+execute. Verified against `server/warships/tasks.py:2995-2996`.
+
+```
+04:47:18  Starting roll_up... window=2026-08-24..2026-08-26 (3 days)
+04:56:18  Soft time limit (540s) exceeded
+04:56:18  TRUNCATED on 2026-08-24 by ProgrammingError: days_rebuilt=0 of 3
+04:56:18  succeeded in 540.1s: {'status': 'partial', 'days_rebuilt': 0, ...}
+```
+
+**Two opposite results in one run.**
+
+*The F2 handler works.* It caught `ProgrammingError` — not
+`SoftTimeLimitExceeded` — which is exactly the substitution its comment predicts:
+the soft limit fires inside `rebuild_daily_ship_stats_for_date`'s atomic block
+and `atomic.__exit__` replaces the in-flight exception before the handler sees
+it. Catching `DatabaseError` alongside the soft-limit class is what made this
+survivable rather than a crash. That half is proven in production.
+
+*The performance half is not.* `days_rebuilt=0 of 3` — it did not finish even the
+first day in 540s, against F2's premise that the Postgres-side aggregation makes
+a day cost ~2.34s.
+
+**Heavy confounder, stated plainly:** this run started 17 minutes late and
+executed against a saturated pool — three correlation warms holding all three
+`-c 3` slots and a 10-deep queue, on a 2-vCPU managed Postgres, a state caused by
+the 04:26 deploy. One run under those conditions does **not** establish that the
+F2 rewrite is too slow. It needs a clean night.
+
+**The finding that does not depend on the confounder:** the task now returns
+`status: partial` and **succeeds**. Celery logs `succeeded in 540.1s`, so the
+digest's Celery axis sees a success and stays silent — a rollup that rebuilt
+**zero of three days** is indistinguishable from a healthy one. This is the same
+class as the lock-skip flaw in §3: the digest measures *did not raise*, not *did
+work*. Before F2 the failure was loud and wrong; now it is quiet and wrong.
 
 ## Decisions
 
@@ -479,6 +519,17 @@ view clamps to `[5, 50]` (`data.py:6589`), so 26-50 would still miss. The
 complete fix is therefore to warm at the clamp ceiling (`limit=50`) and slice
 down to any requested limit, which covers the whole servable range with one
 warmed key per (realm, mode) instead of 46.
+
+**N5 — Alert on a rollup that rebuilds nothing (§6).** The digest cannot see
+`days_rebuilt=0` because the task succeeds. The benchmark family
+`check_battle_history_rollup.sh` already exists in `server/scripts/`; check
+whether it covers this before adding an axis. Do not fix by making the task
+raise again — the whole point of F2 was that truncation is survivable; the gap is
+in what the digest reads, not in the task's behaviour.
+
+**N6 — Re-read the rollup on a clean night (§6).** Its 04:30 slot collided with a
+deploy-triggered warm storm. Establish whether the F2 aggregation is genuinely
+too slow before treating it as a performance defect.
 
 ## Follow-ups (not code)
 
