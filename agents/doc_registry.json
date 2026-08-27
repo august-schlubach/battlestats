@@ -814,6 +814,39 @@
                 "warming-strategy-replaced"
             ]
         },
+        "agents/runbooks/runbook-korean-community-outreach.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "evergreen",
+            "section": "operations",
+            "owner": "operator",
+            "aliases": [
+                "korean community outreach",
+                "arca.live posting",
+                "dcinside referral",
+                "korean register guide",
+                "monthly asia roll-up post",
+                "kr outreach"
+            ],
+            "tags": [
+                "outreach",
+                "korea",
+                "arca.live",
+                "dcinside",
+                "inven",
+                "growth",
+                "localization",
+                "korean",
+                "register",
+                "monthly-post",
+                "ship-standings",
+                "asia"
+            ],
+            "archive_on": [
+                "korean-outreach-abandoned",
+                "monthly-asia-post-retired"
+            ]
+        },
         "agents/runbooks/runbook-seo.md": {
             "kind": "runbook",
             "status": "active",

@@ -106,6 +106,8 @@ Per-realm periodic tasks are striped so at most one realm is mid-cycle. Mechanis
 
 App droplet **2 vCPU / 8 GB**; managed Postgres **2 vCPU / 4 GB** (PG 18). **Do not plan against a 1-vCPU DB** — that assumption is stale. Sizing: `agents/runbooks/ops-infra-resources.md`. HTTP/2 on the nginx 443 listeners. `CONN_HEALTH_CHECKS` enabled. SEO, dynamic OG cards, Umami analytics and the durable visitor id: `agents/runbooks/runbook-seo.md`, `agents/runbooks/runbook-audience-growth-instrumentation-2026-07-29.md`.
 
+**Korean outreach** — our only real language community. Venue map, the board rules, the measured register rules (they say **공방** not 랜덤전, **10티어** not 티어10, **전투** not 판), and the monthly ASIA post generator (`scripts/monthly_asia_post.py`): `agents/runbooks/runbook-korean-community-outreach.md`. **Never automate a forum login**; the operator posts, the agent translates.
+
 ### Data models (`server/warships/models.py`)
 
 Player, Clan, Ship, Snapshot, PlayerExplorerSummary, EntityVisitEvent/Daily, PlayerAchievementStat, DeletedAccount, MvPlayerDistributionStats, ShipTopPlayerSnapshot, StreamerSubmission, Feedback, HotPlayer, RankedSeason, ClanBattleSeason.

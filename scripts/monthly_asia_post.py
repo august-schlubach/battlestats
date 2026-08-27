@@ -1,0 +1,196 @@
+#!/usr/bin/env python
+"""Generate the monthly Korean ASIA tier-10 roll-up post for arca.live/b/wows.
+
+Run ON THE DROPLET, inside the server checkout:
+
+    cd /opt/battlestats-server/current/server
+    set -a; . /opt/battlestats-server/shared/.env; set +a
+    /opt/battlestats-server/venv/bin/python manage.py shell \
+        -c "exec(open('scripts/monthly_asia_post.py').read())" 2026 8
+
+Reads ShipPopDailyAgg (daily grain, so it cuts by CALENDAR month, unlike the
+site's rolling 60-day standings). Retention is max(100, window+15) days, so the
+current month and the prior one are always available; anything older is gone.
+Archive each month's output if you want a long series.
+"""
+import sys, calendar, datetime, json
+from collections import defaultdict
+from django.db.models import Sum
+from warships.models import ShipPopDailyAgg, Ship
+
+YEAR = int(sys.argv[-2]) if len(sys.argv) >= 3 else 2026
+MONTH = int(sys.argv[-1]) if len(sys.argv) >= 2 else 8
+REALM, MODE, TIER = "asia", "random", 10
+FLOOR = 5000          # battles in-month required to appear in a ranking table
+MOVER_FLOOR = 8000    # battles in BOTH months required for a MoM delta
+
+KOT = {"Battleship": "전함", "Cruiser": "순양함", "Destroyer": "구축함",
+       "AirCarrier": "항공모함", "Submarine": "잠수함"}
+KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 지 세템브루",
+      "Kremlin": "크렘린", "Aki": "아키", "Yamato": "야마토", "Montana": "몬타나",
+      "Cristoforo Colombo": "콜롬보", "Shimakaze": "시마카제", "Hildebrand": "힐데브란트",
+      "Pioneer": "파이오니어", "Svea": "스베아", "San Martín": "산 마르틴",
+      "Minotaur": "미노타우어", "Yoshino": "요시노", "Småland": "스몰란드",
+      "Laffey": "라피", "Daring": "데어링", "Châteaurenault": "샤토르노",
+      "AL Shimakaze": "AL 시마카제", "Manfred von Richthofen": "리히트호펜",
+      "Essex": "에식스", "Audacious": "오다시어스", "Shinano": "시나노",
+      "Malta": "몰타", "Archerfish": "아처피시", "Balao": "발라오",
+      "Admiral Nakhimov": "아드미랄 나히모프", "Hindenburg": "힌덴부르크", "Bungo": "붕고", "Slava": "슬라바",
+      "Shikishima": "시키시마", "Bourgogne": "부르고뉴", "Libertad": "리베르타드",
+      "Kearsarge": "키어사지", "Azuma": "아즈마", "Kitakaze": "키타카제",
+      "Affondatore": "아폰다토레", "Conqueror": "컨쿼러", "Schlieffen": "슐리펜",
+      "Worcester": "우스터", "Venezia": "베네치아", "Gearing": "기어링",
+      "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B"}
+
+def _norm(n):
+    # WG ship names carry NON-BREAKING spaces (e.g. 'San\xa0Martín'); normalise
+    # before any lookup or display, or the Korean name silently fails to match.
+    return n.replace("\xa0", " ")
+
+def ko(n):
+    return KO.get(_norm(n), _norm(n))
+
+def nm(n):
+    n = _norm(n)
+    k = KO.get(n)
+    return f"{k} ({n})" if k and k != n else n
+
+def month_bounds(y, m):
+    return datetime.date(y, m, 1), datetime.date(y, m, calendar.monthrange(y, m)[1])
+
+def pull(a, b, ship_ids):
+    qs = (ShipPopDailyAgg.objects
+          .filter(realm=REALM, mode=MODE, date__gte=a, date__lte=b, ship_id__in=ship_ids)
+          .values("ship_id").annotate(bt=Sum("battles"), wn=Sum("wins"),
+                                      dm=Sum("damage_sum")))
+    return {r["ship_id"]: r for r in qs if r["bt"]}
+
+def covered_days(a, b):
+    return len({d for d in ShipPopDailyAgg.objects
+                .filter(realm=REALM, mode=MODE, date__gte=a, date__lte=b)
+                .values_list("date", flat=True)})
+
+t10 = {s.ship_id: s for s in Ship.objects.filter(tier=TIER)}
+a, b = month_bounds(YEAR, MONTH)
+pm = (a - datetime.timedelta(days=1)).replace(day=1)
+pa, pb = month_bounds(pm.year, pm.month)
+
+cur, prev = pull(a, b, t10), pull(pa, pb, t10)
+days, want = covered_days(a, b), (b - a).days + 1
+if days != want:
+    print(f"### WARNING: only {days}/{want} days present for {YEAR}-{MONTH:02d}. "
+          f"Do not publish until the rollup has caught up.\n")
+
+rows = []
+for sid, r in cur.items():
+    s = t10[sid]
+    p = prev.get(sid)
+    rows.append(dict(name=s.name, type=s.ship_type, bt=r["bt"],
+                     wr=round(r["wn"] / r["bt"] * 100, 2),
+                     dmg=int(r["dm"] / r["bt"]),
+                     pwr=round(p["wn"] / p["bt"] * 100, 2) if p and p["bt"] >= MOVER_FLOOR else None,
+                     pbt=p["bt"] if p else 0))
+
+tot = sum(r["bt"] for r in rows)
+wtd = sum(r["bt"] * r["wr"] for r in rows) / tot
+mix = defaultdict(int)
+for r in rows:
+    mix[r["type"]] += r["bt"]
+played = sorted(rows, key=lambda r: -r["bt"])
+top = played[0]
+bb = sorted([r for r in rows if r["type"] == "Battleship" and r["bt"] >= FLOOR], key=lambda r: -r["wr"])
+allf = sorted([r for r in rows if r["bt"] >= FLOOR], key=lambda r: r["wr"])
+below = [r for r in allf if r["wr"] < top["wr"]]
+
+O = []
+w = O.append
+w(f"제목: {MONTH}월 아시아 공방 10티어 통계 정리 ({tot/10000:.0f}만 전투)")
+w("")
+w(f"{MONTH}월 아시아 공방에서 제일 많이 굴러간 10티어는 {ko(top['name'])}였음. "
+  f"{top['bt']:,}전투로 함종 관계없이 전체 1위, 2위({ko(played[1]['name'])} {played[1]['bt']:,})와 차이도 큼.")
+w(f"근데 승률은 {top['wr']:.2f}%로, {FLOOR:,}전투 이상 10티어 전함 {len(bb)}척 중 {bb.index(top)+1}위임.")
+if below:
+    w(f"(10티어 전체로 넓히면 {len(allf)}척 중 밑에서 {len(below)+1}번째. "
+      + ", ".join(f"{ko(r['name'])} {r['wr']:.2f}%" for r in below[:3]) + " 등이 더 아래임.)")
+w("")
+w("battlestats.online 만든 사람입니다. 사이트에 쌓인 데이터로 지난달 아시아 공방을 정리해봤습니다.")
+w("숫자는 전부 사이트에서 직접 확인할 수 있고, 가입이나 로그인 같은 건 없습니다.")
+w("")
+w("■ 집계 기준")
+w(f"· 아시아 / 공방 / 10티어")
+if days == want:
+    w(f"· 기간: {a.month}월 {a.day}일 ~ {b.month}월 {b.day}일 ({days}일 전부)")
+else:
+    _seen = sorted({d for d in ShipPopDailyAgg.objects.filter(
+        realm=REALM, mode=MODE, date__gte=a, date__lte=b).values_list("date", flat=True)})
+    w(f"· 기간: {_seen[0].month}월 {_seen[0].day}일 ~ {_seen[-1].month}월 {_seen[-1].day}일 "
+      f"(※ {a.month}월 {want}일 중 {days}일만 집계됨)")
+w(f"· 표본: 10티어 총 {tot:,}전투 (필터 없음)")
+w(f"· 아래 순위표에는 {FLOOR:,}전투 이상 굴러간 배만 올렸음 (표본 적은 배가 위로 튀는 걸 막으려고)")
+w(f"· 모집단 가중 평균 승률 {wtd:.2f}%")
+w("")
+w("■ 함종별 전투 비중")
+w(" · ".join(f"{KOT[t]} {v/tot*100:.1f}%" for t, v in sorted(mix.items(), key=lambda x: -x[1])))
+w("")
+exc = None
+for r in played[:6]:
+    pool = sorted([x for x in rows if x["type"] == r["type"] and x["bt"] >= FLOOR],
+                  key=lambda x: -x["wr"])
+    if r in pool and pool.index(r) < len(pool) / 2:
+        exc = (r, pool.index(r) + 1, len(pool))
+        break
+w(f"■ {ko(top['name'])}만 그런 게 아님")
+w("많이 타는 배들이 대체로 승률 하위권에 몰려 있음.")
+w("")
+shown = 0
+for r in played[1:]:
+    if shown >= 4 or r["wr"] >= wtd:
+        continue
+    pool = sorted([x for x in rows if x["type"] == r["type"] and x["bt"] >= FLOOR], key=lambda x: -x["wr"])
+    tag = f" ({KOT[r['type']]} 중 최하위)" if pool and pool[-1]["name"] == r["name"] else ""
+    w(f"· {ko(r['name'])} {r['wr']:.2f}%{tag}, {r['bt']:,}전투")
+    shown += 1
+w("")
+if exc:
+    r, rk, n = exc
+    w("")
+    w(f"많이 타는 배 중에 예외는 {ko(r['name'])} 정도. {r['bt']:,}전투로 많이 굴리면서 "
+      f"{KOT[r['type']]} {n}척 중 {rk}위임.")
+else:
+    w("")
+    w("많이 타는 배 중에 승률 상위권인 예외는 이번 달엔 없었음.")
+w("")
+w(f"■ 함종별 승률 상위 ({MONTH}월, {FLOOR:,}전투 이상)")
+w("")
+for t, k in KOT.items():
+    pool = sorted([r for r in rows if r["type"] == t and r["bt"] >= FLOOR], key=lambda r: -r["wr"])
+    if not pool:
+        continue
+    w(f"[{k} {len(pool)}척]")
+    for i, r in enumerate(pool[:5], 1):
+        d = f"  (전월대비 {r['wr']-r['pwr']:+.2f}p)" if r["pwr"] else ""
+        w(f"{i}. {nm(r['name'])}  {r['wr']:.2f}%  {r['bt']:,}전투  평딜 {r['dmg']:,}{d}")
+    if pool[-1] not in pool[:5]:
+        w(f"   최하위: {nm(pool[-1]['name'])}  {pool[-1]['wr']:.2f}%  {pool[-1]['bt']:,}전투")
+    w("")
+mov = [r for r in rows if r["pwr"] and r["bt"] >= MOVER_FLOOR]
+for r in mov:
+    r["d"] = round(r["wr"] - r["pwr"], 2)
+mov.sort(key=lambda r: -r["d"])
+if mov:
+    w(f"■ {pm.month}월 대비 변화")
+    w(f"양쪽 달 다 {MOVER_FLOOR:,}전투 이상인 배 기준입니다.")
+    w("오른 쪽: " + " · ".join(f"{ko(r['name'])} {r['d']:+.2f}p" for r in mov[:3]))
+    w("내린 쪽: " + " · ".join(f"{ko(r['name'])} {r['d']:+.2f}p" for r in mov[-3:]))
+    w("")
+w("■ 한계 (읽으실 때 감안해주세요)")
+w(f"· 저희가 추적하는 플레이어 풀 기준이라 서버 전체 인구와 완전히 같지는 않습니다. "
+  f"가중 평균 승률이 딱 50%가 아니라 {wtd:.2f}%인 것도 그 때문입니다.")
+w("· 사이트 순위표는 최근 60일 롤링 기준이라 이 글 숫자와 소수점 단위로 다를 수 있습니다. "
+  "이 글은 달력 기준으로 따로 뽑은 겁니다.")
+w("")
+w("보고 싶은 지표 있으면 말씀해주세요. 8~9티어나 랭겜도 같은 방식으로 뽑을 수 있습니다. "
+  "이상해 보이는 숫자 있으면 지적해주시면 확인해보겠습니다.")
+w("")
+w("원본 데이터: https://battlestats.online/?realm=asia")
+print("\n".join(O))
