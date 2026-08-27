@@ -21,7 +21,7 @@ _Reviewed 2026-08-27 against `/home/august/code/battlestats`. 41 assertions chec
 - Step 2's **per-metric** 780s budget. The failed sample was the combined task only; the per-metric lanes are daily per realm and need ~48h for one sample each.
 
 ### Open Questions
-1. **Does N1 supersede D2's combined-task budget, or sit alongside it?** If the combined task becomes a pure dispatcher it holds a slot for milliseconds and `PLAYER_CORRELATIONS_WARM_TASK_OPTS` becomes vestigial — worth deleting rather than leaving a misleading 900s constant. If instead it keeps doing work for some realms, the constant stays and stays wrong. **Blocks N1's shape, not its start.**
+1. ~~**Does N1 supersede D2's combined-task budget, or sit alongside it?**~~ **ANSWERED 2026-08-27: N1 supersedes it.** The combined task becomes a pure dispatcher, so it holds a slot for milliseconds and `PLAYER_CORRELATIONS_WARM_TASK_OPTS` becomes vestigial. **Deprecate the constant as part of N1** rather than leaving a misleading 900s value in the file — a budget that no longer bounds anything is worse than no budget, because the next reader will size against it. Delete it in the same commit that lands the dispatcher, not before: it is live and load-bearing until then.
 
 ## Purpose
 
@@ -454,6 +454,13 @@ contends across realms. Fan-out now removes the failure instead of moving it.
 
 A dispatcher also escapes the 1200s lock ceiling entirely, which no single
 budget can: ~1350s of cold work cannot fit under a 1200s TTL.
+
+**Deprecate `PLAYER_CORRELATIONS_WARM_TASK_OPTS` in the same commit** (Open
+Question 1, answered). Once the combined task computes nothing, its 900s budget
+bounds nothing — and this runbook is itself the record of what happens when
+someone sizes against a stale number. The constant is live until the dispatcher
+lands, so remove it *with* that change, not ahead of it. The per-metric
+`CORRELATION_METRIC_WARM_TASK_OPTS` stays: it is what the fan-out targets rely on.
 
 **N2 — Confirm the per-metric budget over ~48h.** Untouched by the failed
 sample. One night is a single sample per realm; do not call it either way sooner.
