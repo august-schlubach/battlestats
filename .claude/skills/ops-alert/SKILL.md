@@ -104,11 +104,18 @@ ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && \
 Together they are deterministic, send nothing, and cost nothing. Output is
 `VERDICT: N condition(s) tripped` then one `[code] detail` line each.
 
-**It re-evaluates against *current* snapshots, not the ones the mail saw.** A
-condition can clear (a late snapshot landed) or a new one appear. Use the email
-for what tripped **then**, the dry run for what is true **now**, and report both
-when they disagree — a condition that cleared on its own is a different finding
-from one that persists.
+**What the dry run buys is the exact codes, not fresher truth.** Every family it
+reads is a once-daily file — service-health 11:00 UTC, recapture 10:10/10:30/10:50,
+observation 04:30 — and the digest mails at 11:30. Re-run the same afternoon and
+it reads the *same* snapshots, so it reproduces the morning's verdict almost by
+construction. It shows drift only if a producer wrote a late file since.
+
+**Live recovery is confirmed in the worker journal, never in the dry run.**
+Verified 2026-08-28: asia correlations succeeded at 16:58 and the dry run still
+listed `celery_task_realm_failing:…:asia`, because the 11:01 snapshot is all it
+can see. An agent that trusts the dry run for "now" reports a recovered realm as
+still dark. For each condition, go to the owning unit's journal for the window
+*since* the snapshot before calling anything unresolved.
 
 Also read the timer journal, which is the only place an all-clear day is
 recorded:
