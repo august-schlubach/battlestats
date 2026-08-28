@@ -120,7 +120,7 @@ Battle-history pipeline: BattleObservation → BattleEvent → PlayerDailyShipSt
 
 ## Claude Code Skills
 
-Project skills live in `.claude/skills/<name>/SKILL.md`, auto-loaded on trigger phrases. Read-only unless noted: `doctrine-precommit`, `release-gate`, `enrichment-status`, `observation`, `crawl-yield`, `recapture`, `feedback`, `event-check`, `crawl`. Mutating: `deploy-droplet` (production), `warm-damage-averages` (cache), `runbook-author` / `runbook-archive` (stage files).
+Project skills live in `.claude/skills/<name>/SKILL.md`, auto-loaded on trigger phrases. Read-only unless noted: `doctrine-precommit`, `release-gate`, `enrichment-status`, `observation`, `crawl-yield`, `recapture`, `feedback`, `event-check`, `crawl`. Mutating: `deploy-droplet` (production), `ops-alert` (investigates the morning ops mail, then remedies), `warm-damage-averages` (cache), `runbook-author` / `runbook-archive` (stage files).
 
 ## Versioning
 
