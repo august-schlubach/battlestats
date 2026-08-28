@@ -4357,6 +4357,38 @@
                 "60d-rollout-verified-and-stable",
                 "90d-window-shipped"
             ]
+        },
+        "agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "ops alert remediation",
+                "correlation warm fan-out",
+                "warm_player_wr_survival_correlation_task",
+                "crawl_all_clans zero successes",
+                "long cycle task exemption",
+                "gunicorn worker timeout cluster"
+            ],
+            "tags": [
+                "ops-email",
+                "alerting",
+                "warmers",
+                "celery",
+                "soft-limit",
+                "fan-out",
+                "background-queue",
+                "clan-crawl",
+                "gunicorn",
+                "detector-gap",
+                "locks"
+            ],
+            "archive_on": [
+                "correlation-fan-out-superseded",
+                "long-cycle-exemption-removed"
+            ]
         }
     }
 }

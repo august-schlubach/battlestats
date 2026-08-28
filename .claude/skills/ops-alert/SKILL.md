@@ -140,7 +140,7 @@ the digest is blind to Celery and gunicorn entirely.
 
 | Code | First probe |
 |---|---|
-| `celery_task_failing:<task>` | The task raised ≥1× and **succeeded 0 times** in 24h — broken, not flaky (a task with any success is filtered out deliberately). `journalctl -u <unit> --since "24 hours ago" \| grep <task>`. Then `event-check` for the queue behind it. |
+| `celery_task_failing:<task>` | The task raised ≥1× and **succeeded 0 times** in 24h — broken, not flaky (a task with any success is filtered out deliberately). `journalctl -u <unit> --since "24 hours ago" \| grep <task>`. Then `event-check` for the queue behind it. **First ask whether the task's unit of work fits in 24h.** A task whose work spans several dispatches by design has legitimate zero-success days, and this rule reads that as broken: `crawl_all_clans_task` completes a pass every 2-4 dispatches, so 4 days in 7 look like a total failure. Those tasks are judged by the staleness rule on their *output* instead, and are listed in `LONG_CYCLE_TASKS` (`server/scripts/daily_ops_email.py`). If a zero-success task is not in that set, check its cadence before believing the condition. |
 | `celery_task_realm_failing:<task>:{r}` | The task completed 0× for that realm while succeeding on another. Two candidates only: it is no longer **dispatched** for that realm (check `signals.py` Beat registration and per-realm striping), or it fails only there. Confirm which before touching code. |
 | `gunicorn_worker_timeouts` | Each is a 500 with an **empty body**. The load-bearing rule from CLAUDE.md applies: no `/api/fetch/*` endpoint may block the request thread. But **the named paths are an attribution heuristic, not a diagnosis** — the writer reports paths seen near the timeout. Get the real `[CRITICAL] WORKER TIMEOUT` lines (`journalctl -u battlestats-gunicorn \| grep "WORKER TIMEOUT"`) and read their timestamps: several workers dying in the same second is a shared-resource stall (DB, lock), not a slow handler, and chasing the named path then wastes the whole investigation. |
 | `journal_unreadable:service-health` | The writer could not read the journal, so every count in the family is an invented zero meaning "not measured", **not** "nothing failed". Check the unit still runs as root. All other counts this run are void. |
@@ -243,3 +243,5 @@ will false-fire on a sweep that starts after ~11:15 UTC).
 - **Pulling two production levers in one turn.** One, then acknowledgement.
 - **Naming the path in a `gunicorn_worker_timeouts` detail as the culprit** without
   reading the `WORKER TIMEOUT` lines' own timestamps.
+- **Reading "succeeded 0 times" as broken without checking the task's cadence.**
+  Some units of work are larger than the 24h window.

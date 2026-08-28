@@ -309,6 +309,17 @@ realm to be succeeding, so it cannot fire on a task that is uniformly mid-pass.
 - **EU correlation duration is still unmeasured.** After the fan-out lands, the
   three per-metric durations for EU are the first honest measurement of what was
   censored at 900s. Record them; they are the input to any future budget work.
+- **The per-realm alert surface tripled: watch it for a week.** One task x 3
+  realms became three tasks x 3 realms, and `celery_task_realm_failing` fires on a
+  realm merely *absent* from the success rows, not only one that failed. Each
+  metric task's guaranteed dispatch is one Beat fire per realm per 24h, so a
+  per-metric `_run_locked_task` collision — a `startup_warm_caches_task` dispatch
+  landing within the 900s lock TTL of the Beat one — makes the Beat run skip, and
+  a skip logs no `Finished` line. Usually the earlier run's own line covers the
+  same window, which is why this is a watch item and not a defect. Validation
+  step 5 checks it once; check it again across the first week before trusting the
+  quiet.
+
 - **`gunicorn_error_paths` invites misattribution.** Reporting the timeout
   timestamps alongside the paths would let a reader see a cluster without
   reaching for the journal. Not done here; scoped to the digest writer.
