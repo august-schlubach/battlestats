@@ -258,6 +258,22 @@ The measurement in §2 refutes it — ranked alone needs ~450s, so a fan-out
 relocates the failure instead of removing it. Recorded because the same wrong
 instinct will recur.
 
+> **SUPERSEDED 2026-08-28 — the fan-out shipped, and this note is why it took
+> two days.** The objection above was sound *against the budget that existed
+> when it was written*: with `TASK_OPTS`' 540s per-metric soft limit, splitting
+> a 450s metric out really does relocate the failure. **D2 itself removed that
+> premise** by raising the per-metric budget to 780s, ~1.56x the worst measured
+> success — at which point each metric fits on its own and only the *combined*
+> task does not. D2 gave the combined warmer 900s for three components budgeted
+> at 780s each, i.e. 1.15x the budget of one of its own parts, and EU
+> soft-limited on every run from 08-27.
+>
+> The lesson worth keeping is narrower than "fan-out was wrong": **a decision
+> recorded against one set of constants does not survive a change to those
+> constants made in the same commit.** Re-read a "not chosen" note against the
+> numbers as they end up, not as they were when the note was drafted.
+> Implementation: `agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md`.
+
 **Deliberately not done:** raising `RESOURCE_TASK_LOCK_TIMEOUT`. It is shared by
 many unrelated tasks; the budgets fit under the existing TTLs.
 

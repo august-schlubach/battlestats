@@ -323,6 +323,31 @@ Order the response by the condition class:
    `/crawl-yield`, `/recapture`) for the interpretation discipline before
    drawing a conclusion.
 
+### Long-cycle tasks are exempt from the zero-success rule (2026-08-28)
+
+`LONG_CYCLE_TASKS` in `daily_ops_email.py` is a frozenset of task names skipped
+by the `celery_task_failing` rule. One member today:
+`warships.tasks.crawl_all_clans_task`.
+
+The zero-success discriminator assumes the 24h window bounds the unit of work.
+For the clan crawl it does not: a full pass takes ~12-18h against a 20700s
+(5h45m) per-dispatch soft limit, so truncation is the designed steady state and a
+pass completes every 2-4 dispatches. On the droplet journal for the seven days to
+2026-08-28 there were three completions, so **4 of those 7 days** held zero
+successes and at least one `SoftTimeLimitExceeded` — the exact shape the rule
+alerts on. That is the same failure mode the any-failure rule had with cache
+warmers, one level up: a rule that fires four mornings in seven stops being read.
+
+**The exemption costs something and the cost is not hedged.** `celery_task_realm_failing`
+only fires when at least one realm is succeeding, so an exempt task broken in
+*every* realm trips neither Celery rule. Cover falls entirely to
+`snapshot_stale:crawl-yield:<realm>` at 168h — seven days of latency on a rare
+total failure, traded against a false positive four days in seven. Widen the set
+only for a task that (a) has a unit of work larger than the window **and** (b) is
+already covered by a staleness rule on its output.
+
+Runbook: `agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md`.
+
 ## Test coverage
 
 `server/warships/tests/test_daily_ops_email.py`, 47 tests. Notably:

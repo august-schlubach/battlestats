@@ -151,6 +151,16 @@ table and red flags, which is where a future investigation will read it.
 
 ## Decisions
 
+0. **This reverses a decision recorded two days earlier, deliberately.**
+   `runbook-correlation-warm-budget-and-per-realm-alerting-2026-08-26.md` D2 lists
+   fan-out under "Not chosen", on the grounds that "ranked alone needs ~450s, so a
+   fan-out relocates the failure instead of removing it". That was correct against
+   the budget in force when it was written — `TASK_OPTS`' 540s. **D2 itself raised
+   the per-metric budget to 780s in the same commit**, which removes the premise:
+   at 780s each metric fits alone, and only the combined task does not. The 08-26
+   runbook carries a superseding note pointing here. Read a "not chosen" note
+   against the constants as they end up, not as they were when it was drafted.
+
 1. **F1: fan out, do not add headroom.** Add the missing per-metric task for
    `win_rate_survival`, then convert `warm_player_correlations_task` from a
    serial in-process runner into a dispatcher. Its own duration becomes
@@ -272,20 +282,45 @@ realm to be succeeding, so it cannot fire on a task that is uniformly mid-pass.
   non-exempt task still does; `celery_task_realm_failing` still fires for an
   exempt task when one realm succeeds and another does not.
 
+## Implementation status (2026-08-28)
+
+Landed on `fix/correlation-fanout-and-ops-alert-skill`, not yet merged or
+deployed. Prod is on **5.6.2**; `main` is on 5.6.3 (docs-only), so the first
+deploy from this branch carries that bump too.
+
+| item | file | state |
+|---|---|---|
+| I1 `warm_player_wr_survival_correlation_task` | `server/warships/tasks.py` | done |
+| I1 route to `background` | `server/battlestats/settings.py` | done |
+| I2 dispatcher | `server/warships/tasks.py` | done |
+| I3 `LONG_CYCLE_TASKS` | `server/scripts/daily_ops_email.py` | done |
+| I4 tests | `test_correlation_warm_budgets.py`, `test_daily_ops_email.py` | done |
+| F3 | — | no change, by decision |
+
+**One defect surfaced during implementation, not present in the plan.** The lock
+value is `self.request.id`, which is `None` whenever the task body runs outside a
+Celery request, while `queue_warm_player_correlations` gates on that value being
+**truthy**. A stored `None` is therefore a lock that exists and gates nothing.
+Pre-existing, and harmless in production where `request.id` is always set, but it
+made the "lock outlives the dispatch" test fail for the wrong reason. Hardened to
+`self.request.id or "in-flight"`.
+
 ## Validation
 
 1. `cd server && DJANGO_SECRET_KEY=k DB_ENGINE=sqlite3 python -m pytest warships/tests/ --nomigrations --tb=short`
-2. `/release-gate`
-3. Deploy backend; bump VERSION (`fix:` → patch) and **redeploy the client**, per
+   — **PASSED 2026-08-28: 1293 passed, 2 skipped, 6 subtests passed.**
+   `server/scripts/check_env_drift.sh`: no actionable drift (checks 1 and 3 clean).
+2. `/release-gate` — **pending**
+3. **Pending.** Deploy backend; bump VERSION (`fix:` → patch) and **redeploy the client**, per
    the standing `NEXT_PUBLIC_APP_VERSION` build-time rule.
-4. Confirm EU completes. The Beat slot is `player-correlation-warmer-eu`; watch
+4. **Pending.** Confirm EU completes. The Beat slot is `player-correlation-warmer-eu`; watch
    the per-metric tasks, not the dispatcher:
    ```bash
    ssh root@battlestats.online 'journalctl -u battlestats-celery-background \
      --since "6 hours ago" --no-pager | grep -E "correlation_task.*(realm=eu|succeeded|SoftTime)"'
    ```
    Success = three `succeeded` lines for `realm=eu`, none over 780s.
-5. Confirm the digest still sees them per realm. The service-health snapshot is
+5. **Pending.** Confirm the digest still sees them per realm. The service-health snapshot is
    written at 11:00 UTC, so this is a **next-day** check:
    ```bash
    ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && \
@@ -293,7 +328,7 @@ realm to be succeeding, so it cannot fire on a task that is uniformly mid-pass.
    ```
    Expect the three metric task names present with per-realm successes, and no
    `celery_task_failing:warships.tasks.crawl_all_clans_task`.
-6. Confirm the crawl is genuinely healthy, independent of the exemption: a
+6. **Pending.** Confirm the crawl is genuinely healthy, independent of the exemption: a
    completion for eu by ~08-29 and a fresh crawl-yield snapshot.
    ```bash
    ssh root@battlestats.online 'journalctl -u battlestats-celery-crawls \
