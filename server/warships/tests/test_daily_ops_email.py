@@ -824,6 +824,61 @@ class ServiceHealthConditions(OpsAlertTestCase):
         self.assertIn("SoftTimeLimitExceeded", detail)
         self.assertIn("battlestats-celery-background", detail)
 
+    def test_a_long_cycle_task_with_zero_successes_does_not_trip(self):
+        """The clan crawl's unit of work is larger than the alert's window.
+
+        crawl_all_clans_task's own comment puts a full pass at ~12-18h against a
+        20700s (5h45m) per-dispatch soft limit, so truncation is the designed
+        steady state and a pass completes every 2-4 dispatches. Measured on the
+        droplet journal for the 7 days to 2026-08-28: three completions, so on 4
+        of those 7 days the window held zero successes and at least one
+        SoftTimeLimitExceeded -- the exact shape this rule alerts on. Firing four
+        mornings in seven is how a digest stops being read.
+        """
+        self.rewrite_service_health(
+            celery_task_failures=[{
+                "unit": "battlestats-celery-crawls",
+                "task": "warships.tasks.crawl_all_clans_task",
+                "exception": "SoftTimeLimitExceeded",
+                "count": 4,
+                "succeeded": 0,
+            }],
+            celery_failure_total=4,
+        )
+        self.assertEqual(self.codes(), [])
+
+    def test_the_exemption_does_not_leak_to_other_tasks(self):
+        """Narrow by name, not by exception or by unit.
+
+        SoftTimeLimitExceeded on the crawls unit is not itself the exemption;
+        only the named long-cycle task is.
+        """
+        self.rewrite_service_health(
+            celery_task_failures=[{
+                "unit": "battlestats-celery-crawls",
+                "task": "warships.tasks.crawl_clan_batch_task",
+                "exception": "SoftTimeLimitExceeded",
+                "count": 4,
+                "succeeded": 0,
+            }],
+            celery_failure_total=4,
+        )
+        self.assertIn(
+            "celery_task_failing:warships.tasks.crawl_clan_batch_task",
+            self.codes(),
+        )
+
+    def test_the_long_cycle_list_names_the_crawl(self):
+        """Pins the membership itself.
+
+        An exemption is a silence. If a future edit widens this set, the widening
+        should have to change a test that says so out loud.
+        """
+        self.assertEqual(
+            doe.LONG_CYCLE_TASKS,
+            frozenset({"warships.tasks.crawl_all_clans_task"}),
+        )
+
     def test_gunicorn_worker_timeouts_trip(self):
         self.rewrite_service_health(gunicorn_worker_timeouts=5)
         self.assertIn("gunicorn_worker_timeouts", self.codes())

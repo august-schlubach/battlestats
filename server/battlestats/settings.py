@@ -345,6 +345,11 @@ CELERY_TASK_ROUTES = {
     # 2026-08-26 and so ran a ~400s population aggregation on `default`,
     # the request-adjacent lane shared with crawl dispatchers and watchdogs.
     'warships.tasks.warm_player_clan_battle_wr_battles_correlation_task': {'queue': 'background'},
+    # The third of the trio, split out of warm_player_correlations_task on
+    # 2026-08-28. Routed with its siblings for the same reason they are pinned
+    # as a set: an unrouted population aggregation lands on `default`, the
+    # request-adjacent lane.
+    'warships.tasks.warm_player_wr_survival_correlation_task': {'queue': 'background'},
     'warships.tasks.warm_ships_by_pct_task': {'queue': 'background'},
     'warships.tasks.warm_ships_bucket_task': {'queue': 'background'},
     'warships.tasks.warm_top_ships_treemap_task': {'queue': 'background'},

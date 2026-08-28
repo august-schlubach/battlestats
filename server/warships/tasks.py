@@ -1931,26 +1931,114 @@ def warm_player_distributions_task(self, realm=DEFAULT_REALM):
         cache.delete(lock_key)
 
 
+@app.task(bind=True, **CORRELATION_METRIC_WARM_TASK_OPTS)
+def warm_player_wr_survival_correlation_task(self, realm=DEFAULT_REALM):
+    """The third population correlation, previously reachable only in-process.
+
+    Its two siblings have had their own task since before 2026-08-26; this one
+    did not, which is why `warm_player_correlations_task` had to run all three
+    serially and could never fit its own budget on the largest realm.
+
+    No dispatch-key cleanup in a `finally` here: the siblings clear a *refresh
+    dispatch* key only because a cold-cache user-traffic path sets one. There is
+    no such path for win-rate/survival, so a key here would be dead code.
+    """
+    from warships.data import warm_player_wr_survival_correlation
+
+    logger.info(
+        "Starting warm_player_wr_survival_correlation_task realm=%s", realm)
+    result = _run_locked_task(
+        "warm_player_wr_survival_correlation",
+        realm,
+        self.request.id,
+        lambda: warm_player_wr_survival_correlation(realm=realm),
+    )
+    if isinstance(result, dict) and result.get("status") != "skipped":
+        # EXACT format, not cosmetic: snapshot_service_health.sh greps
+        # `Finished [a-z_0-9]+ realm=[a-z]+` and prefixes the captured name with
+        # `warships.tasks.` to build the digest's per-realm success axis. Any
+        # other phrasing makes this task invisible to `celery_task_realm_failing`.
+        # Guarded on not-skipped for the same reason the siblings are: a skip
+        # logged as a finish is a success the digest never earned.
+        logger.info(
+            "Finished warm_player_wr_survival_correlation_task realm=%s", realm)
+    return result
+
+
 @app.task(bind=True, **PLAYER_CORRELATIONS_WARM_TASK_OPTS)
 def warm_player_correlations_task(self, realm=DEFAULT_REALM):
-    from warships.data import warm_player_correlations
+    """Dispatcher, not a runner, since 2026-08-28.
 
+    It used to call `warm_player_correlations()`, which runs three population
+    correlations SERIALLY in-process. Each of those is separately budgeted at
+    CORRELATION_METRIC_WARM_TASK_OPTS' 780s soft limit on measured 389-500s work,
+    while this task had 900s for all three -- 1.15x the budget of one of its own
+    components. EU, the largest realm, soft-limited on every run from 2026-08-27;
+    na (515s) and asia (805s) fitted only because their metrics are cheaper.
+
+    Headroom was the wrong lever: every EU run was censored at 900s so the tail
+    was unmeasurable, and `soft < hard <= lock TTL` against
+    CORRELATION_WARM_LOCK_TIMEOUT (1200s) left no room to size it honestly.
+    Fan-out needs no measurement, and it is the same call `startup_warm_caches_task`
+    got in 55b946f -- separable work is split, irreducible work gets headroom.
+
+    Two invariants this must preserve, both load-bearing:
+
+    1. THE LOCK OUTLIVES THE DISPATCH. `queue_warm_player_correlations` gates
+       cold-cache user traffic on this lock being held. A dispatcher that cleared
+       it in a `finally` after ~0s would leave every player-page load on a cold
+       cache free to re-enqueue -- the 4581-message pileup shape that function's
+       comment cites. So the lock is released ONLY when dispatch itself failed;
+       otherwise it expires on its own TTL.
+    2. NO `Finished <name> realm=<realm>` LINE. The service-health writer builds
+       the digest's per-realm success axis from exactly that string. A dispatcher
+       that emitted one would be tallied as the realm's success and
+       `celery_task_realm_failing` would read green while all three metrics failed.
+
+    Runbook: agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md
+    """
     logger.info("Starting warm_player_correlations_task realm=%s", realm)
 
     lock_key = _correlation_warm_lock_key(realm)
-    if not cache.add(lock_key, self.request.id, timeout=CORRELATION_WARM_LOCK_TIMEOUT):
+    # `or` guard, not decoration: `queue_warm_player_correlations` gates on
+    # `cache.get(lock_key)` being TRUTHY, so a falsy stored value is a lock that
+    # exists and gates nothing. `self.request.id` is None whenever the task body
+    # runs outside a Celery request -- a direct call, a test -- and storing that
+    # would silently reopen the cold-cache enqueue path this lock exists to shut.
+    if not cache.add(lock_key, self.request.id or "in-flight",
+                     timeout=CORRELATION_WARM_LOCK_TIMEOUT):
         logger.info(
             "Skipping warm_player_correlations_task because another correlation warm is already running"
         )
         return {"status": "skipped", "reason": "already-running"}
 
+    metrics = (
+        warm_player_wr_survival_correlation_task,
+        warm_player_ranked_wr_battles_correlation_task,
+        warm_player_clan_battle_wr_battles_correlation_task,
+    )
+    dispatched = []
     try:
-        result = warm_player_correlations(realm=realm)
-        logger.info("Finished warm_player_correlations_task realm=%s: %s",
-                    realm, result)
-        return result
-    finally:
+        for metric in metrics:
+            metric.delay(realm=realm)
+            dispatched.append(metric.name)
+    except Exception as error:
+        # Broker down: releasing the lock keeps the realm from being gated for
+        # the full 1200s TTL over a dispatch that never happened.
         cache.delete(lock_key)
+        logger.warning(
+            "Correlation fan-out dispatch failed for realm=%s after %d of %d: %s",
+            realm, len(dispatched), len(metrics), error)
+        return {
+            "status": "dispatch-failed",
+            "realm": realm,
+            "dispatched": dispatched,
+        }
+
+    # Deliberately NOT "Finished ... realm=<realm>" -- see invariant 2 above.
+    logger.info(
+        "Dispatched %d correlation warmers for realm=%s", len(dispatched), realm)
+    return {"status": "dispatched", "realm": realm, "dispatched": dispatched}
 
 
 @app.task(bind=True, **TASK_OPTS)

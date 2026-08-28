@@ -387,6 +387,27 @@ DEFAULT_THRESHOLDS: dict[str, float] = {
     "gunicorn_worker_timeouts_min": 2,
 }
 
+# Tasks whose unit of work spans MORE THAN ONE dispatch by design, so a 24h
+# window legitimately contains zero successes.
+#
+# The zero-success discriminator below assumes the measurement window bounds the
+# work. For these it does not, and the rule then fires on healthy operation the
+# same way an any-failure rule fired on cache warmers that fall back to
+# `:published` by design. crawl_all_clans_task's own comment puts a full pass at
+# ~12-18h against a 20700s (5h45m) per-dispatch soft limit, so truncation is the
+# designed steady state and a pass completes every 2-4 dispatches. Measured on
+# the droplet journal for the 7 days to 2026-08-28: three completions, so 4 of
+# those 7 days contained zero successes and at least one SoftTimeLimitExceeded.
+#
+# The cost, stated plainly: a task exempted here that is broken in EVERY realm
+# trips neither Celery rule, because the per-realm rule requires at least one
+# succeeding realm. Cover therefore falls entirely to a staleness rule on the
+# task's OUTPUT, which is the honest instrument for work this shape:
+#   crawl_all_clans_task -> snapshot_stale:crawl-yield:<realm> at 168h.
+# That is 7 days of latency on a rare total failure, traded against a false
+# positive four days in seven.
+LONG_CYCLE_TASKS = frozenset({"warships.tasks.crawl_all_clans_task"})
+
 # Family cadence labels used in alert text.
 FAMILY_CADENCE = {
     "observation-floor": "daily 04:30 UTC",
@@ -629,6 +650,10 @@ def _evaluate_service_health(svc: dict) -> list[dict]:
         if isinstance(ok, (int, float)) and ok > 0:
             continue  # flaky, not broken: it is still completing runs
         task = row.get("task") or "<unknown task>"
+        if task in LONG_CYCLE_TASKS:
+            # Zero successes in 24h is normal operation here, not a fault; the
+            # staleness rule on this task's output owns the real failure.
+            continue
         out.append(_cond(
             f"celery_task_failing:{task}",
             f"{task} raised {row.get('exception') or 'an exception'} "

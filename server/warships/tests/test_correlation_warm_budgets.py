@@ -25,13 +25,17 @@ from django.test import TestCase
 
 class CorrelationWarmRoutingTests(TestCase):
     def test_both_per_metric_correlation_warmers_route_to_background(self):
-        # Pinned as a PAIR so the two cannot drift apart again: the ranked one
-        # was routed and the clan-battle one was not, which is the same defect
-        # class as test_ship_standings_warm_chain_routes_to_background.
+        # Pinned as a SET so they cannot drift apart again: the ranked one was
+        # routed and the clan-battle one was not, which is the same defect class
+        # as test_ship_standings_warm_chain_routes_to_background. The wr-survival
+        # task joined on 2026-08-28 when the combined warmer was split; a new
+        # member of this trio arriving unrouted would reproduce the 2026-08-26
+        # defect exactly.
         routes = settings.CELERY_TASK_ROUTES
         for task in (
             "warships.tasks.warm_player_ranked_wr_battles_correlation_task",
             "warships.tasks.warm_player_clan_battle_wr_battles_correlation_task",
+            "warships.tasks.warm_player_wr_survival_correlation_task",
         ):
             self.assertEqual(
                 routes.get(task, {}).get("queue"), "background",
@@ -72,8 +76,15 @@ class CorrelationWarmBudgetTests(TestCase):
             "measured 389-500s on every realm; 540s was not enough")
 
     def test_combined_budget_exceeds_the_per_metric_budget(self):
-        # The combined task runs all three correlations serially, so it cannot
-        # have a smaller budget than one of them.
+        # The original reason -- "it runs all three serially" -- died on
+        # 2026-08-28 when warm_player_correlations_task became a dispatcher. It
+        # was never a sufficient reason anyway: 900s for three 780s components
+        # is what made EU soft-limit on every run.
+        #
+        # The assertion is kept for a different reason. The combined task's
+        # budget is now slack it should never need, and the ordering is the cheap
+        # way to catch someone "tidying" it down toward the per-metric number as
+        # though the two still measured comparable work.
         from warships.tasks import (
             CORRELATION_METRIC_WARM_TASK_OPTS, PLAYER_CORRELATIONS_WARM_TASK_OPTS,
         )
@@ -88,6 +99,9 @@ class CorrelationWarmBudgetTests(TestCase):
             tasks.CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"])
         self.assertEqual(
             tasks.warm_player_clan_battle_wr_battles_correlation_task.soft_time_limit,
+            tasks.CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"])
+        self.assertEqual(
+            tasks.warm_player_wr_survival_correlation_task.soft_time_limit,
             tasks.CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"])
         self.assertEqual(
             tasks.warm_player_correlations_task.soft_time_limit,
@@ -125,3 +139,134 @@ class CorrelationWarmLockScopeTests(TestCase):
             hits, [],
             f"lock scoped to the literal 'population' at tasks.py lines {hits} "
             "is shared across every realm")
+
+
+class CorrelationFanOutTests(TestCase):
+    """`warm_player_correlations_task` is a dispatcher since 2026-08-28.
+
+    It ran three population correlations serially in-process under a 900s budget
+    while each of those is separately budgeted at 780s, so EU -- the largest
+    realm -- soft-limited on every run from 2026-08-27. Fan-out rather than
+    headroom, the same call 55b946f made for `startup_warm_caches_task`.
+
+    Runbook: agents/runbooks/runbook-ops-alert-remediation-2026-08-28.md
+    """
+
+    METRICS = (
+        "warm_player_wr_survival_correlation_task",
+        "warm_player_ranked_wr_battles_correlation_task",
+        "warm_player_clan_battle_wr_battles_correlation_task",
+    )
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_it_dispatches_all_three_metrics_for_the_realm(self):
+        from unittest import mock
+        from warships import tasks
+
+        with mock.patch.multiple(
+            tasks,
+            **{m: mock.DEFAULT for m in self.METRICS},
+        ) as patched:
+            result = tasks.warm_player_correlations_task(realm="eu")
+
+        for name in self.METRICS:
+            patched[name].delay.assert_called_once_with(realm="eu")
+        self.assertEqual(result["status"], "dispatched")
+
+    def test_the_lock_outlives_the_dispatch(self):
+        """The gate `queue_warm_player_correlations` reads must still be held.
+
+        THE LOAD-BEARING ONE. That function skips a cold-cache user-traffic
+        enqueue while this lock is present. A dispatcher that cleared it in a
+        `finally` after ~0s would let every player-page load on a cold cache
+        enqueue another fan-out -- the 4581-message pileup shape its comment
+        cites. The lock must expire on its TTL, not be deleted on success.
+        """
+        from unittest import mock
+        from django.core.cache import cache
+        from warships import tasks
+
+        with mock.patch.multiple(
+            tasks,
+            **{m: mock.DEFAULT for m in self.METRICS},
+        ):
+            tasks.warm_player_correlations_task(realm="eu")
+
+        # Truthy, not merely present: the gate below reads it with `cache.get`
+        # and a truthiness test, so a stored None is a lock that gates nothing.
+        self.assertTrue(
+            cache.get(tasks._correlation_warm_lock_key("eu")),
+            "dispatcher released the lock the cold-cache gate depends on")
+        self.assertEqual(
+            tasks.queue_warm_player_correlations(realm="eu"),
+            {"status": "skipped", "reason": "already-running"})
+
+    def test_a_held_lock_skips_without_dispatching(self):
+        from unittest import mock
+        from django.core.cache import cache
+        from warships import tasks
+
+        cache.add(tasks._correlation_warm_lock_key("eu"), "someone-else", timeout=60)
+        with mock.patch.multiple(
+            tasks,
+            **{m: mock.DEFAULT for m in self.METRICS},
+        ) as patched:
+            result = tasks.warm_player_correlations_task(realm="eu")
+
+        self.assertEqual(result, {"status": "skipped", "reason": "already-running"})
+        for name in self.METRICS:
+            patched[name].delay.assert_not_called()
+
+    def test_a_broker_failure_releases_the_lock(self):
+        """A dispatch that never happened must not gate the realm for 1200s."""
+        from unittest import mock
+        from django.core.cache import cache
+        from warships import tasks
+
+        with mock.patch.multiple(
+            tasks,
+            **{m: mock.DEFAULT for m in self.METRICS},
+        ) as patched:
+            patched[self.METRICS[0]].delay.side_effect = OSError("broker down")
+            result = tasks.warm_player_correlations_task(realm="eu")
+
+        self.assertEqual(result["status"], "dispatch-failed")
+        self.assertIsNone(cache.get(tasks._correlation_warm_lock_key("eu")))
+
+    def test_the_dispatcher_emits_no_per_realm_success_line(self):
+        """`Finished <task> realm=<r>` is the digest's per-realm success axis.
+
+        `snapshot_service_health.sh` greps exactly that string and prefixes the
+        captured name with `warships.tasks.`. A dispatcher that logged one would
+        be tallied as the realm's success, and `celery_task_realm_failing` would
+        read green while all three metrics failed -- the precise blindness the
+        per-realm axis was added on 2026-08-26 to remove.
+        """
+        import inspect
+        import re
+        from warships import tasks
+
+        source = inspect.getsource(tasks.warm_player_correlations_task)
+        hits = [
+            line.strip() for line in source.splitlines()
+            if re.search(r'"Finished \w+ realm=%s', line)
+        ]
+        self.assertEqual(
+            hits, [],
+            "dispatcher emits a per-realm success line the digest will believe")
+
+    def test_each_metric_task_emits_one(self):
+        """The counterpart: the signal must have MOVED, not vanished."""
+        import inspect
+        import re
+        from warships import tasks
+
+        for name in self.METRICS:
+            source = inspect.getsource(getattr(tasks, name))
+            self.assertTrue(
+                re.search(r'"Finished %s realm=%%s' % name, source),
+                f"{name} must log `Finished {name} realm=<r>` or the digest "
+                "cannot see it per realm")
