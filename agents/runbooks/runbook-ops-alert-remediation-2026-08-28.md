@@ -284,9 +284,9 @@ realm to be succeeding, so it cannot fire on a task that is uniformly mid-pass.
 
 ## Implementation status (2026-08-28)
 
-Landed on `fix/correlation-fanout-and-ops-alert-skill`, not yet merged or
-deployed. Prod is on **5.6.2**; `main` is on 5.6.3 (docs-only), so the first
-deploy from this branch carries that bump too.
+**Merged to main and deployed as v5.6.4 on 2026-08-29 04:44-04:47 UTC.** Prod had
+been on 5.6.2, so this release also carried the undeployed 5.6.3 docs bump.
+Backend release `20260829004420`, client release `20260829004630`.
 
 | item | file | state |
 |---|---|---|
@@ -310,17 +310,29 @@ made the "lock outlives the dispatch" test fail for the wrong reason. Hardened t
 1. `cd server && DJANGO_SECRET_KEY=k DB_ENGINE=sqlite3 python -m pytest warships/tests/ --nomigrations --tb=short`
    — **PASSED 2026-08-28: 1293 passed, 2 skipped, 6 subtests passed.**
    `server/scripts/check_env_drift.sh`: no actionable drift (checks 1 and 3 clean).
-2. `/release-gate` — **pending**
-3. **Pending.** Deploy backend; bump VERSION (`fix:` → patch) and **redeploy the client**, per
-   the standing `NEXT_PUBLIC_APP_VERSION` build-time rule.
-4. **Pending.** Confirm EU completes. The Beat slot is `player-correlation-warmer-eu`; watch
+2. `/release-gate` — **run as its two halves, not through Docker.** The
+   `run_test_suite.sh` path needs `DB_PASSWORD`, which is canonical in Pass and
+   absent from every on-disk env file, so `docker compose` cannot interpolate it
+   in a tool shell. Backend covered by step 1; frontend run natively:
+   `cd client && npm test` — **727 passed, 84 suites**. No client file changed in
+   this tranche, so the frontend half proves only that nothing regressed.
+3. **DONE 2026-08-29.** VERSION 5.6.3 → 5.6.4, tagged `v5.6.4`, both tiers
+   deployed. Footer and `current/VERSION` both serve 5.6.4;
+   `warm_player_wr_survival_correlation_task` is registered on the background
+   worker; `LONG_CYCLE_TASKS` is present in the deployed script.
+4. **Pending — the EU Beat slot (`player-correlation-warmer-eu`) had not fired
+   since the deploy.** Confirm EU completes. The Beat slot is `player-correlation-warmer-eu`; watch
    the per-metric tasks, not the dispatcher:
    ```bash
    ssh root@battlestats.online 'journalctl -u battlestats-celery-background \
      --since "6 hours ago" --no-pager | grep -E "correlation_task.*(realm=eu|succeeded|SoftTime)"'
    ```
    Success = three `succeeded` lines for `realm=eu`, none over 780s.
-5. **Pending.** Confirm the digest still sees them per realm. The service-health snapshot is
+5. **Pending, and cannot be run today.** The service-health snapshot is written
+   at 11:00 UTC, so the post-deploy dry run still reads the 2026-08-28 file and
+   still reports the *old* combined task dark on eu and asia. That is the skill's
+   own rule: the dry run reproduces a morning's verdict, it does not observe
+   recovery. Confirm the digest still sees them per realm. The service-health snapshot is
    written at 11:00 UTC, so this is a **next-day** check:
    ```bash
    ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && \
@@ -334,6 +346,13 @@ made the "lock outlives the dispatch" test fail for the wrong reason. Hardened t
    ssh root@battlestats.online 'journalctl -u battlestats-celery-crawls \
      --since "3 days ago" --no-pager | grep "Finished crawl_all_clans_task"'
    ```
+
+**Verified at deploy time:** `celery_task_failing:warships.tasks.crawl_all_clans_task`
+is gone from the dry run — the exemption works against the same snapshot that
+produced it yesterday. One unrelated condition appeared and cleared during the
+window: `snapshot_stale:observation-floor` at 24.3h, because the 04:30 cron run
+was still executing; it wrote `2026-08-29_0430Z.json` at 04:48, an 18-minute run.
+Not caused by the deploy, and it will read ~7h old at the 11:30 digest.
 
 ## Follow-ups
 
