@@ -1,6 +1,6 @@
 ---
 name: ops-alert
-description: Pull the newest battlestats ops mail from the operator's Gmail, recover the deterministic condition codes behind it, investigate each one against the right instrument, and carry the fix through to production. Use when the user says "/ops-alert", "pull the latest ops alert", "check my ops email", "what did the digest say", "investigate the alert", "did anything trip overnight", "any alerts?", or forwards an ops ALERT subject line. Mutating on the remedy path — the investigation is read-only, but fixes may be committed and deployed.
+description: Pull the newest battlestats ops mail from the operator's Gmail, recover the deterministic condition codes behind it, investigate each one against the right instrument, and carry the fix through to production. Use when the user says "/ops-alert", "pull the latest ops alert", "check my ops email", "what did the digest say", "investigate the alert", "did anything trip overnight", "any alerts?", or forwards an ops ALERT subject line. Mutating on the remedy path — the investigation is read-only, but fixes may be committed and deployed, and a handled mail is marked read and archived so the inbox stays a true to-do queue.
 ---
 
 # ops-alert
@@ -8,7 +8,8 @@ description: Pull the newest battlestats ops mail from the operator's Gmail, rec
 Reads the morning mail from the `battlestats-ops-digest` timer, converts it back
 into the **deterministic condition codes** that caused it, investigates each one
 with the instrument that owns it, and — unlike every sibling ops skill — carries
-the remedy through under the autonomy rules below.
+the remedy through under the autonomy rules below, ending by marking the mail
+read and archiving it so the inbox keeps meaning "not yet dealt with".
 
 The digest is **exception-only** (`server/scripts/daily_ops_email.py`, systemd
 `battlestats-ops-digest.timer`, 11:30 UTC ±300s). Python's `evaluate()` decides
@@ -231,6 +232,49 @@ State plainly when a condition cleared on its own, and when one is a known
 false-fire (the recapture 24h rule has only 40–80 minutes of healthy margin and
 will false-fire on a sweep that starts after ~11:15 UTC).
 
+### 8. Close the loop in the mailbox
+
+**Not optional, and not cosmetic.** The operator's only at-a-glance signal for
+"has this been dealt with" is whether the mail is still sitting unread in the
+inbox. A handled alert left there is indistinguishable from one nobody has
+opened, so the next morning's mail arrives on top of a queue that no longer means
+anything. Finish the job in the mailbox, then say in the report that you did.
+
+```
+mcp__mailcap__gmail_modify_message  message_id: <id>  remove_label_ids: ["UNREAD", "INBOX"]
+```
+
+Removing `INBOX` **archives**; it does not delete. The mail stays in All Mail and
+stays findable by the same `from:sysop@tamezz.com subject:ops` search, so nothing
+about step 1 changes for a future run.
+
+**Archive only from a terminal state.** One of:
+
+- the remedy shipped (or the condition proved to be a false fire / an artifact
+  that cannot recur), or
+- it is a true positive with no safe same-session fix, and the report names the
+  next step.
+
+**Do not archive** a run you abandoned midway, one blocked waiting on the user's
+acknowledgement for a production lever, or one where you could not reach the
+droplet. Leave it unread: that is exactly the case the inbox signal exists for.
+Archiving early makes the mailbox lie in the one direction that costs something.
+
+The other two mail types:
+
+| Subject | Action |
+|---|---|
+| `ops heartbeat: all clear` | Mark read and archive as soon as you have noted its date. It is proof-of-life, not a task. |
+| `daily ops email FAILED` | Archive **only after the digest itself is fixed and a dry run returns a real verdict.** Until then the reporting path is down and the mail is the only thing saying so. |
+
+Archiving loses no audit trail. Per step 1 the mailbox was never the send record:
+`journalctl -u battlestats-ops-digest` is, and it is unaffected.
+
+If several older ops mails are still in the inbox, do not sweep them on the way
+past. Archive one only when you can point at the evidence it was remediated
+(a shipped version, a runbook, a commit); otherwise name it in the report and
+leave it for the operator to judge.
+
 ## Red flags
 
 - **Reading the subject line as the condition list.** It is LLM prose;
@@ -245,3 +289,8 @@ will false-fire on a sweep that starts after ~11:15 UTC).
   reading the `WORKER TIMEOUT` lines' own timestamps.
 - **Reading "succeeded 0 times" as broken without checking the task's cadence.**
   Some units of work are larger than the 24h window.
+- **Finishing the remediation and leaving the mail unread in the inbox.** The
+  operator reads the inbox as the to-do queue; a handled alert left in it is
+  indistinguishable from an ignored one. Step 8.
+- **Archiving before the remedy landed**, or while waiting on an acknowledgement
+  for a production lever. The inbox signal only has value in that direction.
