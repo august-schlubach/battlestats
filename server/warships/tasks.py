@@ -46,17 +46,35 @@ SHIP_PCT_WARM_TASK_OPTS = {
 # limit, so it soft-limited on roughly two thirds of runs -- eu 1/8, asia 1/3,
 # na 2/4. This is the OPPOSITE call from startup_warm_caches_task, which was
 # twelve separable operations and was split rather than given headroom.
-# Every killed run is censored at 540s, so the true tail is unknown; 780s is
-# ~1.56x the slowest SUCCESSFUL run, not a hair over it.
-# Invariant: soft < hard <= lock TTL, and _run_locked_task's TTL is
-# RESOURCE_TASK_LOCK_TIMEOUT (900s).
+# Every killed run is censored at 540s, so the true tail is unknown; 780s was
+# ~1.56x the slowest SUCCESSFUL run in that sample, not a hair over it.
+#
+# 2026-08-29: that sample was drawn while the three metrics shared one budget, so
+# it understated the heaviest of them. Split out by the 08-26 fan-out, the eu
+# `ranked_wr_battles` aggregation alone runs 708-757s on its SUCCESSFUL passes and
+# soft-limited SIX times in one day (05:21, 09:00, 13:07, 14:07, 14:39, 14:54)
+# before completing at 15:08 -- ~80 minutes of a 3-slot background pool spent
+# producing nothing, then re-queued by the on-view path each time the fresh key
+# stayed cold. Raising the budget REDUCES background occupancy here; it does not
+# add to it. eu is the tail because its tracked ranked population is 102.5k
+# against na 57.5k and asia 71.9k; na (600s) and asia (597s) gain headroom they
+# do not currently need. The other two metrics are not close: eu wr_survival is
+# ~2s and eu clan_battle_wr_battles ~48s.
+#
+# Invariant: soft < hard <= lock TTL. _run_locked_task's DEFAULT TTL is
+# RESOURCE_TASK_LOCK_TIMEOUT (900s), which is why these three pass an explicit
+# CORRELATION_METRIC_WARM_LOCK_TIMEOUT (1320s) -- a soft limit above the lock TTL
+# would let the lock lapse mid-run and the on-view dispatch start a second
+# identical 20-minute aggregation on the same 3-slot pool.
 CORRELATION_METRIC_WARM_TASK_OPTS = {
-    "time_limit": 14 * 60,        # 840s hard
-    "soft_time_limit": 13 * 60,   # 780s soft
+    "time_limit": 20 * 60,        # 1200s hard
+    "soft_time_limit": 18 * 60,   # 1080s soft
     "ignore_result": True,
 }
-# The combined warmer runs all three correlations serially, so it needs more than
-# any one of them. Its lock is CORRELATION_WARM_LOCK_TIMEOUT (1200s).
+# The parent warmer has been a pure DISPATCHER since 2026-08-28 (it fans the three
+# metrics out onto the background queue and returns in ~5ms), so this budget is
+# now vestigial headroom rather than a real ceiling. Its lock is
+# CORRELATION_WARM_LOCK_TIMEOUT (1200s).
 PLAYER_CORRELATIONS_WARM_TASK_OPTS = {
     "time_limit": 17 * 60,        # 1020s hard
     "soft_time_limit": 15 * 60,   # 900s soft
@@ -121,11 +139,19 @@ RANKED_OBSERVATION_REFRESH_STALE_AFTER_SECONDS = 15 * 60
 CLAN_BATTLE_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_REFRESH_DISPATCH_TIMEOUT = 15 * 60
 EFFICIENCY_SNAPSHOT_REFRESH_DISPATCH_TIMEOUT = 15 * 60
-PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
-PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 15 * 60
+# Enqueue dedup for the on-view correlation refresh. The task clears these in its
+# `finally`, so the TTL is only the safety net for a run that dies without
+# unwinding -- but it must still outlive the task's hard time_limit (1200s), or a
+# second enqueue lands while the first is mid-aggregation.
+PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 20 * 60
+PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT = 20 * 60
 BROKER_DISPATCH_FAILURE_COOLDOWN = 60
 DISTRIBUTION_WARM_LOCK_TIMEOUT = 15 * 60
 CORRELATION_WARM_LOCK_TIMEOUT = 20 * 60
+# Per-metric correlation warms outlive RESOURCE_TASK_LOCK_TIMEOUT (900s), so they
+# carry their own lock TTL. It must OUTLIVE their hard time_limit (1200s) or a
+# slow eu pass could be duplicated by the on-view dispatch path.
+CORRELATION_METRIC_WARM_LOCK_TIMEOUT = 22 * 60
 CORRELATION_WARM_DISPATCH_TIMEOUT = 30  # Matches landing — coalesces cold-cache fanout
 # Coalesces the cold-cache fanout when a window-rotation gap or Redis eviction
 # leaves the treemap / tier-type fresh keys cold and the published fallback is
@@ -772,9 +798,19 @@ def _crawl_heartbeat_is_fresh(heartbeat, now_ts: float) -> bool:
         return False
 
 
-def _run_locked_task(task_name: str, resource_id: object, request_id: str, callback):
+def _run_locked_task(task_name: str, resource_id: object, request_id: str, callback,
+                     lock_timeout: int = None):
+    """Run `callback` under a per-(task, resource) lock.
+
+    `lock_timeout` defaults to RESOURCE_TASK_LOCK_TIMEOUT (900s). A task whose
+    hard `time_limit` exceeds that MUST pass its own longer TTL: otherwise the
+    lock lapses while the task is still running and a concurrent trigger starts
+    a duplicate pass.
+    """
     lock_key = _task_lock_key(task_name, resource_id)
-    if not cache.add(lock_key, request_id, timeout=RESOURCE_TASK_LOCK_TIMEOUT):
+    if lock_timeout is None:
+        lock_timeout = RESOURCE_TASK_LOCK_TIMEOUT
+    if not cache.add(lock_key, request_id, timeout=lock_timeout):
         logger.info(
             "Skipping %s for resource=%s because another refresh is already running",
             task_name,
@@ -1494,6 +1530,7 @@ def warm_player_ranked_wr_battles_correlation_task(self, realm=DEFAULT_REALM):
             self.request.id,
             lambda: warm_player_ranked_wr_battles_population_correlation(
                 realm=realm),
+            lock_timeout=CORRELATION_METRIC_WARM_LOCK_TIMEOUT,
         )
         if isinstance(result, dict) and result.get("status") != "skipped":
             logger.info("Finished warm_player_ranked_wr_battles_correlation_task realm=%s", realm)
@@ -1521,6 +1558,7 @@ def warm_player_clan_battle_wr_battles_correlation_task(self, realm=DEFAULT_REAL
             self.request.id,
             lambda: warm_player_clan_battle_wr_battles_population_correlation(
                 realm=realm),
+            lock_timeout=CORRELATION_METRIC_WARM_LOCK_TIMEOUT,
         )
         if isinstance(result, dict) and result.get("status") != "skipped":
             logger.info("Finished warm_player_clan_battle_wr_battles_correlation_task realm=%s", realm)
@@ -1952,6 +1990,7 @@ def warm_player_wr_survival_correlation_task(self, realm=DEFAULT_REALM):
         realm,
         self.request.id,
         lambda: warm_player_wr_survival_correlation(realm=realm),
+        lock_timeout=CORRELATION_METRIC_WARM_LOCK_TIMEOUT,
     )
     if isinstance(result, dict) and result.get("status") != "skipped":
         # EXACT format, not cosmetic: snapshot_service_health.sh greps

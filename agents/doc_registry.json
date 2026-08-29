@@ -4389,6 +4389,36 @@
                 "correlation-fan-out-superseded",
                 "long-cycle-exemption-removed"
             ]
+        },
+        "agents/runbooks/runbook-eu-ranked-correlation-budget-2026-08-29.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "operations",
+            "owner": "platform",
+            "aliases": [
+                "eu ranked correlation budget",
+                "warm_player_ranked_wr_battles_correlation_task soft limit",
+                "CORRELATION_METRIC_WARM_LOCK_TIMEOUT",
+                "_run_locked_task lock_timeout",
+                "correlation per-realm signal moved to the subtasks",
+                "zero-success rule misses a mostly-failing task"
+            ],
+            "tags": [
+                "ops-email",
+                "alerting",
+                "warmers",
+                "celery",
+                "soft-limit",
+                "locks",
+                "background-queue",
+                "detector-gap",
+                "gunicorn"
+            ],
+            "archive_on": [
+                "correlation-budget-resized-again",
+                "ranked-correlation-query-optimised"
+            ]
         }
     }
 }

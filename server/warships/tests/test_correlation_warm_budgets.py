@@ -49,13 +49,70 @@ class CorrelationWarmBudgetTests(TestCase):
         # soft < hard <= lock TTL. A budget that outlives its lock lets a second
         # invocation start on top of a live one. Mirrors
         # test_lock_outlives_the_hard_time_limit in the top-ships suite.
+        #
+        # The comparand is CORRELATION_METRIC_WARM_LOCK_TIMEOUT, not
+        # RESOURCE_TASK_LOCK_TIMEOUT: since 2026-08-29 the hard limit (1200s)
+        # deliberately exceeds `_run_locked_task`'s 900s DEFAULT, which is why
+        # these three tasks pass an explicit longer TTL. The pairing below is the
+        # thing that makes that safe.
         from warships.tasks import (
-            CORRELATION_METRIC_WARM_TASK_OPTS, RESOURCE_TASK_LOCK_TIMEOUT,
+            CORRELATION_METRIC_WARM_LOCK_TIMEOUT,
+            CORRELATION_METRIC_WARM_TASK_OPTS,
         )
         soft = CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"]
         hard = CORRELATION_METRIC_WARM_TASK_OPTS["time_limit"]
         self.assertLess(soft, hard)
-        self.assertLessEqual(hard, RESOURCE_TASK_LOCK_TIMEOUT)
+        self.assertLessEqual(hard, CORRELATION_METRIC_WARM_LOCK_TIMEOUT)
+
+    def test_each_metric_task_passes_the_longer_lock_ttl(self):
+        """THE LOAD-BEARING ONE for the 2026-08-29 budget raise.
+
+        `_run_locked_task` defaults to RESOURCE_TASK_LOCK_TIMEOUT (900s). These
+        tasks may now run 1200s. A task that forgets the explicit
+        `lock_timeout=` releases its gate 300s before it finishes, and the
+        on-view dispatch path can start a SECOND 20-minute eu aggregation on the
+        3-slot background pool -- the duplicate-warm class the realm-scoped lock
+        was introduced to remove on 2026-08-26.
+        """
+        import inspect
+        from warships import tasks
+
+        for name in (
+            "warm_player_ranked_wr_battles_correlation_task",
+            "warm_player_clan_battle_wr_battles_correlation_task",
+            "warm_player_wr_survival_correlation_task",
+        ):
+            source = inspect.getsource(getattr(tasks, name))
+            self.assertIn(
+                "lock_timeout=CORRELATION_METRIC_WARM_LOCK_TIMEOUT", source,
+                f"{name} runs longer than _run_locked_task's default TTL and "
+                "must pass its own")
+
+    def test_run_locked_task_defaults_to_the_resource_ttl(self):
+        # The new parameter must not have moved the default for the ~20 other
+        # callers that never pass one.
+        import inspect
+        from warships.tasks import _run_locked_task, RESOURCE_TASK_LOCK_TIMEOUT
+
+        default = inspect.signature(_run_locked_task).parameters["lock_timeout"].default
+        self.assertIsNone(default)
+        self.assertEqual(RESOURCE_TASK_LOCK_TIMEOUT, 15 * 60)
+
+    def test_on_view_dispatch_dedup_outlives_the_hard_limit(self):
+        # The task clears these keys in its `finally`, so the TTL is only the
+        # safety net -- but a net shorter than the run it guards lets a second
+        # enqueue land mid-aggregation.
+        from warships.tasks import (
+            CORRELATION_METRIC_WARM_TASK_OPTS,
+            PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT,
+            PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT,
+        )
+        hard = CORRELATION_METRIC_WARM_TASK_OPTS["time_limit"]
+        for ttl in (
+            PLAYER_RANKED_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT,
+            PLAYER_CLAN_BATTLE_WR_BATTLES_CORRELATION_REFRESH_DISPATCH_TIMEOUT,
+        ):
+            self.assertGreaterEqual(ttl, hard)
 
     def test_combined_budget_fits_under_its_lock_ttl(self):
         from warships.tasks import (
@@ -67,30 +124,33 @@ class CorrelationWarmBudgetTests(TestCase):
         self.assertLessEqual(hard, CORRELATION_WARM_LOCK_TIMEOUT)
 
     def test_per_metric_budget_clears_the_measured_worst_case(self):
-        # 500s is the slowest SUCCESSFUL run observed (na, 2026-08-26). Every
-        # killed run is censored at 540s, so the true tail is unknown and the
-        # budget needs real headroom over the measurement, not a hair.
+        # 2026-08-26 measured 389-500s per realm, but on a sample where the three
+        # metrics still shared one budget, so it understated the heaviest. Split
+        # out by the fan-out, eu `ranked_wr_battles` alone ran 708s and 757s on
+        # its two SUCCESSFUL passes of 2026-08-29 and soft-limited six times at
+        # 780s the same day. Every killed run is censored, so the true tail is
+        # still unknown; 1080s is ~1.43x the slowest observed success.
         from warships.tasks import CORRELATION_METRIC_WARM_TASK_OPTS
         self.assertGreaterEqual(
-            CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"], 750,
-            "measured 389-500s on every realm; 540s was not enough")
+            CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"], 1000,
+            "eu ranked_wr_battles succeeds at 708-757s; 780s soft-limited it "
+            "six times on 2026-08-29")
 
-    def test_combined_budget_exceeds_the_per_metric_budget(self):
-        # The original reason -- "it runs all three serially" -- died on
-        # 2026-08-28 when warm_player_correlations_task became a dispatcher. It
-        # was never a sufficient reason anyway: 900s for three 780s components
-        # is what made EU soft-limit on every run.
+    def test_the_dispatcher_budget_is_not_a_bound_on_the_metrics(self):
+        # This assertion used to read `combined > per-metric`, on the reasoning
+        # that the parent ran all three serially. That reasoning died on
+        # 2026-08-28 when `warm_player_correlations_task` became a dispatcher
+        # returning in ~5ms, and on 2026-08-29 the ordering became false when the
+        # per-metric soft limit passed 900s. Inverting it back would silently
+        # re-cap the metrics at the parent's number.
         #
-        # The assertion is kept for a different reason. The combined task's
-        # budget is now slack it should never need, and the ordering is the cheap
-        # way to catch someone "tidying" it down toward the per-metric number as
-        # though the two still measured comparable work.
-        from warships.tasks import (
-            CORRELATION_METRIC_WARM_TASK_OPTS, PLAYER_CORRELATIONS_WARM_TASK_OPTS,
-        )
-        self.assertGreater(
-            PLAYER_CORRELATIONS_WARM_TASK_OPTS["soft_time_limit"],
-            CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"])
+        # What is actually load-bearing now: the parent must have enough budget
+        # to enqueue three messages, and nothing more is claimed of it.
+        from warships.tasks import PLAYER_CORRELATIONS_WARM_TASK_OPTS
+        self.assertGreaterEqual(
+            PLAYER_CORRELATIONS_WARM_TASK_OPTS["soft_time_limit"], 60,
+            "the dispatcher only enqueues three messages, but it still needs "
+            "room for a slow broker")
 
     def test_correlation_tasks_carry_the_new_budgets(self):
         from warships import tasks
