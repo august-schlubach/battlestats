@@ -799,7 +799,7 @@ def _crawl_heartbeat_is_fresh(heartbeat, now_ts: float) -> bool:
 
 
 def _run_locked_task(task_name: str, resource_id: object, request_id: str, callback,
-                     lock_timeout: int = None):
+                     lock_timeout: int | None = None):
     """Run `callback` under a per-(task, resource) lock.
 
     `lock_timeout` defaults to RESOURCE_TASK_LOCK_TIMEOUT (900s). A task whose

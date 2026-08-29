@@ -118,9 +118,11 @@ The dispatch dedup keys moved with it for the same reason: they are cleared in
 the task's `finally`, so their TTL is only a safety net — but a net shorter than
 the run it guards lets a second enqueue land mid-aggregation.
 
-na and asia gain headroom they do not currently need. That is accepted: there is
-no per-realm budget knob, and inventing one for a single tail realm is more
-machinery than the problem earns.
+na and asia gain headroom they do not need *today* — but "comfortable slack" would
+be generous: na ranked at 600s had only ~1.3x margin against the old 780s limit
+and was next in line as its population grows. Widening all three is accepted:
+there is no per-realm budget knob, and inventing one for a single tail realm is
+more machinery than the problem earns.
 
 ### Tests
 
@@ -154,6 +156,22 @@ Beat fire and **no** `SoftTimeLimitExceeded`. A single success is not proof: eu
 succeeded once on 08-29 too. The claim is that failures stop, so look at the
 ratio across a full day.
 
+**Absence of failure is only evidence if a run occurred.** The Beat stripe is 8h
+apart rotating realms — asia 16:45, na 00:45, eu 08:45 — so eu ranked fires
+**once per 24h**, and the on-view path will not fill the gap while the fresh key
+is still warm from the 15:08 success. Run the grep immediately after the deploy
+and it reads clean for the trivial reason that no eu pass has happened. Earliest
+honest proof is **~09:00 UTC the following day**. To collapse an 18-hour wait
+into a 13-minute one, dispatch the pass by hand — work the task does daily
+anyway, and a production lever, so take it one at a time with an ack:
+
+```bash
+ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && \
+  /opt/battlestats-server/venv/bin/python manage.py shell -c \
+  "from warships.tasks import warm_player_ranked_wr_battles_correlation_task as t; \
+   print(t.delay(realm=\"eu\"))"'
+```
+
 ## Follow-ups
 
 - **1080s is ~1.43× the slowest observed success, and every killed run is
@@ -162,6 +180,17 @@ ratio across a full day.
 - **The "0 successes in 24h" rule cannot see a task that fails most runs and
   succeeds once.** A ratio-based or duration-based condition would have caught
   eu ranked on 08-27. Scoped to the digest writer, deliberately not bundled here.
+- **This change widens the skip window the 08-28 runbook flagged as a watch
+  item.** An over-budget eu run used to be killed at 780s, releasing its lock;
+  it now holds the lock to 1080s. A concurrent dispatch landing inside that wider
+  window (the `startup_warm_caches_task` path that runbook names) returns
+  `skipped`, which logs no `Finished … realm=` line, which the digest reads as a
+  realm zero. So this fix can produce a **spurious**
+  `celery_task_realm_failing:<metric>:<realm>`. Not a defect; the same detector
+  surface this runbook spent a day disambiguating, so check for a `Skipping
+  warm_player_… because another refresh is already running` line before believing
+  one.
+
 - **`gunicorn_error_paths` still invites misattribution** — carried forward
   unchanged from 08-28: reporting the timeout timestamps alongside the paths
   would let a reader see a 13-second cluster without reaching for the journal.
