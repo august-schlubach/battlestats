@@ -2,7 +2,8 @@
 
 _Created: 2026-08-13_
 _Context: the 2026-08-13 ops email reported `recapture_partial:asia` (23,100 of 30,000 scanned). Investigation found two independent causes — asia's pass has been consuming 72–95% of its 900s soft-limit budget every day for a week, and the 2026-08-12 top-ships orchestrator fan-out newly saturated the `background` worker across the recapture window._
-_Status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals. **Step 0 ran on 2026-08-14 and its gate is met** — asia went partial a second time (912s, `scanned` 28,800 of 30,000), so Step 1 is authorized and unapplied. **The precondition observation was lost and then partly reconstructed (2026-08-16):** the 2026-08-15 asia run **crashed in its truncation handler** and wrote no snapshot, so the file-based read that precondition asked for does not exist. Journal reconstruction recovers the number that mattered — **28.9 rows/s, still under asia's 35–46 baseline**, so v5.3.9 did **not** clear the contention and L1's mandate stands. See Execution log — 2026-08-15 and `runbook-recapture-truncation-handler-crash-2026-08-16.md`._
+_Status: **CLOSED 2026-08-30 — L4 APPLIED, out of order, on an explicit operator decision.** `RECAPTURE_TASK_OPTS` is now 20 min soft / 21 min hard (v5.6.7). L1 and L2b were **retired on arithmetic, not skipped**: against the three observed truncations L1 prevents 0 of 3 and L2b 1 of 3, while L4 prevents 2 of 3 — see Performed — 2026-08-30. The ladder's premise for ordering L4 last ("most load-additive", against a `background` queue at 100%) had expired: the same window measured 60% on 2026-08-30. Historical status below is retained for provenance._
+_Superseded status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals. **Step 0 ran on 2026-08-14 and its gate is met** — asia went partial a second time (912s, `scanned` 28,800 of 30,000), so Step 1 is authorized and unapplied. **The precondition observation was lost and then partly reconstructed (2026-08-16):** the 2026-08-15 asia run **crashed in its truncation handler** and wrote no snapshot, so the file-based read that precondition asked for does not exist. Journal reconstruction recovers the number that mattered — **28.9 rows/s, still under asia's 35–46 baseline**, so v5.3.9 did **not** clear the contention and L1's mandate stands. See Execution log — 2026-08-15 and `runbook-recapture-truncation-handler-crash-2026-08-16.md`._
 _QA: reviewed 2026-08-13 — see QA Notes._
 
 ## QA Notes
@@ -260,14 +261,90 @@ Aug 15 is the first pass with v5.3.9's rollup swap already in place, and it is *
 
 **Read this bound honestly.** The chunk count is a floor, not an exact figure: it counts `Bulk fetching account/info` log lines in the window, and the last chunk was in flight when the limit landed. The durability claim is also weaker than a clean partial's — the tail flush did not land, so an unknown slice of the final buffer went unstamped and retries next run. What the number is good enough for is the one question the precondition asked: *did v5.3.9 clear the contention?* It did not.
 
+### Performed — 2026-08-30 (L4 applied; L1 and L2b retired on arithmetic)
+
+The 2026-08-30 ops alert fired `recapture_partial:asia` a third time (23,600 of
+30,000 in 926.6s). Two things had changed since this ladder was written, and both
+of them move L4.
+
+**1. `duration_s` now exists**, so the budget trend is readable from the benchmark
+corpus without `journalctl` — the instrumentation gap in Follow-ups is closed. What
+it shows is not an intermittent contention problem but a chronically under-budgeted
+task. asia duration against the 900s soft limit, 2026-08-19 → 08-30:
+
+| 900.9 (T) | 814.8 | 884.7 | 770.5 | 911.6 (T) | 720.9 | 808.7 | 726.7 | 815.6 | 732.4 | 738.3 | 926.6 (T) |
+
+**Median ~800s = 89% of budget; 3 truncations in 12 days.** The near-miss detector
+proposed in Follow-ups (>85% of soft) would have been firing on most days, which is
+the correct reading of this distribution.
+
+**2. The lever ladder decides itself once the arithmetic is written down.** The
+effective scan rate is `scanned / 900`, not `scanned / duration_s` — `duration_s`
+includes the post-limit flush, and using it understates the rate.
+
+| lever | required rows/s | 08-19 (20.1) | 08-23 (30.0) | 08-30 (26.2) |
+|---|---|---|---|---|
+| L1 `RECAPTURE_LAPSED_DELAY=0.05` (+45s → 945s) | 31.7 | ✗ | ✗ | ✗ |
+| L2b `RECAPTURE_LAPSED_LIMIT_ASIA=24000` | 26.7 | ✗ | ✓ | ✗ |
+| **L4 soft 1200 / hard 1260** | **25.0** | ✗ | ✓ | ✓ |
+
+**L1 prevents none of them.** It has stood authorized-and-unpulled since 2026-08-16
+and been reconsidered at every alert since; this retires it on arithmetic rather
+than on a per-incident caveat. **L2b fails 08-30 trivially** — a day that could not
+scan 23,600 rows inside the budget cannot finish a 24,000-row pass. Neither is worth
+spending an operator ack on.
+
+**Why "most load-additive" no longer holds.** The ordering rationale was measured
+against a `background` queue at **100%** of 3 slots × 100 min (2026-08-13/08-14).
+The same window on 2026-08-30 was **10,761 / 18,000 = 60%**. The premise expired.
+Note also that a raised ceiling is not a raised runtime — this runbook's own L4
+section already establishes that only a realm which would otherwise be cut short
+consumes the new headroom, so the cost is bounded to asia holding one slot longer.
+
+**A cost this runbook did not price: flush headroom.** The 08-30 run used 26.6s of
+the old 60s gap between soft and hard (0.9s and 11.6s on the two earlier
+truncations). A flush that overruns the **hard** limit raises `TimeLimitExceeded`,
+which cannot be caught, so no snapshot is written — reproducing
+`runbook-recapture-truncation-handler-crash-2026-08-16.md`, where the next alert's
+`partial` operands came from the previous day's file. Raising soft to 20 min with a
+60s gap preserved buys that margin back at the same time.
+
+**What was NOT the finding.** Do not attribute 08-30 to queue contention: journal
+retention no longer reaches 08-23 or 08-19 (n=1), and 08-29 refutes it directly —
+that day carried a 1,061s `warm_realm_ships_pct_task` with all three slots busy and
+asia still finished in 738s. Do not attribute it to asia's upstream either. asia is
+structurally the slowest realm per row and is the last stripe, so it has the least
+headroom and truncates first; NA and EU slowed on the same day (50.3 and 40.6 rows/s,
+both near their own lows). The unmerged branch `worktree-recapture-budget-20min`
+(commit `5455114`) carries this same code change with a commit message asserting
+asia-upstream latency as the cause — that message is **wrong**, and the branch was
+deliberately not merged. The constants and test were re-applied on main instead.
+
+**2026-08-19 is deliberately not covered.** At 20.1 rows/s a full pass needs
+~1,493s. That day was a platform-wide throughput decay across all three realms
+(`runbook-system-wide-throughput-decay-2026-08-20.md`), and sizing the budget to
+absorb it would suppress the signal that says so. The test pins this explicitly.
+
+**Applied:** `server/warships/tasks.py` `RECAPTURE_TASK_OPTS` → `soft_time_limit`
+1200s, `time_limit` 1260s. `PLAYER_REFRESH_LOCK_TIMEOUT` is 6h and does **not**
+move with it; the invariant `soft < hard <= lock TTL` holds with three orders of
+magnitude to spare. The hard limit now exceeds the 20-min per-realm stripe gap, so
+two realms' sweeps can overlap — per-realm lock, `-c 3`, and the trade is recorded
+in the constant's comment. Re-examine that claim if the `background` queue returns
+to saturation.
+
+**Verification gate:** asia's `scanned == candidates` with `partial: false` for
+three consecutive daily stripes (10:50 UTC). A truncation at 20.1 rows/s is the
+throughput-decay signal, not a budget failure, and should be routed there.
+
 ### Outstanding
 
 1. ~~**Step 0 — observe the 2026-08-14 run.**~~ **DONE 2026-08-14, gate met** — see Performed — 2026-08-14. The contention did recur; a lever is warranted.
-2. **Step 1 (L1) not applied — this is the live next action. Its precondition is now MET** (see Performed — 2026-08-15): the 08-15 snapshot was lost to the truncation-handler crash, but journal reconstruction puts asia at **28.9 rows/s against a 35–46 baseline**, so v5.3.9 did not clear the contention and L1's attribution is protected. Do not wait for another observation on that account. **Land the truncation-handler fix before or with L1** — otherwise the next partial can lose its snapshot the same way and take L1's own measurement with it. `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2). Env-only, no deploy, instantly reversible. Note what it is and is not: it buys ~45s of recapture's own wall-clock and measures the WG-limiter question for free — it is ordered first because it is the cheapest and most reversible, **not** because it is the most likely to close a contention deficit. The stripe runs ~10:10–11:30 UTC, so a change applied in the evening reads back on the *next* day's run.
-3. **Step 2 (L2b) half-done: code shipped, lever not pulled.** Setting `RECAPTURE_LAPSED_LIMIT_ASIA=24000` in Pass → `/etc/battlestats-server.env` → restart `battlestats-celery-background` is all that remains, and only if Step 1 leaves asia above ~800s.
-4. **L3 and L4 unimplemented**, by design — they sit behind Steps 1–2.
+2. ~~**Step 1 (L1)**~~ **RETIRED 2026-08-30 on arithmetic** — it prevents 0 of the 3 observed truncations (Performed — 2026-08-30). Historical text follows. **Step 1 (L1) not applied — this was the live next action. Its precondition is now MET** (see Performed — 2026-08-15): the 08-15 snapshot was lost to the truncation-handler crash, but journal reconstruction puts asia at **28.9 rows/s against a 35–46 baseline**, so v5.3.9 did not clear the contention and L1's attribution is protected. Do not wait for another observation on that account. **Land the truncation-handler fix before or with L1** — otherwise the next partial can lose its snapshot the same way and take L1's own measurement with it. `RECAPTURE_LAPSED_DELAY` remains unset in prod (default 0.2). Env-only, no deploy, instantly reversible. Note what it is and is not: it buys ~45s of recapture's own wall-clock and measures the WG-limiter question for free — it is ordered first because it is the cheapest and most reversible, **not** because it is the most likely to close a contention deficit. The stripe runs ~10:10–11:30 UTC, so a change applied in the evening reads back on the *next* day's run.
+3. ~~**Step 2 (L2b)**~~ **RETIRED 2026-08-30 on arithmetic** — it prevents 1 of 3, and not the day that triggered the decision. The code half stays shipped and inert, and is still the right lever if asia's *pool rotation* ever becomes the problem rather than its budget. Historical text: **Step 2 (L2b) half-done: code shipped, lever not pulled.** Setting `RECAPTURE_LAPSED_LIMIT_ASIA=24000` in Pass → `/etc/battlestats-server.env` → restart `battlestats-celery-background` is all that remains, and only if Step 1 leaves asia above ~800s.
+4. ~~**L3 and L4 unimplemented**~~ — **L4 APPLIED 2026-08-30** (v5.6.7), out of order and on an explicit operator decision, because the ordering premise had expired. **L3 remains unimplemented** and is the next lever if the budget raise does not hold.
 5. **F4 unexplained** (why EU alone was unaffected). The contention model is incomplete until answered.
-6. **No `duration_s` in the snapshot**, so Step 0's measurement still requires `journalctl`. This is the instrumentation that would let `/recapture` see the budget trend directly, and the near-miss ops-email condition depends on it.
+6. ~~**No `duration_s` in the snapshot**~~ — **CLOSED**; the field exists and carried the 12-day distribution that decided L4. The **near-miss ops-email condition (duration > 85% of soft) is still unbuilt**, and it is now cheap: it would have fired on most of the 08-19..08-30 days rather than on 3 of 12.
 
 ## Remediation path — one lever at a time
 

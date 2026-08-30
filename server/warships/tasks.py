@@ -82,16 +82,45 @@ PLAYER_CORRELATIONS_WARM_TASK_OPTS = {
 }
 # The lapsed-player recapture sweep is one serial pass over RECAPTURE_LAPSED_LIMIT
 # candidates: a 20-45s ordering query plus ~1 WG call + RECAPTURE_LAPSED_DELAY per
-# 100 players. At the prod limit (30k) that is ~470-520s for the slower realms, so
-# TASK_OPTS' 540s soft limit truncated EU and ASIA *every day* (ASIA's last complete
-# pass was 2026-07-20). The command now flushes writes incrementally and finalizes
-# on SoftTimeLimitExceeded, so truncation is survivable; this budget makes it rare.
+# 100 players. At the prod limit (30k) that is 300 WG chunks.
+#
+# History. TASK_OPTS' 540s truncated EU and ASIA *every day* (ASIA's last complete
+# pass was 2026-07-20); 15 min fixed that, then ASIA drifted back to the wall. Its
+# duration over 2026-08-19..08-30 was 721-927s against the 900s limit — a MEDIAN of
+# ~800s, 89% of budget, with 3 truncations in 12 days. The sweep was chronically
+# under-budgeted, not intermittently unlucky.
+#
+# Sizing, from the widest real truncation this budget is meant to absorb: on
+# 2026-08-30 ASIA covered 23,600 of 30,000 inside 900s, so a full pass at that rate
+# needs ~1,144s. 20 min clears it with ~56s. This deliberately does NOT cover
+# 2026-08-19 (18,100 rows, 20.1 rows/s, ~1,493s needed): that was a platform-wide
+# throughput decay across all three realms, not a recapture sizing question — see
+# runbook-system-wide-throughput-decay-2026-08-20.
+#
+# ASIA is structurally the slowest realm per row (fixed droplet->api.worldofwarships.asia
+# latency) and is the last stripe, so it has the least headroom and truncates first.
+# That is NOT evidence of an asia-only upstream fault: NA and EU slow on the same
+# days. Do not re-derive the "asia upstream is 2x slower, therefore the budget"
+# argument; it was measured, and it explains asia's baseline, not its truncations.
+#
+# The command flushes writes incrementally and finalizes on SoftTimeLimitExceeded,
+# so truncation is survivable — the last_idle_check_at LRU cursor leaves unscanned
+# rows NULL, so they sort first next run and the cost is rotation latency, not yield.
+# This budget makes it rare, and buys back flush headroom: the 2026-08-30 run used
+# 26.6s of the old 60s, and a flush that overruns the HARD limit raises
+# TimeLimitExceeded, which cannot be handled and writes no snapshot at all.
+#
 # Invariant (tasks.py `_run_reclassify_bucket` note): soft < hard <= lock TTL, and
-# PLAYER_REFRESH_LOCK_TIMEOUT is 6h. Stripes are 20 min apart per realm, and the
-# per-realm lock plus the background worker's -c 3 make an overlap harmless.
+# PLAYER_REFRESH_LOCK_TIMEOUT is 6h, so the lock does not move with this. NOTE: the
+# hard limit (21 min) now EXCEEDS the 20-min per-realm stripe gap, so two realms'
+# sweeps can overlap where they could not before. The lock is per-realm and the
+# background worker is -c 3, so this is a deliberate trade, not an oversight — but
+# the "overlap is harmless" claim was written for a less loaded queue and should be
+# re-examined if the background queue returns to saturation (it was 60% of
+# 3 slots x 100 min during the 2026-08-30 stripe window, against 100% on 2026-08-14).
 RECAPTURE_TASK_OPTS = {
-    "time_limit": 16 * 60,        # 16 min hard — 60s of headroom for the final flush
-    "soft_time_limit": 15 * 60,   # 15 min soft
+    "time_limit": 21 * 60,        # 21 min hard — 60s of headroom for the final flush
+    "soft_time_limit": 20 * 60,   # 20 min soft
     "ignore_result": True,
 }
 # Short DB-breather between heavy percentile buckets (load-spreading on the shared

@@ -605,15 +605,38 @@ class RecaptureLapsedTaskGateTests(TestCase):
         self.assertEqual(res, {"status": "completed"})
 
     def test_task_budget_clears_a_full_prod_sized_pass(self):
-        """540s (TASK_OPTS) truncated EU/ASIA daily; the sweep needs its own budget."""
+        """540s (TASK_OPTS) truncated EU/ASIA daily; the sweep needs its own budget.
+
+        Pinned to a real truncation rather than to a bare "bigger than TASK_OPTS",
+        so a regression to 15 min fails here. ASIA on 2026-08-30 covered 23,600 of
+        30,000 inside the then-current 900s soft limit; scaling that rate to a full
+        pass is the width this budget must absorb. The scaling is conservative — it
+        stretches the fixed ordering query along with the per-chunk work.
+
+        It deliberately does NOT cover 2026-08-19 (18,100 rows, ~1,493s needed).
+        That day was a platform-wide throughput decay across all three realms, not
+        a recapture sizing question, and sizing the budget for it would hide the
+        signal that says so.
+        """
         from warships.tasks import (PLAYER_REFRESH_LOCK_TIMEOUT,
                                     RECAPTURE_TASK_OPTS)
         soft = RECAPTURE_TASK_OPTS["soft_time_limit"]
         hard = RECAPTURE_TASK_OPTS["time_limit"]
         self.assertGreater(soft, 540)
+        prod_limit = 30000
+        truncated_at_seconds, truncated_rows = 900, 23600   # asia, 2026-08-30
+        needed = truncated_at_seconds * prod_limit / truncated_rows
+        self.assertGreater(
+            soft, needed,
+            "soft_time_limit must clear a 30k pass at the rate asia sustained "
+            f"when it truncated on 2026-08-30 (~{needed:.0f}s)")
         # Invariant: soft < hard <= lock TTL, with room for the final flush.
         self.assertLess(soft, hard)
         self.assertLessEqual(hard, PLAYER_REFRESH_LOCK_TIMEOUT)
+        # The flush headroom is load-bearing: overrunning the HARD limit raises
+        # TimeLimitExceeded, which cannot be caught, so no snapshot is written and
+        # the next ops alert reads the previous day's file (2026-08-15).
+        self.assertGreaterEqual(hard - soft, 60)
 
 
 class RecapturePerRealmLimitTests(TestCase):
