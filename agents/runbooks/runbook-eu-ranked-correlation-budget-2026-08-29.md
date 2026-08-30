@@ -69,10 +69,19 @@ out by the fan-out, the eu ranked aggregation alone is:
 |---|---|---|---|---|
 | na | 600s | 1.9s | 22s | 57,541 |
 | asia | 597s | 1.5s | 33s | 71,908 |
-| **eu** | **708s / 757s (successes)** | 2.2s | 48s | **102,558** |
+| **eu** | **708s / 757s (successes under the old limit)** | 2.2s | 48s | **102,558** |
 
 eu is the tail because its ranked population is ~1.8× na's. The other two
 metrics are nowhere near the limit.
+
+**Those eu figures were censored, and the first uncensored pass proved it.** 708s
+and 757s are the runs that fit under 780s; the ones that did not fit were killed
+and reported nothing. The first eu pass on the new budget — 08-29 16:06:35, nine
+minutes after the worker restarted onto the new release — **succeeded in 851s**.
+That is above the old soft limit: under 780s it would have been killed, so this
+single run is the decisive test of the change. It also means the honest margin is
+**1.27× against the 1080s soft limit, not 1.43×**; treat the table above as a
+lower bound on eu, not a measurement of it.
 
 On 08-29 eu ranked soft-limited **six times** — 05:21, 09:00, 13:07, 14:07,
 14:39, 14:54 — before completing at 15:08 in 708s. Each killed attempt spent
@@ -156,6 +165,13 @@ Beat fire and **no** `SoftTimeLimitExceeded`. A single success is not proof: eu
 succeeded once on 08-29 too. The claim is that failures stop, so look at the
 ratio across a full day.
 
+**Verified 2026-08-29 16:20 UTC.** The first eu pass after the worker restart
+succeeded in **851s** -- above the old 780s limit, so the change is proven by a
+run that would previously have been killed. No `SoftTimeLimitExceeded` on any
+realm since the deploy (na 434s/653s, asia 452s/385s). No manual dispatch was
+needed; the note below is kept because it is the right procedure whenever the
+evidence does *not* arrive on its own.
+
 **Absence of failure is only evidence if a run occurred.** The Beat stripe is 8h
 apart rotating realms — asia 16:45, na 00:45, eu 08:45 — so eu ranked fires
 **once per 24h**, and the on-view path will not fill the gap while the fresh key
@@ -174,9 +190,11 @@ ssh root@battlestats.online 'cd /opt/battlestats-server/current/server && \
 
 ## Follow-ups
 
-- **1080s is ~1.43× the slowest observed success, and every killed run is
-  censored** — the true eu tail is still unknown. If eu ranked starts landing
-  above ~1000s, the answer is the query, not another budget raise.
+- **1080s is ~1.27× the slowest observed success (851s), and every killed run is
+  still censored** — the true eu tail remains unknown, and the first uncensored
+  pass already came in 94s above the highest figure the old limit could report.
+  That margin is thinner than it looked when this was written. If eu ranked
+  starts landing above ~1000s, the answer is the query, not another budget raise.
 - **The "0 successes in 24h" rule cannot see a task that fails most runs and
   succeeds once.** A ratio-based or duration-based condition would have caught
   eu ranked on 08-27. Scoped to the digest writer, deliberately not bundled here.

@@ -128,13 +128,16 @@ class CorrelationWarmBudgetTests(TestCase):
         # metrics still shared one budget, so it understated the heaviest. Split
         # out by the fan-out, eu `ranked_wr_battles` alone ran 708s and 757s on
         # its two SUCCESSFUL passes of 2026-08-29 and soft-limited six times at
-        # 780s the same day. Every killed run is censored, so the true tail is
-        # still unknown; 1080s is ~1.43x the slowest observed success.
+        # 780s the same day. Every killed run is censored, so 708-757s was only
+        # ever a LOWER bound: the first pass on the raised budget (08-29 16:20,
+        # nine minutes after the worker restarted) came in at 851s -- above the
+        # old limit, and 94s above the highest figure that limit could report.
+        # 1080s is ~1.27x that, not the 1.43x the censored sample suggested.
         from warships.tasks import CORRELATION_METRIC_WARM_TASK_OPTS
         self.assertGreaterEqual(
             CORRELATION_METRIC_WARM_TASK_OPTS["soft_time_limit"], 1000,
-            "eu ranked_wr_battles succeeds at 708-757s; 780s soft-limited it "
-            "six times on 2026-08-29")
+            "eu ranked_wr_battles is measured at 851s uncensored; 780s "
+            "soft-limited it six times on 2026-08-29")
 
     def test_the_dispatcher_budget_is_not_a_bound_on_the_metrics(self):
         # This assertion used to read `combined > per-metric`, on the reasoning
