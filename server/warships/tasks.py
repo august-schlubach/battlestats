@@ -118,6 +118,10 @@ PLAYER_CORRELATIONS_WARM_TASK_OPTS = {
 # the "overlap is harmless" claim was written for a less loaded queue and should be
 # re-examined if the background queue returns to saturation (it was 60% of
 # 3 slots x 100 min during the 2026-08-30 stripe window, against 100% on 2026-08-14).
+# Second consequence: asia's worst case now ends 11:11 UTC (10:50 + 1260s) against an
+# 11:30 ops digest, ~19 min of margin. The 2026-08-13/14 signature was a 20-30 min
+# RECEIPT lag; if that returns, a still-running pass makes the digest read yesterday's
+# benchmark file. Move the digest or the stripe before raising this budget again.
 RECAPTURE_TASK_OPTS = {
     "time_limit": 21 * 60,        # 21 min hard — 60s of headroom for the final flush
     "soft_time_limit": 20 * 60,   # 20 min soft

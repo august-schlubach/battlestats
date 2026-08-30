@@ -77,9 +77,13 @@ measures only), `band_days`, `partial`, `aborted`, `abort_reason`, `flush_failed
 `candidates`, `scanned`, `wg_calls`, `cursor_stamped`, and the yield breakdown.
 
 `duration_s` (added 2026-08-16) is wall-clock for the pass; older snapshots lack
-it. Read it against the realm's soft limit — `RECAPTURE_TASK_OPTS` is 900s
-(`server/warships/tasks.py`) — and treat anything above ~85% of that as a
-near-miss worth reporting even when `partial` is false. Rates differ ~2x by
+it. Read it against the realm's soft limit — `RECAPTURE_TASK_OPTS` is **1200s
+soft / 1260s hard since 2026-08-30** (v5.6.7; was 900/960, raised because asia
+sat at a median 89% of the old budget and truncated 3 days in 12 —
+`agents/runbooks/runbook-recapture-soft-limit-budget-2026-08-13.md`) — and treat
+anything above ~85% of that (**1020s**) as a near-miss worth reporting even when
+`partial` is false. Against the 721–927s the realms actually run, that threshold
+now fires on nothing, which is what a calibrated one should do. Rates differ ~2x by
 realm (asia 35–46 rows/s, na 66–85), so compare a realm against **itself**.
 
 **A missing snapshot is a finding in its own right, and the loudest one.** If a

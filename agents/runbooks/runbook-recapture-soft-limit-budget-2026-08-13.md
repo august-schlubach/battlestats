@@ -2,7 +2,7 @@
 
 _Created: 2026-08-13_
 _Context: the 2026-08-13 ops email reported `recapture_partial:asia` (23,100 of 30,000 scanned). Investigation found two independent causes — asia's pass has been consuming 72–95% of its 900s soft-limit budget every day for a week, and the 2026-08-12 top-ships orchestrator fan-out newly saturated the `background` worker across the recapture window._
-_Status: **CLOSED 2026-08-30 — L4 APPLIED, out of order, on an explicit operator decision.** `RECAPTURE_TASK_OPTS` is now 20 min soft / 21 min hard (v5.6.7). L1 and L2b were **retired on arithmetic, not skipped**: against the three observed truncations L1 prevents 0 of 3 and L2b 1 of 3, while L4 prevents 2 of 3 — see Performed — 2026-08-30. The ladder's premise for ordering L4 last ("most load-additive", against a `background` queue at 100%) had expired: the same window measured 60% on 2026-08-30. Historical status below is retained for provenance._
+_Status: **L4 APPLIED 2026-08-30 (v5.6.7), out of order, on an explicit operator decision — VERIFICATION GATE OPEN until 2026-09-02.** Do not read this runbook as closed: the gate is asia `scanned == candidates` with `partial: false` for three consecutive 10:50 UTC stripes (08-31, 09-01, 09-02), and the margin is thin — at the 26.2 rows/s that triggered the change a full pass needs ~1,144s against the new 1,200s limit, about 5%. Read `duration_s`, not just `partial`: a pass at 1,150–1,199s is a near-miss that clears the condition while saying the budget is still marginal.** `RECAPTURE_TASK_OPTS` is now 20 min soft / 21 min hard (v5.6.7). L1 and L2b were **retired on arithmetic, not skipped**: against the three observed truncations L1 prevents 0 of 3 and L2b 1 of 3, while L4 prevents 2 of 3 — see Performed — 2026-08-30. The ladder's premise for ordering L4 last ("most load-additive", against a `background` queue at 100%) had expired: the same window measured 60% on 2026-08-30. Historical status below is retained for provenance._
 _Superseded status: **NO LEVER PULLED.** L2b shipped to production in **v5.3.8** (2026-08-13) and is **inert by design** — `RECAPTURE_LAPSED_LIMIT_*` is unset in prod, so the sweep behaves exactly as before. L1/L3/L4 remain proposals. **Step 0 ran on 2026-08-14 and its gate is met** — asia went partial a second time (912s, `scanned` 28,800 of 30,000), so Step 1 is authorized and unapplied. **The precondition observation was lost and then partly reconstructed (2026-08-16):** the 2026-08-15 asia run **crashed in its truncation handler** and wrote no snapshot, so the file-based read that precondition asked for does not exist. Journal reconstruction recovers the number that mattered — **28.9 rows/s, still under asia's 35–46 baseline**, so v5.3.9 did **not** clear the contention and L1's mandate stands. See Execution log — 2026-08-15 and `runbook-recapture-truncation-handler-crash-2026-08-16.md`._
 _QA: reviewed 2026-08-13 — see QA Notes._
 
@@ -332,6 +332,16 @@ magnitude to spare. The hard limit now exceeds the 20-min per-realm stripe gap, 
 two realms' sweeps can overlap — per-realm lock, `-c 3`, and the trade is recorded
 in the constant's comment. Re-examine that claim if the `background` queue returns
 to saturation.
+
+**A consequence not priced above: the ops digest's read margin narrowed.** asia's
+worst-case completion moves from 11:06 to **11:11** (10:50 + 1260s) and the digest
+fires 11:30–11:35, so ~19 minutes remain. That is comfortable today, but the
+2026-08-13/08-14 saturation signature was a **20–30 minute receipt lag**, and a
+late-received asia pass can now still be running when the digest reads the
+benchmark directory — at which point it reads *yesterday's* file and reports
+`partial` operands belonging to a different pass, exactly the 2026-08-15
+confusion. If receipt lag ever returns, move the digest or the stripe before
+raising this budget again.
 
 **Verification gate:** asia's `scanned == candidates` with `partial: false` for
 three consecutive daily stripes (10:50 UTC). A truncation at 20.1 rows/s is the
