@@ -63,16 +63,32 @@ failure modes belong to their own runbooks — this is an index, not a summary.
   realm. `runbook-enrichment-pool-maintenance-2026-06-09.md` and
   `runbook-post-deploy-verification-2026-08-07.md`.
 - **Daily clan crawl** — own single-slot `crawls` queue.
+- **Player population correlation warmers** — `CORRELATION_WARM_MINUTES` (1440,
+  daily) with `base_minute=45`, so stride 480 and the fires land at **na 00:45,
+  eu 08:45, asia 16:45 UTC**. Since 2026-08-28 the registered task is a
+  *dispatcher*: one Beat fire per realm enqueues three per-metric warms.
+  `runbook-eu-ranked-correlation-budget-2026-08-29.md`,
+  `runbook-correlation-warm-budget-and-per-realm-alerting-2026-08-26.md`.
 
-## Two non-obvious reads for anyone interpreting a striped task's output
+## Three non-obvious reads for anyone interpreting a striped task's output
 
-These cost real debugging time when missed, and both concern the recapture sweep:
+These cost real debugging time when missed. The first two concern the recapture
+sweep; the third applies to every engine in the index above.
 
 1. **Read `partial` before `scanned`.** A truncated pass looks exactly like the
    healthy "cursor exhausted the pool" case. A low `scanned` with `partial: true`
    is a budget failure; the same number with `partial: false` is normal.
 2. **`aborted` is a separate axis from `partial`.** On an aborted run
    `cursor_stamped=0` and empty buckets are correct by design, not a defect.
+3. **A clean journal is not evidence unless that realm's stripe actually fired
+   inside the window you read.** Striping means a daily task fires **once per
+   realm per 24h**, and the three fires are 8 hours apart. So "no failures since
+   the deploy" is vacuous for any realm whose stripe has not yet come round —
+   the grep returns nothing because nothing ran, which looks identical to
+   nothing failing. **Before believing a quiet result, compute the realm's next
+   fire from `_realm_crontab_for_cycle` and confirm one falls inside your
+   window.** Cost a wasted verification twice on 2026-08-29/30, checking eu
+   correlations at 05:41 UTC against a stripe that fires at 08:45.
 
 ## Env authority
 

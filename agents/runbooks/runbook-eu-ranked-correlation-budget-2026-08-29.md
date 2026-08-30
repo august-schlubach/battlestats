@@ -172,12 +172,15 @@ realm since the deploy (na 434s/653s, asia 452s/385s). No manual dispatch was
 needed; the note below is kept because it is the right procedure whenever the
 evidence does *not* arrive on its own.
 
-**Absence of failure is only evidence if a run occurred.** The Beat stripe is 8h
-apart rotating realms — asia 16:45, na 00:45, eu 08:45 — so eu ranked fires
-**once per 24h**, and the on-view path will not fill the gap while the fresh key
-is still warm from the 15:08 success. Run the grep immediately after the deploy
-and it reads clean for the trivial reason that no eu pass has happened. Earliest
-honest proof is **~09:00 UTC the following day**. To collapse an 18-hour wait
+**Absence of failure is only evidence if a run occurred — check the clock before
+the journal.** `CORRELATION_WARM_MINUTES=1440` with `base_minute=45` gives stride
+480, so the stripe is 8h apart rotating realms: **na 00:45, eu 08:45, asia 16:45
+UTC**. eu ranked therefore fires **once per 24h**, and the on-view path will not
+fill the gap while the fresh key is still warm. Run the grep at any hour before
+08:45 and it reads clean for the trivial reason that no eu pass has happened —
+demonstrated twice on 08-29/08-30 before the lesson stuck, now non-obvious read 3
+in `runbook-realm-schedule-striping-2026-08-15.md`. Earliest honest proof on a
+given day is **~09:00 UTC**. To collapse an 18-hour wait
 into a 13-minute one, dispatch the pass by hand — work the task does daily
 anyway, and a production lever, so take it one at a time with an ack:
 

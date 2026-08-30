@@ -294,3 +294,10 @@ leave it for the operator to judge.
   indistinguishable from an ignored one. Step 8.
 - **Archiving before the remedy landed**, or while waiting on an acknowledgement
   for a production lever. The inbox signal only has value in that direction.
+- **Verifying a per-realm fix before that realm's stripe has fired.** Striped
+  tasks run once per realm per cycle, 8h apart for a daily one (correlations:
+  na 00:45, eu 08:45, asia 16:45 UTC). A journal grep run before the stripe comes
+  round returns nothing because nothing ran, which is indistinguishable from
+  nothing failing. Compute the next fire first; absence of failure is only
+  evidence if a run occurred. `runbook-realm-schedule-striping-2026-08-15.md`,
+  non-obvious read 3.
