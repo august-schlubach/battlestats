@@ -55,18 +55,40 @@ Swap creeping up = memory pressure.
   DB-bound, or a stuck task). Investigate.
 - `consumers=0` on a queue whose service is `active` → **zombie worker**; the watchdog
   (`battlestats-celery-watchdog.timer`) should restart it within ~5 min — say so, and
-  flag if it hasn't.
+  flag if it hasn't. **Exception: the `celery` queue.** `CELERY_TASK_DEFAULT_QUEUE` is
+  `default` (`battlestats/settings.py`), so `celery` is a vestigial auto-declared queue
+  that legitimately sits at `ready=0 consumers=0`. It is not a zombie lane.
 - `floor` and `background` legitimately carry the heaviest, slowest work; some backlog
   there is normal. `default`/`hydration` should stay near-empty (user-facing).
 
 **Workers (Flower)** — `online: 5` expected (default/background/hydration/crawls/floor).
-Fewer than 5 = a lane is down or not reporting.
+Fewer than 5 = a lane is down or not reporting. If the section prints
+`STALE: no workers reported by Flower`, that is a **Flower fault, not a dead cluster** —
+the script says so and tells you to trust the QUEUES `consumers` column instead. Flower
+ran blind for a month on stale credentials while serving persisted rows as live
+(2026-07-27); never report worker liveness from an empty Flower registry.
 
-**Recent tasks (Flower)** — `failure_rate` under ~2–3% is normal. Spikes, or `FAIL`
-lines mentioning `REQUEST_LIMIT_EXCEEDED` / `407` → WG rate-limit pressure (the shared
-token bucket; `ops-env-reference.md` "WG rate limiter"). `WorkerLost`/`SIGKILL` →
-zombie/OOM, see `runbook-incident-celery-zombie-worker`. A near-empty sample right after
-a deploy just means Flower started fresh — note it, don't alarm.
+**Recent tasks (Flower)** — the script prints a `freshness:` line first; if it instead
+prints `STALE: newest task event is …`, it has **refused to summarise** because the rows
+are persisted, not live. Do not summarise them yourself: read throughput off the QUEUES
+`ack/s` column and treat the staleness as the finding.
+
+`failure_rate` under ~2–3% is normal, **but subtract the by-design failures before
+judging it**:
+- `crawl_all_clans_task :: SoftTimeLimitExceeded` is **expected steady state**, not a
+  defect. A full clan-walk pass takes ~12–18h against a 5h45m per-dispatch soft limit
+  (`CRAWL_TASK_OPTS`, `warships/tasks.py`), so it truncates and resumes; a pass completes
+  every 2–4 dispatches. This is why `LONG_CYCLE_TASKS` exempts it in
+  `scripts/daily_ops_email.py`. Its real instrument is output staleness
+  (`snapshot_stale:crawl-yield:<realm>` at 168h), never its failure count.
+- Everything else: spikes, or `FAIL` lines mentioning `REQUEST_LIMIT_EXCEEDED` / `407` →
+  WG rate-limit pressure (the shared token bucket; `ops-env-reference.md` "WG rate
+  limiter"). `WorkerLost`/`SIGKILL` → zombie/OOM, see
+  `runbook-incident-celery-zombie-worker`.
+
+A near-empty sample right after a deploy just means Flower started fresh — note it,
+don't alarm. Report the failure rate net of the long-cycle truncations, and say which
+tasks you excluded.
 
 **Recent errors** — `none` ideal. Nonzero error-level counts: read them as a magnitude
 signal and name the worst offender.

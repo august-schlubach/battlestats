@@ -126,20 +126,28 @@ if stamps:
         sys.exit(0)
     print("  freshness: newest event %.0fs ago" % age)
 st=collections.Counter(); names=collections.Counter(); fails=[]
+fail_by_name=collections.Counter()
 for t in items:
     if not isinstance(t,dict): continue
     s=t.get("state","?"); st[s]+=1
-    names[(t.get("name") or "?").split(".")[-1]]+=1
+    nm=(t.get("name") or "?").split(".")[-1]
+    names[nm]+=1
+    if s == "FAILURE": fail_by_name[nm]+=1
     if s in ("FAILURE","RETRY"):
-        fails.append(((t.get("name") or "?").split(".")[-1], str(t.get("exception") or "")[:90]))
+        fails.append((nm, str(t.get("exception") or "")[:90]))
 total=sum(st.values())
 print("  sampled:", total)
 if total:
     print("  states:", ", ".join("%s=%d"%(k,v) for k,v in st.most_common()))
     print("  top tasks:", ", ".join("%s=%d"%(k,v) for k,v in names.most_common(6)))
     print("  failure_rate: %.1f%%" % (st.get("FAILURE",0)/total*100))
+    # Every FAILURE is attributed by task name, unlike the FAIL sample below
+    # which is capped at 8. Netting out a by-design long-cycle truncation
+    # (crawl_all_clans_task) needs the FULL count, not the visible slice.
+    if fail_by_name:
+        print("  failures_by_task:", ", ".join("%s=%d"%(k,v) for k,v in fail_by_name.most_common()))
     for n,e in fails[:8]:
-        print("  FAIL %s :: %s" % (n,e))
+        print("  FAIL %s :: %s (sample capped at 8)" % (n,e))
 else:
     print("  (no tasks captured yet — task-events may have just been (re)enabled)")
 '
