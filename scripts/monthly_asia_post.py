@@ -15,7 +15,7 @@ Archive each month's output if you want a long series.
 """
 import sys, calendar, datetime, json
 from collections import defaultdict
-from django.db.models import Sum
+from django.db.models import Sum, Min
 from warships.models import ShipPopDailyAgg, Ship
 
 YEAR = int(sys.argv[-2]) if len(sys.argv) >= 3 else 2026
@@ -40,7 +40,8 @@ KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 �
       "Kearsarge": "키어사지", "Azuma": "아즈마", "Kitakaze": "키타카제",
       "Affondatore": "아폰다토레", "Conqueror": "컨쿼러", "Schlieffen": "슐리펜",
       "Worcester": "우스터", "Venezia": "베네치아", "Gearing": "기어링",
-      "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B"}
+      "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B",
+      "Almirante Irizar": "알미란테 이리사르", "20 de Julio": "20 데 훌리오"}
 
 def _norm(n):
     # WG ship names carry NON-BREAKING spaces (e.g. 'San\xa0Martín'); normalise
@@ -85,11 +86,33 @@ rows = []
 for sid, r in cur.items():
     s = t10[sid]
     p = prev.get(sid)
-    rows.append(dict(name=s.name, type=s.ship_type, bt=r["bt"],
+    rows.append(dict(sid=sid, name=s.name, type=s.ship_type, bt=r["bt"],
                      wr=round(r["wn"] / r["bt"] * 100, 2),
                      dmg=int(r["dm"] / r["bt"]),
                      pwr=round(p["wn"] / p["bt"] * 100, 2) if p and p["bt"] >= MOVER_FLOOR else None,
                      pbt=p["bt"] if p else 0))
+
+# Prior-month rank within each ship's type, at the same FLOOR gate used for this
+# month's tables — independent of MOVER_FLOOR, which only gates the wr-delta.
+# Used for the record-chart-style rank movement column below.
+prev_rows = []
+for sid, r in prev.items():
+    s = t10[sid]
+    prev_rows.append(dict(sid=sid, type=s.ship_type,
+                          wr=round(r["wn"] / r["bt"] * 100, 2), bt=r["bt"]))
+prev_rank = {}
+for t in KOT:
+    pool = sorted([x for x in prev_rows if x["type"] == t and x["bt"] >= FLOOR], key=lambda x: -x["wr"])
+    for i, x in enumerate(pool, 1):
+        prev_rank[x["sid"]] = i
+
+# T10 ships whose earliest-ever ship-pop record falls inside this month: our
+# best proxy for "entered the game this patch" (verified against known
+# releases; floor-crossing veterans do NOT show up here since their earliest
+# record predates the month).
+first_seen = (ShipPopDailyAgg.objects.filter(realm=REALM, mode=MODE, ship_id__in=t10)
+              .values("ship_id").annotate(fs=Min("date")))
+new_ships = sorted([f for f in first_seen if a <= f["fs"] <= b], key=lambda f: f["fs"])
 
 tot = sum(r["bt"] for r in rows)
 wtd = sum(r["bt"] * r["wr"] for r in rows) / tot
@@ -132,6 +155,21 @@ w("")
 w("■ 함종별 전투 비중")
 w(" · ".join(f"{KOT[t]} {v/tot*100:.1f}%" for t, v in sorted(mix.items(), key=lambda x: -x[1])))
 w("")
+if new_ships:
+    w(f"■ {MONTH}월 신규 함선")
+    w("이번 달 데이터에 처음 등장한 10티어 함선입니다.")
+    w("")
+    for f in new_ships:
+        sid = f["ship_id"]
+        s = t10[sid]
+        r = cur.get(sid)
+        if not r:
+            continue
+        wr = round(r["wn"] / r["bt"] * 100, 2)
+        note = f" (※ {FLOOR:,}전투 미만 — 표본이 작아서 승률은 지켜봐야 함)" if r["bt"] < FLOOR else ""
+        w(f"· {nm(s.name)} ({KOT[s.ship_type]}) — {f['fs'].month}월 {f['fs'].day}일 첫 등장, "
+          f"{r['bt']:,}전투, 승률 {wr:.2f}%{note}")
+    w("")
 exc = None
 for r in played[:6]:
     pool = sorted([x for x in rows if x["type"] == r["type"] and x["bt"] >= FLOOR],
@@ -161,6 +199,8 @@ else:
     w("많이 타는 배 중에 승률 상위권인 예외는 이번 달엔 없었음.")
 w("")
 w(f"■ 함종별 승률 상위 ({MONTH}월, {FLOOR:,}전투 이상)")
+w(f"[  ] 안 숫자는 같은 함종 순위표에서 {pm.month}월 대비 순위 변동임. NEW는 {pm.month}월엔 "
+  f"이 함종 순위표({FLOOR:,}전투 이상)에 없었다는 뜻이고, 진짜 신규 함선과는 다름.")
 w("")
 for t, k in KOT.items():
     pool = sorted([r for r in rows if r["type"] == t and r["bt"] >= FLOOR], key=lambda r: -r["wr"])
@@ -169,7 +209,16 @@ for t, k in KOT.items():
     w(f"[{k} {len(pool)}척]")
     for i, r in enumerate(pool[:5], 1):
         d = f"  (전월대비 {r['wr']-r['pwr']:+.2f}p)" if r["pwr"] else ""
-        w(f"{i}. {nm(r['name'])}  {r['wr']:.2f}%  {r['bt']:,}전투  평딜 {r['dmg']:,}{d}")
+        pr = prev_rank.get(r["sid"])
+        if pr is None:
+            mv = "  [NEW]"
+        elif pr == i:
+            mv = "  [-]"
+        elif pr > i:
+            mv = f"  [▲{pr - i}]"
+        else:
+            mv = f"  [▼{i - pr}]"
+        w(f"{i}. {nm(r['name'])}  {r['wr']:.2f}%  {r['bt']:,}전투  평딜 {r['dmg']:,}{d}{mv}")
     if pool[-1] not in pool[:5]:
         w(f"   최하위: {nm(pool[-1]['name'])}  {pool[-1]['wr']:.2f}%  {pool[-1]['bt']:,}전투")
     w("")
