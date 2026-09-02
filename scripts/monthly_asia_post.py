@@ -125,9 +125,18 @@ bb = sorted([r for r in rows if r["type"] == "Battleship" and r["bt"] >= FLOOR],
 allf = sorted([r for r in rows if r["bt"] >= FLOOR], key=lambda r: r["wr"])
 below = [r for r in allf if r["wr"] < top["wr"]]
 
+# The operator posts by hand (never automated — see the runbook). Turn this
+# mention into a hyperlink to the realm URL when pasting into arca.live's
+# editor; the plain-text output below can't carry that markup itself.
+print(f"### NOTE: hyperlink \"battlestats.online\" in the opening line to "
+      f"https://battlestats.online/?realm={REALM} when posting to arca.live.\n")
+
 O = []
 w = O.append
 w(f"제목: {MONTH}월 아시아 공방 10티어 통계 정리 ({tot/10000:.0f}만 전투)")
+w("")
+w("안녕하세요! battlestats.online 만든 사람입니다. 사이트에 쌓인 데이터로 지난달 아시아 공방을 정리해봤습니다.")
+w("숫자는 전부 사이트에서 직접 확인할 수 있고, 가입이나 로그인 같은 건 없습니다.")
 w("")
 w(f"{MONTH}월 아시아 공방에서 제일 많이 굴러간 10티어는 {ko(top['name'])}였음. "
   f"{top['bt']:,}전투로 함종 관계없이 전체 1위, 2위({ko(played[1]['name'])} {played[1]['bt']:,})와 차이도 큼.")
@@ -135,9 +144,6 @@ w(f"근데 승률은 {top['wr']:.2f}%로, {FLOOR:,}전투 이상 10티어 전함
 if below:
     w(f"(10티어 전체로 넓히면 {len(allf)}척 중 밑에서 {len(below)+1}번째. "
       + ", ".join(f"{ko(r['name'])} {r['wr']:.2f}%" for r in below[:3]) + " 등이 더 아래임.)")
-w("")
-w("battlestats.online 만든 사람입니다. 사이트에 쌓인 데이터로 지난달 아시아 공방을 정리해봤습니다.")
-w("숫자는 전부 사이트에서 직접 확인할 수 있고, 가입이나 로그인 같은 건 없습니다.")
 w("")
 w("■ 집계 기준")
 w(f"· 아시아 / 공방 / 10티어")
@@ -240,6 +246,8 @@ w("· 사이트 순위표는 최근 60일 롤링 기준이라 이 글 숫자와 
 w("")
 w("보고 싶은 지표 있으면 말씀해주세요. 8~9티어나 랭겜도 같은 방식으로 뽑을 수 있습니다. "
   "이상해 보이는 숫자 있으면 지적해주시면 확인해보겠습니다.")
+w("")
+w("사이트 하단의 '피드백 남기기' 링크로도 의견 남기실 수 있습니다.")
 w("")
 w("원본 데이터: https://battlestats.online/?realm=asia")
 print("\n".join(O))
