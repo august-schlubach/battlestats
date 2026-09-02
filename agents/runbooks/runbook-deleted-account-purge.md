@@ -1,8 +1,8 @@
 # Runbook: Deleted Account Purge (GDPR / WG Account Deletion Request)
 
 **Created**: 2026-03-30
-**Last executed**: 2026-07-30 (fifth batch — see "Execution Results" section)
-**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), 2026-05-30 (9,729 IDs / 79 found), 2026-07-01 (9,822 IDs / 85 found), and 2026-07-30 (9,238 IDs / 129 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
+**Last executed**: 2026-08-31 (sixth batch — see "Execution Results" section)
+**Status**: Recurring — tooling deployed v1.2.13; executed 2026-03-30 (11,839 IDs / 0 found), 2026-04-30 (9,723 IDs / 14 found), 2026-05-30 (9,729 IDs / 79 found), 2026-07-01 (9,822 IDs / 85 found), 2026-07-30 (9,238 IDs / 129 found), and 2026-08-31 (12,817 IDs / 136 found), responses sent to Wargaming after each batch. Expect future batches at irregular cadence.
 
 ## Context
 
@@ -416,6 +416,70 @@ open(OUT_PATH, "wb").write(base64.urlsafe_b64decode(att["data"]))
 ```
 
 Run it under `cd /home/august/code/mailcap && uv run python <script>`. Write the script to a file rather than passing `-c` with an inline attachment id — the long opaque base64 id trips the harness classifier.
+
+---
+
+## Execution Results (2026-08-31)
+
+Source: WG data-protection email received 2026-08-31 00:31 UTC (Gmail message `1a0553a4fb81b041`, subject "Wargaming.net Data Deletion Request", from `noreply@wargaming.net`). Same envelope and body text as prior batches. The CSV contained 12,818 lines, i.e. 12,817 account IDs plus the header — all unique.
+
+**Retrieval**: Pulled directly from the Gmail attachment via `gmail_export_messages` (mbox export of the single message, then parsed the multipart MIME to extract `deleted_accounts.zip`) rather than the Selenium/attachments-API recipe in the 2026-07-30 section — simpler, no message-part enumeration needed. Landed at `deleted/deleted_accounts_20260831.zip`.
+
+**Schema re-verification**: Enumerated `Player._meta.get_fields()` reverse relations — still exactly the same 8 (Snapshot, PlayerExplorerSummary, HotPlayer, PlayerAchievementStat, BattleObservation, BattleEvent, PlayerDailyShipStats, ShipTopPlayerSnapshot), all `CASCADE`. No drift since 2026-07-30.
+
+**Pre-flight (read-only)**: `purge_deleted_accounts --dry-run` against the cloud DB (env loaded from `.env.cloud` + `.env.secrets.cloud` in a sub-shell; `DB_HOST` echoed and confirmed as the managed-PG host). Predicted 136/12,817 found, 12,817 to blocklist.
+
+Match distribution: 81 EU, 29 ASIA, 26 NA. 6 of 136 matched players were clan members; 0 were clan leaders. Battle volume: 92 had <250 lifetime PvP battles, 25 had 250-999, and 19 had >=1,000. Last-battle dates spanned 2017-02-17 to **2026-08-14** — one match was active just 18 days before the purge, inside the 105-day battle-history retention window.
+
+**Execution**: On the droplet (operator ran via `!` prefix — the ssh invocation is classifier-gated per the standing lesson):
+```bash
+scp deleted/deleted_accounts_20260831.zip root@battlestats.online:/tmp/deleted_accounts.zip
+ssh root@battlestats.online '/opt/battlestats-server/venv/bin/python /opt/battlestats-server/current/server/manage.py purge_deleted_accounts /tmp/deleted_accounts.zip --transcript /tmp/purge_transcript_20260831.jsonl'
+```
+
+```json
+{
+  "total_ids": 12817,
+  "found_in_db": 136,
+  "not_found": 12681,
+  "total_player_rows": 136,
+  "total_snapshot_rows": 1223,
+  "total_achievement_rows": 354,
+  "total_explorer_rows": 111,
+  "total_visit_event_rows": 2,
+  "total_visit_daily_rows": 2,
+  "total_cache_keys_deleted": 0,
+  "total_clan_leaders_nulled": 0,
+  "blocked": 12817
+}
+```
+
+Live run matched the dry-run prediction exactly on `found_in_db` and every row count. 136 players purged with full cascade: 136 `Player`, 1,223 `Snapshot`, 354 `PlayerAchievementStat`, 111 `PlayerExplorerSummary`, 2 `EntityVisitEvent`, 2 `EntityVisitDaily`. No clan-leader references needed nulling. Cache invalidation found no live keys (consistent with prior batches — the dry-run's 1,088 is the 136 × 8 template-count estimate, not actual live keys).
+
+Largest match count of any batch to date (0 → 14 → 79 → 85 → 129 → **136**), continuing the growth trend as the indexed player pool grows.
+
+**Post-purge verification**:
+```json
+{
+  "ids": 12817,
+  "players_remaining": 0,
+  "blocklisted_for_batch": 12817,
+  "visit_events_remaining": 0,
+  "visit_daily_remaining": 0,
+  "clan_leaders_remaining": 0,
+  "battle_observations_remaining": 0,
+  "battle_events_remaining": 0,
+  "daily_ship_stats_remaining": 0
+}
+```
+
+**Transcript**: `/tmp/purge_transcript_20260831.jsonl` on the droplet (12,818 lines: 12,817 per-account + 1 summary).
+
+**Response**: Gmail draft created via mailcap (`gmail_create_draft`, threaded reply to the request message, addressed to `noreply@wargaming.net` matching all five prior responses). Source email marked read and archived.
+
+### New lesson
+
+`gmail_export_messages` (mbox export of the raw RFC822 message) is a cleaner path to the zip attachment than the Gmail attachments API recipe documented for 2026-07-30 — no need to enumerate `payload.parts` for an `attachmentId` by hand; standard `mailbox`/MIME parsing pulls it straight out. Prefer this route going forward; keep the older recipe as a fallback only if `gmail_export_messages` is unavailable.
 
 ---
 
