@@ -168,6 +168,15 @@ cross-checking we are explicitly inviting.
 Unattested transliterations still carrying risk: 세치 지 세템브루 (Sete de Setembro),
 프린스 판 오라녜 (Prins van Oranje).
 
+**There is no official Korean source for ship names, and the site will not localize them
+(decision 2026-09-03, dropped).** Verified against the WG encyclopedia with the prod app id:
+`language=ko` returns 407 INVALID_LANGUAGE on asia, com and eu; `ja`, `zh-tw` and `th` are
+accepted but return the Latin name unchanged; only `zh-cn` (and `ru` for Soviet hulls) actually
+localize. Korean and Japanese players therefore see Latin ship names in their own game client,
+so the English names on the player page already match what they read in-game. The `KO` table in
+`scripts/monthly_asia_post.py` is a courtesy transliteration with no canonical form; reader
+corrections on the posts are its highest authority. Do not re-propose pulling Korean names from WG.
+
 ### Register
 
 Chat posts on these boards are 반말 with profanity. **That is not the register for an info post.**
