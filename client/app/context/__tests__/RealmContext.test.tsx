@@ -128,6 +128,124 @@ describe('RealmProvider URL realm sync', () => {
         expect(firstRealm).toBe('asia');
     });
 
+    describe('timezone autodetect (NEXT_PUBLIC_REALM_AUTODETECT)', () => {
+        const originalFlag = process.env.NEXT_PUBLIC_REALM_AUTODETECT;
+        const setTimeZone = (timeZone: string) => {
+            const resolvedOptions = () => ({ timeZone } as Intl.ResolvedDateTimeFormatOptions);
+            jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(
+                () => ({ resolvedOptions } as unknown as Intl.DateTimeFormat),
+            );
+        };
+        afterEach(() => {
+            jest.restoreAllMocks();
+            if (originalFlag === undefined) {
+                delete process.env.NEXT_PUBLIC_REALM_AUTODETECT;
+            } else {
+                process.env.NEXT_PUBLIC_REALM_AUTODETECT = originalFlag;
+            }
+        });
+
+        it('stays na with the flag off, whatever the timezone', () => {
+            delete process.env.NEXT_PUBLIC_REALM_AUTODETECT;
+            setTimeZone('Asia/Seoul');
+            window.history.replaceState({}, '', 'http://localhost/');
+            render(
+                <RealmProvider>
+                    <RealmProbe />
+                </RealmProvider>,
+            );
+            expect(screen.getByTestId('realm').textContent).toBe('na');
+        });
+
+        it.each([
+            ['Asia/Seoul', 'asia'],
+            ['Europe/Berlin', 'eu'],
+            ['America/New_York', 'na'],
+        ])('defaults a first-time %s visitor to %s on the FIRST render', (tz, realm) => {
+            // First-render, not settled: the landing treemap and the first
+            // fetch must already be on the detected realm (see the synchronous
+            // resolve test above for why that distinction matters).
+            process.env.NEXT_PUBLIC_REALM_AUTODETECT = '1';
+            setTimeZone(tz);
+            window.history.replaceState({}, '', 'http://localhost/');
+            let firstRealm: string | undefined;
+            const CaptureFirstRender: React.FC = () => {
+                const { realm: r } = useRealm();
+                if (firstRealm === undefined) {
+                    // eslint-disable-next-line react-hooks/globals
+                    firstRealm = r;
+                }
+                return <div data-testid="realm">{r}</div>;
+            };
+            render(
+                <RealmProvider>
+                    <CaptureFirstRender />
+                </RealmProvider>,
+            );
+            expect(firstRealm).toBe(realm);
+            expect(screen.getByTestId('realm').textContent).toBe(realm);
+        });
+
+        it('never persists the detected realm, so one manual switch overrides it for good', () => {
+            process.env.NEXT_PUBLIC_REALM_AUTODETECT = '1';
+            setTimeZone('Asia/Seoul');
+            window.history.replaceState({}, '', 'http://localhost/');
+            render(
+                <RealmProvider>
+                    <RealmProbe />
+                </RealmProvider>,
+            );
+            expect(screen.getByTestId('realm').textContent).toBe('asia');
+            expect(window.localStorage.getItem('bs-realm')).toBeNull();
+        });
+
+        it('lets ?realm= and a stored realm both outrank detection', () => {
+            process.env.NEXT_PUBLIC_REALM_AUTODETECT = '1';
+            setTimeZone('Asia/Seoul');
+            window.localStorage.setItem('bs-realm', 'eu');
+            window.history.replaceState({}, '', 'http://localhost/');
+            const { unmount } = render(
+                <RealmProvider>
+                    <RealmProbe />
+                </RealmProvider>,
+            );
+            expect(screen.getByTestId('realm').textContent).toBe('eu');
+            unmount();
+
+            window.history.replaceState({}, '', 'http://localhost/?realm=na');
+            render(
+                <RealmProvider>
+                    <RealmProbe />
+                </RealmProvider>,
+            );
+            expect(screen.getByTestId('realm').textContent).toBe('na');
+        });
+
+        it('keeps the detected realm across client-side navigation to a bare URL', () => {
+            // The pathname effect re-resolves on every navigation; with nothing
+            // stored and no ?realm= it must not snap back to na.
+            process.env.NEXT_PUBLIC_REALM_AUTODETECT = '1';
+            setTimeZone('Asia/Tokyo');
+            window.history.replaceState({}, '', 'http://localhost/');
+            const { rerender } = render(
+                <RealmProvider>
+                    <RealmProbe />
+                </RealmProvider>,
+            );
+            expect(screen.getByTestId('realm').textContent).toBe('asia');
+            act(() => {
+                window.history.replaceState({}, '', 'http://localhost/ships/t10-battleships');
+                mockPathname = '/ships/t10-battleships';
+            });
+            rerender(
+                <RealmProvider>
+                    <RealmProbe />
+                </RealmProvider>,
+            );
+            expect(screen.getByTestId('realm').textContent).toBe('asia');
+        });
+    });
+
     it('useDisplayRealm settles on the resolved realm after mount', () => {
         window.localStorage.setItem('bs-realm', 'eu');
         window.history.replaceState({}, '', 'http://localhost/');

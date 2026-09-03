@@ -3,7 +3,25 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 
+import { isRealmAutodetectEnabled } from '../lib/featureFlags';
+import { browserTimeZone, realmForTimeZone } from '../lib/realmDetect';
+
 export type Realm = 'na' | 'eu' | 'asia';
+
+// Timezone-derived default for a visitor who has neither a ?realm= nor a
+// stored choice — only with NEXT_PUBLIC_REALM_AUTODETECT=1. The detected value
+// is deliberately NEVER written to storage (setRealm is the only writer):
+// bs-realm must mean "the visitor chose this", so one click of the realm
+// selector overrides detection permanently, and a later refinement of the
+// mapping reaches everyone who never chose. Same contract as the locale
+// detector; the pre-paint head script (lib/bootScript.ts) mirrors it so the
+// first frame agrees.
+const detectRealm = (): Realm | null => {
+    if (!isRealmAutodetectEnabled()) {
+        return null;
+    }
+    return realmForTimeZone(browserTimeZone());
+};
 
 const VALID_REALMS: Realm[] = ['na', 'eu', 'asia'];
 
@@ -49,7 +67,7 @@ const resolveInitialRealm = (): Realm => {
     } catch {
         // URL / localStorage unavailable
     }
-    return 'na';
+    return detectRealm() ?? 'na';
 };
 
 export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -77,6 +95,13 @@ export const RealmProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const stored = localStorage.getItem('bs-realm') as Realm | null;
             if (stored && VALID_REALMS.includes(stored)) {
                 setRealmState(stored);
+                return;
+            }
+            // Nothing chosen: keep the timezone default across navigation too,
+            // rather than letting a bare URL snap the realm back to na.
+            const detected = detectRealm();
+            if (detected) {
+                setRealmState(detected);
             }
         } catch {
             // localStorage / URL unavailable
