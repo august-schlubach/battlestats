@@ -23,6 +23,7 @@ MONTH = int(sys.argv[-1]) if len(sys.argv) >= 2 else 8
 REALM, MODE, TIER = "asia", "random", 10
 FLOOR = 5000          # battles in-month required to appear in a ranking table
 MOVER_FLOOR = 8000    # battles in BOTH months required for a MoM delta
+TOP_N = 3             # rows per ship-type table, and per highlight list (was 5/4 until 2026-09-02)
 
 SITE_URL = f"https://battlestats.online/?realm={REALM}"
 # arca.live's own post filter rejects the raw link outright (observed
@@ -139,8 +140,6 @@ for r in rows:
 played = sorted(rows, key=lambda r: -r["bt"])
 top = played[0]
 bb = sorted([r for r in rows if r["type"] == "Battleship" and r["bt"] >= FLOOR], key=lambda r: -r["wr"])
-allf = sorted([r for r in rows if r["bt"] >= FLOOR], key=lambda r: r["wr"])
-below = [r for r in allf if r["wr"] < top["wr"]]
 
 # The operator posts by hand (never automated — see the runbook). Turn this
 # mention into a hyperlink to the realm URL when pasting into arca.live's
@@ -161,9 +160,6 @@ w("")
 w(f"{MONTH}월 아시아 공방에서 제일 많이 굴러간 10티어는 {ko(top['name'])}였음. "
   f"{top['bt']:,}전투로 함종 관계없이 전체 1위, 2위({ko(played[1]['name'])} {played[1]['bt']:,})와 차이도 큼.")
 w(f"근데 승률은 {top['wr']:.2f}%로, {FLOOR:,}전투 이상 10티어 전함 {len(bb)}척 중 {bb.index(top)+1}위임.")
-if below:
-    w(f"(10티어 전체로 넓히면 {len(allf)}척 중 밑에서 {len(below)+1}번째. "
-      + ", ".join(f"{ko(r['name'])} {r['wr']:.2f}%" for r in below[:3]) + " 등이 더 아래임.)")
 w("")
 w("■ 집계 기준")
 w(f"· 아시아 / 공방 / 10티어")
@@ -175,7 +171,6 @@ else:
     w(f"· 기간: {_seen[0].month}월 {_seen[0].day}일 ~ {_seen[-1].month}월 {_seen[-1].day}일 "
       f"(※ {a.month}월 {want}일 중 {days}일만 집계됨)")
 w(f"· 표본: 10티어 총 {tot:,}전투 (필터 없음)")
-w(f"· 아래 순위표에는 {FLOOR:,}전투 이상 굴러간 배만 올렸음 (표본 적은 배가 위로 튀는 걸 막으려고)")
 w(f"· 모집단 가중 평균 승률 {wtd:.2f}%")
 w("")
 w("■ 함종별 전투 비중")
@@ -213,7 +208,7 @@ w("많이 타는 배들이 대체로 승률 하위권에 몰려 있음.")
 w("")
 shown = 0
 for r in played[1:]:
-    if shown >= 4 or r["wr"] >= wtd:
+    if shown >= TOP_N or r["wr"] >= wtd:
         continue
     pool = sorted([x for x in rows if x["type"] == r["type"] and x["bt"] >= FLOOR], key=lambda x: -x["wr"])
     tag = f" ({KOT[r['type']]} 중 최하위)" if pool and pool[-1]["name"] == r["name"] else ""
@@ -238,7 +233,7 @@ for t, k in KOT.items():
     if not pool:
         continue
     w(f"[{k} {len(pool)}척]")
-    for i, r in enumerate(pool[:5], 1):
+    for i, r in enumerate(pool[:TOP_N], 1):
         d = f"  (전월대비 {r['wr']-r['pwr']:+.2f}p)" if r["pwr"] else ""
         pr = prev_rank.get(r["sid"])
         if pr is None:
@@ -250,7 +245,7 @@ for t, k in KOT.items():
         else:
             mv = f"  [▼{i - pr}]"
         w(f"{i}. {nm(r['name'])}  {r['wr']:.2f}%  {r['bt']:,}전투  평딜 {r['dmg']:,}{d}{mv}")
-    if pool[-1] not in pool[:5]:
+    if pool[-1] not in pool[:TOP_N]:
         w(f"   최하위: {nm(pool[-1]['name'])}  {pool[-1]['wr']:.2f}%  {pool[-1]['bt']:,}전투")
     w("")
 mov = [r for r in rows if r["pwr"] and r["bt"] >= MOVER_FLOOR]
