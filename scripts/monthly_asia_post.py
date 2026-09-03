@@ -15,7 +15,7 @@ Archive each month's output if you want a long series.
 """
 import sys, calendar, datetime, json
 from collections import defaultdict
-from django.db.models import Sum
+from django.db.models import Sum, Min
 from warships.models import ShipPopDailyAgg, Ship
 
 YEAR = int(sys.argv[-2]) if len(sys.argv) >= 3 else 2026
@@ -40,7 +40,16 @@ KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 �
       "Kearsarge": "키어사지", "Azuma": "아즈마", "Kitakaze": "키타카제",
       "Affondatore": "아폰다토레", "Conqueror": "컨쿼러", "Schlieffen": "슐리펜",
       "Worcester": "우스터", "Venezia": "베네치아", "Gearing": "기어링",
-      "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B"}
+      "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B",
+      "Almirante Irizar": "알미란테 이리사르", "20 de Julio": "20 데 훌리오",
+      # Added for the August post. Midway/Hayate/Ohio/Gato are standard,
+      # high-confidence transliterations (each is a common class/hull name
+      # with established Korean naval-discussion usage). Amiral Lartigue and
+      # Cassard are lower-confidence guesses, unattested in the wild same as
+      # 세치 지 세템브루 / 프린스 판 오라녜 above — flag both for the
+      # native-speaker read before this post goes out (runbook §5 step 3).
+      "Midway": "미드웨이", "Hayate": "하야테", "Ohio": "오하이오", "Gato": "가토",
+      "Amiral Lartigue": "아미랄 라르티그", "Cassard": "카사르"}
 
 def _norm(n):
     # WG ship names carry NON-BREAKING spaces (e.g. 'San\xa0Martín'); normalise
@@ -85,11 +94,33 @@ rows = []
 for sid, r in cur.items():
     s = t10[sid]
     p = prev.get(sid)
-    rows.append(dict(name=s.name, type=s.ship_type, bt=r["bt"],
+    rows.append(dict(sid=sid, name=s.name, type=s.ship_type, bt=r["bt"],
                      wr=round(r["wn"] / r["bt"] * 100, 2),
                      dmg=int(r["dm"] / r["bt"]),
                      pwr=round(p["wn"] / p["bt"] * 100, 2) if p and p["bt"] >= MOVER_FLOOR else None,
                      pbt=p["bt"] if p else 0))
+
+# Prior-month rank within each ship's type, at the same FLOOR gate used for this
+# month's tables — independent of MOVER_FLOOR, which only gates the wr-delta.
+# Used for the record-chart-style rank movement column below.
+prev_rows = []
+for sid, r in prev.items():
+    s = t10[sid]
+    prev_rows.append(dict(sid=sid, type=s.ship_type,
+                          wr=round(r["wn"] / r["bt"] * 100, 2), bt=r["bt"]))
+prev_rank = {}
+for t in KOT:
+    pool = sorted([x for x in prev_rows if x["type"] == t and x["bt"] >= FLOOR], key=lambda x: -x["wr"])
+    for i, x in enumerate(pool, 1):
+        prev_rank[x["sid"]] = i
+
+# T10 ships whose earliest-ever ship-pop record falls inside this month: our
+# best proxy for "entered the game this patch" (verified against known
+# releases; floor-crossing veterans do NOT show up here since their earliest
+# record predates the month).
+first_seen = (ShipPopDailyAgg.objects.filter(realm=REALM, mode=MODE, ship_id__in=t10)
+              .values("ship_id").annotate(fs=Min("date")))
+new_ships = sorted([f for f in first_seen if a <= f["fs"] <= b], key=lambda f: f["fs"])
 
 tot = sum(r["bt"] for r in rows)
 wtd = sum(r["bt"] * r["wr"] for r in rows) / tot
@@ -102,9 +133,18 @@ bb = sorted([r for r in rows if r["type"] == "Battleship" and r["bt"] >= FLOOR],
 allf = sorted([r for r in rows if r["bt"] >= FLOOR], key=lambda r: r["wr"])
 below = [r for r in allf if r["wr"] < top["wr"]]
 
+# The operator posts by hand (never automated — see the runbook). Turn this
+# mention into a hyperlink to the realm URL when pasting into arca.live's
+# editor; the plain-text output below can't carry that markup itself.
+print(f"### NOTE: hyperlink \"battlestats.online\" in the opening line to "
+      f"https://battlestats.online/?realm={REALM} when posting to arca.live.\n")
+
 O = []
 w = O.append
 w(f"제목: {MONTH}월 아시아 공방 10티어 통계 정리 ({tot/10000:.0f}만 전투)")
+w("")
+w("안녕하세요! battlestats.online 만든 사람입니다. 사이트에 쌓인 데이터로 지난달 아시아 공방을 정리해봤습니다.")
+w("숫자는 전부 사이트에서 직접 확인할 수 있고, 가입이나 로그인 같은 건 없습니다.")
 w("")
 w(f"{MONTH}월 아시아 공방에서 제일 많이 굴러간 10티어는 {ko(top['name'])}였음. "
   f"{top['bt']:,}전투로 함종 관계없이 전체 1위, 2위({ko(played[1]['name'])} {played[1]['bt']:,})와 차이도 큼.")
@@ -112,9 +152,6 @@ w(f"근데 승률은 {top['wr']:.2f}%로, {FLOOR:,}전투 이상 10티어 전함
 if below:
     w(f"(10티어 전체로 넓히면 {len(allf)}척 중 밑에서 {len(below)+1}번째. "
       + ", ".join(f"{ko(r['name'])} {r['wr']:.2f}%" for r in below[:3]) + " 등이 더 아래임.)")
-w("")
-w("battlestats.online 만든 사람입니다. 사이트에 쌓인 데이터로 지난달 아시아 공방을 정리해봤습니다.")
-w("숫자는 전부 사이트에서 직접 확인할 수 있고, 가입이나 로그인 같은 건 없습니다.")
 w("")
 w("■ 집계 기준")
 w(f"· 아시아 / 공방 / 10티어")
@@ -132,6 +169,26 @@ w("")
 w("■ 함종별 전투 비중")
 w(" · ".join(f"{KOT[t]} {v/tot*100:.1f}%" for t, v in sorted(mix.items(), key=lambda x: -x[1])))
 w("")
+if new_ships:
+    w(f"■ {MONTH}월 신규 함선")
+    w("이번 달 데이터에 처음 등장한 10티어 함선입니다.")
+    w("")
+    for f in new_ships:
+        sid = f["ship_id"]
+        s = t10[sid]
+        r = cur.get(sid)
+        if not r:
+            continue
+        wr = round(r["wn"] / r["bt"] * 100, 2)
+        note = f" (※ {FLOOR:,}전투 미만 — 표본이 작아서 승률은 지켜봐야 함)" if r["bt"] < FLOOR else ""
+        label = nm(s.name)
+        # nm() already opens a "(English name)" paren when a KO mapping
+        # exists; fold the ship type into that same paren instead of a
+        # second back-to-back "(...)  (...)".
+        label = f"{label[:-1]} · {KOT[s.ship_type]})" if label.endswith(")") else f"{label} ({KOT[s.ship_type]})"
+        w(f"· {label} — {f['fs'].month}월 {f['fs'].day}일 첫 등장, "
+          f"{r['bt']:,}전투, 승률 {wr:.2f}%{note}")
+    w("")
 exc = None
 for r in played[:6]:
     pool = sorted([x for x in rows if x["type"] == r["type"] and x["bt"] >= FLOOR],
@@ -161,6 +218,8 @@ else:
     w("많이 타는 배 중에 승률 상위권인 예외는 이번 달엔 없었음.")
 w("")
 w(f"■ 함종별 승률 상위 ({MONTH}월, {FLOOR:,}전투 이상)")
+w(f"[  ] 안 숫자는 같은 함종 순위표에서 {pm.month}월 대비 순위 변동임. NEW는 {pm.month}월엔 "
+  f"이 함종 순위표({FLOOR:,}전투 이상)에 없었다는 뜻이고, 진짜 신규 함선과는 다름.")
 w("")
 for t, k in KOT.items():
     pool = sorted([r for r in rows if r["type"] == t and r["bt"] >= FLOOR], key=lambda r: -r["wr"])
@@ -169,7 +228,16 @@ for t, k in KOT.items():
     w(f"[{k} {len(pool)}척]")
     for i, r in enumerate(pool[:5], 1):
         d = f"  (전월대비 {r['wr']-r['pwr']:+.2f}p)" if r["pwr"] else ""
-        w(f"{i}. {nm(r['name'])}  {r['wr']:.2f}%  {r['bt']:,}전투  평딜 {r['dmg']:,}{d}")
+        pr = prev_rank.get(r["sid"])
+        if pr is None:
+            mv = "  [NEW]"
+        elif pr == i:
+            mv = "  [-]"
+        elif pr > i:
+            mv = f"  [▲{pr - i}]"
+        else:
+            mv = f"  [▼{i - pr}]"
+        w(f"{i}. {nm(r['name'])}  {r['wr']:.2f}%  {r['bt']:,}전투  평딜 {r['dmg']:,}{d}{mv}")
     if pool[-1] not in pool[:5]:
         w(f"   최하위: {nm(pool[-1]['name'])}  {pool[-1]['wr']:.2f}%  {pool[-1]['bt']:,}전투")
     w("")
@@ -191,6 +259,8 @@ w("· 사이트 순위표는 최근 60일 롤링 기준이라 이 글 숫자와 
 w("")
 w("보고 싶은 지표 있으면 말씀해주세요. 8~9티어나 랭겜도 같은 방식으로 뽑을 수 있습니다. "
   "이상해 보이는 숫자 있으면 지적해주시면 확인해보겠습니다.")
+w("")
+w("사이트 하단의 '피드백 남기기' 링크로도 의견 남기실 수 있습니다.")
 w("")
 w("원본 데이터: https://battlestats.online/?realm=asia")
 print("\n".join(O))
