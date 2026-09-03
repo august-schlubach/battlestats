@@ -4419,6 +4419,36 @@
                 "correlation-budget-resized-again",
                 "ranked-correlation-query-optimised"
             ]
+        },
+        "agents/runbooks/runbook-ship-standings-75d-spike-2026-09-03.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "ship standings 75d spike",
+                "60d vs 75d board comparison",
+                "why we skipped 75d",
+                "wait for 90d decision",
+                "window widen leader churn",
+                "spike_ship_board_window.py"
+            ],
+            "tags": [
+                "ship-badges",
+                "ship-standings",
+                "SHIP_LEADERBOARD_WINDOW_DAYS",
+                "SHIP_BADGE_MIN_BATTLES",
+                "spike",
+                "decision",
+                "coverage",
+                "leader-stability",
+                "read-only"
+            ],
+            "archive_on": [
+                "90d-window-shipped",
+                "ship-standings-feature-removed"
+            ]
         }
     }
 }
