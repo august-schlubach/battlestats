@@ -41,7 +41,15 @@ KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 �
       "Affondatore": "아폰다토레", "Conqueror": "컨쿼러", "Schlieffen": "슐리펜",
       "Worcester": "우스터", "Venezia": "베네치아", "Gearing": "기어링",
       "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B",
-      "Almirante Irizar": "알미란테 이리사르", "20 de Julio": "20 데 훌리오"}
+      "Almirante Irizar": "알미란테 이리사르", "20 de Julio": "20 데 훌리오",
+      # Added for the August post. Midway/Hayate/Ohio/Gato are standard,
+      # high-confidence transliterations (each is a common class/hull name
+      # with established Korean naval-discussion usage). Amiral Lartigue and
+      # Cassard are lower-confidence guesses, unattested in the wild same as
+      # 세치 지 세템브루 / 프린스 판 오라녜 above — flag both for the
+      # native-speaker read before this post goes out (runbook §5 step 3).
+      "Midway": "미드웨이", "Hayate": "하야테", "Ohio": "오하이오", "Gato": "가토",
+      "Amiral Lartigue": "아미랄 라르티그", "Cassard": "카사르"}
 
 def _norm(n):
     # WG ship names carry NON-BREAKING spaces (e.g. 'San\xa0Martín'); normalise
@@ -173,7 +181,12 @@ if new_ships:
             continue
         wr = round(r["wn"] / r["bt"] * 100, 2)
         note = f" (※ {FLOOR:,}전투 미만 — 표본이 작아서 승률은 지켜봐야 함)" if r["bt"] < FLOOR else ""
-        w(f"· {nm(s.name)} ({KOT[s.ship_type]}) — {f['fs'].month}월 {f['fs'].day}일 첫 등장, "
+        label = nm(s.name)
+        # nm() already opens a "(English name)" paren when a KO mapping
+        # exists; fold the ship type into that same paren instead of a
+        # second back-to-back "(...)  (...)".
+        label = f"{label[:-1]} · {KOT[s.ship_type]})" if label.endswith(")") else f"{label} ({KOT[s.ship_type]})"
+        w(f"· {label} — {f['fs'].month}월 {f['fs'].day}일 첫 등장, "
           f"{r['bt']:,}전투, 승률 {wr:.2f}%{note}")
     w("")
 exc = None
