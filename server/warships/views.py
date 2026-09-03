@@ -719,10 +719,16 @@ BATTLE_HISTORY_WINDOWS = {
     "day":    {"period": "daily", "windows": 1},
     "week":   {"period": "daily", "windows": 7},
     "month":  {"period": "daily", "windows": 30},
-    # The extended lookback, second foothold toward the 90d rolling end
-    # state (45d shipped v4.4.0). Sits inside retention (60 < 105) and
-    # routes through the same daily-rollup path as `month`, just wider.
+    # Permanent selector pills (2026-09-02), not transitional footholds:
+    # `fortyfive` and `sixty` were each the sole "extended lookback" window
+    # in turn (v4.4.0, v5.3.11) before being renamed away on the next hop.
+    # This reverses that — all three now coexist so a reader can pick
+    # 45/60/75 directly instead of only ever having the current widest.
+    # All three route through the same daily-rollup path as `month`, just
+    # wider, and all sit inside retention (75 < 105).
+    "fortyfive": {"period": "daily", "windows": 45},
     "sixty": {"period": "daily", "windows": 60},
+    "seventyfive": {"period": "daily", "windows": 75},
     "year":   {"period": "daily", "windows": 365},
 }
 BATTLE_HISTORY_DEFAULT_WINDOW = "week"

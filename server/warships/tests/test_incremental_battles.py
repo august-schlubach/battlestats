@@ -3106,6 +3106,38 @@ class BattleHistoryEndpointTests(TestCase):
         self.assertEqual(body["totals"]["battles"], 9)
         self.assertEqual(body["totals"]["wins"], 5)
 
+    def test_window_fortyfive_returns_45_days_of_daily_rollups(self):
+        """The `fortyfive` window reads PlayerDailyShipStats with
+        windows=45. Rows inside 45 days are included; the 46-day row is
+        excluded.
+        """
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=3,
+        )
+        # 44 days old — inside the 45-day window, outside the 30-day month.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=44),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
+        )
+        # 46 days old — outside the 45-day window.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=46),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=99, wins=99,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=fortyfive&mode=random",
+            )
+        body = r.json()
+        self.assertEqual(body["totals"]["battles"], 9)
+        self.assertEqual(body["totals"]["wins"], 5)
+
     def test_window_sixty_returns_60_days_of_daily_rollups(self):
         """The `sixty` window reads PlayerDailyShipStats with windows=60.
         Rows inside 60 days are included; the 61-day row is excluded.
@@ -3132,6 +3164,38 @@ class BattleHistoryEndpointTests(TestCase):
         ):
             r = self.client.get(
                 "/api/player/api_test/battle-history/?window=sixty&mode=random",
+            )
+        body = r.json()
+        self.assertEqual(body["totals"]["battles"], 9)
+        self.assertEqual(body["totals"]["wins"], 5)
+
+    def test_window_seventyfive_returns_75_days_of_daily_rollups(self):
+        """The `seventyfive` window reads PlayerDailyShipStats with
+        windows=75. Rows inside 75 days are included; the 76-day row is
+        excluded.
+        """
+        today = django_timezone.now().date()
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today, ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=5, wins=3,
+        )
+        # 74 days old — inside the 75-day window, outside the 30-day month.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=74),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=4, wins=2,
+        )
+        # 76 days old — outside the 75-day window.
+        PlayerDailyShipStats.objects.create(
+            player=self.player, date=today - timedelta(days=76),
+            ship_id=42, ship_name="Yamato",
+            mode=PlayerDailyShipStats.MODE_RANDOM, battles=99, wins=99,
+        )
+        with mock.patch.dict(
+            "os.environ", {"BATTLE_HISTORY_API_ENABLED": "1"}, clear=False,
+        ):
+            r = self.client.get(
+                "/api/player/api_test/battle-history/?window=seventyfive&mode=random",
             )
         body = r.json()
         self.assertEqual(body["totals"]["battles"], 9)
@@ -3223,8 +3287,8 @@ class BattleHistoryEndpointTests(TestCase):
         Regression (2026-08-24, found on `briansayshello` NA): the probe ran
         over every `PlayerDailyShipStats` row for the player, so its width was
         `BATTLE_HISTORY_ARCHIVE_RETENTION_DAYS` (prod 105) while every surface
-        it fed was judged at 60. A player whose only ranked rows sat in the
-        60-105 day band (all 21 of theirs landed on a single day 66 days
+        it fed was judged at 75. A player whose only ranked rows sat in the
+        75-105 day band (all 21 of theirs landed on a single day 80 days
         earlier) reported `ranked` as available; the client's
         `battleHistoryIndicatesActivity` lit the Ranked tab on that disjunct,
         the auto-flip to the ranked History sub-view never fired, and the
@@ -3234,11 +3298,11 @@ class BattleHistoryEndpointTests(TestCase):
         self._seed_daily_rows({
             42: {"battles": 4, "wins": 2, "ship_name": "Yamato",
                  "mode": PlayerDailyShipStats.MODE_RANDOM, "date": today},
-            # 66 days back: inside the 105-day rollup retention, outside the
-            # 60-day window the client judges every pill on.
+            # 80 days back: inside the 105-day rollup retention, outside the
+            # 75-day window the client judges every pill on.
             43: {"battles": 21, "wins": 12, "ship_name": "Dalian",
                  "mode": PlayerDailyShipStats.MODE_RANKED, "season_id": 29,
-                 "date": today - timedelta(days=66)},
+                 "date": today - timedelta(days=80)},
         })
         with mock.patch.dict(
             "os.environ",
@@ -3246,7 +3310,7 @@ class BattleHistoryEndpointTests(TestCase):
             clear=False,
         ):
             response = self.client.get(
-                "/api/player/api_test/battle-history/?window=sixty&mode=ranked",
+                "/api/player/api_test/battle-history/?window=seventyfive&mode=ranked",
             )
         payload = response.json()
         # Pin the scenario: the window really is empty of ranked battles.
@@ -3279,7 +3343,7 @@ class BattleHistoryEndpointTests(TestCase):
             clear=False,
         ):
             response = self.client.get(
-                "/api/player/api_test/battle-history/?window=sixty&mode=ranked",
+                "/api/player/api_test/battle-history/?window=seventyfive&mode=ranked",
             )
         payload = response.json()
         # Season-filtered out of the totals...

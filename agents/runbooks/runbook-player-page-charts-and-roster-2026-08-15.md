@@ -254,6 +254,88 @@ A restored pick counts as an explicit pick (`userPickedWindow`) **only when it
 differs from the default** — otherwise remembering `60d` would defeat the
 standalone card's no-battles collapse and surface empty cards.
 
+## BattleHistoryCard — 60d → 75d, the third foothold (2026-09-02, worktree `worktree-seventyfive-day-window`)
+
+**The sections above describe the window as it stood at 60d; the live values
+are now 75d.** This is a straight rename, same shape as the 45d→60d hop
+(`fortyfive`→`sixty`) on 2026-08-19: `BATTLE_HISTORY_WINDOWS["sixty"]` (60) →
+`["seventyfive"]` (75) in `views.py`, `STRIP_DOMAIN_DAYS` 60→75,
+`STRIP_FETCH_WINDOW` `'sixty'`→`'seventyfive'`, the `sixty` arm of every
+`BattleHistoryWindow`-keyed map, the pill label `60d`→`75d`
+(`battleHistory.window.seventyfive`, en/ko/ja), and the header key
+`last60`→`last75`. **Scoped to the player-timeline card only** —
+`SHIP_LEADERBOARD_WINDOW_DAYS` (ship standings) is untouched and stays at 60;
+the two windows are independent levers on the same 90d end state (see
+`runbook-ship-standings-60d-rollout-2026-08-18.md` for that one).
+
+Bar geometry at the new domain: `barW = (100 − 0.5×74) ÷ 75 = 0.84`, so
+`barW + gap = 1.34` and the bracket's left edge = `(75 − span) × 1.34`. The
+Day/Week/Month backdrop stays 30 bars (`barW = 2.85`, pitch `3.35`) —
+unaffected, since `stripDomainForWindow` only swaps in `STRIP_DOMAIN_DAYS` when
+`WINDOW_SPAN_DAYS[w] > 30`. One geometry subtlety this rename exposed: the
+`window range bracket` test that clicks the wide pill then Week does **not**
+land on 75-bar geometry — clicking Week sets `window = 'week'`, and
+`stripDomainForWindow('week')` is 30 regardless of what was selected before, so
+that assertion is identical to the plain Week click. The comment in
+`BattleHistoryCard.test.tsx` describing this as "measured against 60 bars and
+reads much narrower" predates this rename and was already inaccurate; it now
+states the actual mechanism.
+
+75d is computable today (2026-09-02): capture started 2026-06-13, giving 81
+days of depth, clearing 75 with room to spare. 90d is not — per
+[[project_90d_window_ui_branch]] it stays blocked until ~2026-09-11. Backend
+(`test_incremental_battles.py`, sqlite gate) and frontend
+(`BattleHistoryCard.test.tsx`, 57 tests) both green; `tsc --noEmit` clean.
+Not yet deployed — built and verified in a local worktree stack
+(cloud DB, throwaway Redis/RabbitMQ/Django containers) per
+`runbook-worktree-local-prereqs-2026-08-13.md`; no snapshot rebuild needed,
+unlike the ship-standings lever, since the daily-rollup path just requests a
+wider slice of `PlayerDailyShipStats` and there is nothing to warm ahead of
+time.
+
+## BattleHistoryCard — 45d/60d restored as PERMANENT pills, not stepping stones (2026-09-02, same worktree)
+
+**Reverses the framing above.** The section immediately preceding this one
+treats `fortyfive`→`sixty`→`seventyfive` as a single evolving pill — each
+rename deletes the previous name, so there was only ever one "extended
+lookback" pill at a time. That was also the explicit product framing in
+`agents/work-items/data-capture-utility-audit-2026-08-05.md`: *"45d and 60d are
+disposable stepping stones toward it, not a selector."* This entry reverses
+that decision: `fortyfive` (45) and `sixty` (60) are added back into
+`BATTLE_HISTORY_WINDOWS` and `VISIBLE_WINDOWS` **alongside** `seventyfive`
+(75), permanently. The pill row is now Day / Week / Month / 45d / 60d / 75d —
+six pills, not four.
+
+**Why this was cheap to do.** Nothing about the rename-based architecture
+needed to change shape, because `stripDomainForWindow`'s split
+(`WINDOW_SPAN_DAYS[w] > 30 ? STRIP_DOMAIN_DAYS : 30`) already generalizes to
+any number of "wide" windows, not just one — 45d/60d/75d all share the same
+75-day strip backdrop `STRIP_FETCH_WINDOW` already fetches, so no new request
+shape or snapshot warm was needed. The only genuinely new visible behavior:
+**the bracket is now visibly opaque at 45d and 60d** (`span < domain`, same
+mechanism Day/Week already use against the 30-day backdrop) where previously
+only Day/Week showed a visible bracket and Month/the-one-wide-pill dissolved
+to full-width. Bracket geometry at domain=75 (pitch 1.34, unchanged from the
+75d rollout above): 45d → `left = 30 × 1.34 = 40.2`, `scale = 0.598`; 60d →
+`left = 15 × 1.34 = 20.1`, `scale = 0.799`.
+
+**The 30d-empty fallback still jumps straight to `seventyfive`**, not to the
+narrowest of the three with data — a deliberate choice (kept the existing,
+already-tested logic rather than adding three trailing-sum checks for a
+marginally nicer landing spot). 45d/60d are reachable only by the reader
+clicking them.
+
+Backend: two boundary tests restored verbatim from before the 60d→75d rename
+(`test_window_fortyfive_returns_45_days_of_daily_rollups`,
+`test_window_sixty_returns_60_days_of_daily_rollups`; boundaries at
+44/46 and 59/61 days). Frontend: `VISIBLE_WINDOWS` and every
+`BattleHistoryWindow`-keyed map gained `fortyfive`/`sixty` entries; i18n
+(`battleHistory.window.{fortyfive,sixty}`, `.header.last{45,60}`) restored in
+en/ko/ja; new tests cover the shared 75-day backdrop across all three wide
+pills, the 45d/60d bracket geometry, and a 60d localStorage round-trip.
+Backend 1298 passed (2 skipped, unrelated), frontend 729 passed, `tsc
+--noEmit` clean. Same worktree, not yet deployed.
+
 ## The other player-page figures
 
 - **ActivitySVG** — activity over time.
