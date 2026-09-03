@@ -131,22 +131,22 @@ export const BATTLE_HISTORY_FETCH_TTL_MS = 60_000;
 // dedup the prefetch exists to get. Also the strip's fixed domain (see
 // STRIP_DOMAIN_DAYS).
 //
-// The card OPENS on Month (30 days). `sixty` is one pill click away and is also
-// the automatic fallback for a player with nothing in the last 30 days — see
-// the fallback effect in the component. Note this is no longer the window the
-// strip fetches: the strip always pulls STRIP_FETCH_WINDOW (60d) so the 60d
-// pill has its data ready to animate into and the fallback has something to
-// decide on. That costs a second request per card — month for the view, sixty
-// for the strip — which cannot be collapsed, because totals and by_ship are
-// aggregated server-side per window and a 30d view is not derivable from a
-// 60d payload.
+// The card OPENS on Month (30 days). `seventyfive` is one pill click away and
+// is also the automatic fallback for a player with nothing in the last 30
+// days — see the fallback effect in the component. Note this is no longer the
+// window the strip fetches: the strip always pulls STRIP_FETCH_WINDOW (75d)
+// so the 75d pill has its data ready to animate into and the fallback has
+// something to decide on. That costs a second request per card — month for
+// the view, seventyfive for the strip — which cannot be collapsed, because
+// totals and by_ship are aggregated server-side per window and a 30d view is
+// not derivable from a 75d payload.
 export const DEFAULT_BATTLE_HISTORY_WINDOW = 'month';
 
 // The window the trend strip always fetches, independent of the pill. Wider
-// than the default view on purpose: the strip is the backdrop the 60d pill
+// than the default view on purpose: the strip is the backdrop the 75d pill
 // animates out to, and the emptiness of the trailing 30 days (which decides
 // the fallback) is read off it.
-export const STRIP_FETCH_WINDOW = 'sixty';
+export const STRIP_FETCH_WINDOW = 'seventyfive';
 
 export const battleHistoryFetchUrl = (
     playerName: string, realm: string,
@@ -508,7 +508,7 @@ const stripBarWidth = (n: number): number =>
 //
 // ALWAYS MOUNTED, never conditionally rendered and never keyed on the data-
 // presence signal. CSS transitions do not run on first render, so a bracket that
-// mounts on demand would pop into place with no motion on 60d → Month — and the
+// mounts on demand would pop into place with no motion on 75d → Month — and the
 // motion is the whole point. Only opacity and the group transform are driven from
 // state. At the full domain the bracket expands to the strip's entire width as it
 // fades to nothing, dissolving exactly as it stops carrying information.
@@ -678,7 +678,7 @@ const InlineSparkline: React.FC<{
     // Crosshair position, in viewBox x (0–100) rather than a day index: the rule
     // tracks the pointer CONTINUOUSLY, at pointer granularity, instead of
     // snapping between 30 discrete stops. Storing viewBox units also survives a
-    // domain change for free — the coordinate space is the same at 30d and 60d.
+    // domain change for free — the coordinate space is the same at 30d and 75d.
     // Declared above the short-data bail below; a hook after an early return is
     // a conditional hook call.
     const [hoverX, setHoverX] = React.useState<number | null>(null);
@@ -702,7 +702,7 @@ const InlineSparkline: React.FC<{
     const offset = days.length - shown;
     const barW = stripBarWidth(shown);
     // Every scale below is computed over the VISIBLE days only. Carrying the
-    // 60-day maximum into the 30-day view would flatten it against a peak the
+    // 75-day maximum into the 30-day view would flatten it against a peak the
     // reader can no longer see.
     const visible = days.slice(offset);
     const maxBattles = Math.min(STRIP_BAR_CAP, Math.max(1, ...visible.map(d => d.battles)));
@@ -884,7 +884,7 @@ const InlineSparkline: React.FC<{
                     style={{ overflow: 'visible' }}
                 >
                     {/* Days outside the shown domain sit at negative x and are
-                        clipped rather than unmounted, so a 30d↔60d change moves
+                        clipped rather than unmounted, so a 30d↔75d change moves
                         every bar along one continuous path instead of popping half
                         of them in and out of existence. That clip used to be the
                         SVG viewport; `overflow: visible` above hands it back, so
@@ -1036,18 +1036,22 @@ const InlineSparkline: React.FC<{
 
 type Period = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
-// `sixty` is the second foothold toward the 90d rolling end state, taking
-// over from the 45d window shipped in v4.4.0. Retention is 105d, so 60 sits
-// well inside it, but the live capture window backfills forward and does not
-// reach 60d depth yet — the pre-fill region renders empty by design.
+// `fortyfive`/`sixty`/`seventyfive` are PERMANENT selector pills (2026-09-02),
+// not transitional footholds — each was in turn the sole "extended lookback"
+// window (v4.4.0, v5.3.11, and this one) before being renamed away on the
+// next hop. This reverses that: all three coexist so a reader can pick
+// 45/60/75 directly instead of only ever having the current widest. Retention
+// is 105d, so all three sit well inside it, but the live capture window
+// backfills forward and does not reach 75d depth yet — the pre-fill region
+// renders empty by design.
 // `year` is intentionally excluded from VISIBLE_WINDOWS — capture started
 // 2026-04-28 so a 365-day view won't carry meaningful additional context
 // for the next ~12 months. The backend still accepts ?window=year for
 // back-compat, but no pill exposes it. Re-add to VISIBLE_WINDOWS once
 // >180 days of capture have accumulated.
-type BattleHistoryWindow = 'day' | 'week' | 'month' | 'sixty' | 'year';
+type BattleHistoryWindow = 'day' | 'week' | 'month' | 'fortyfive' | 'sixty' | 'seventyfive' | 'year';
 const VISIBLE_WINDOWS: ReadonlyArray<BattleHistoryWindow> = [
-    'day', 'week', 'month', 'sixty',
+    'day', 'week', 'month', 'fortyfive', 'sixty', 'seventyfive',
 ];
 // `year` has no pill (see VISIBLE_WINDOWS above) and so no translated key —
 // it is unreachable UI, and inventing a key for it would put an untranslatable
@@ -1056,18 +1060,22 @@ const WINDOW_LABEL_KEY: Record<BattleHistoryWindow, StringKey | null> = {
     day: 'battleHistory.window.day',
     week: 'battleHistory.window.week',
     month: 'battleHistory.window.month',
+    fortyfive: 'battleHistory.window.fortyfive',
     sixty: 'battleHistory.window.sixty',
+    seventyfive: 'battleHistory.window.seventyfive',
     year: null,
 };
 const WINDOW_TITLE: Record<BattleHistoryWindow, string> = {
     day: 'Today (UTC calendar date, matching the trend strip\'s last bar)',
     week: 'Last 7 days',
     month: 'Last 30 days',
+    fortyfive: 'Last 45 days',
     sixty: 'Last 60 days',
+    seventyfive: 'Last 75 days',
     year: 'Last 365 days',
 };
 // Tooltip shown when a window pill is disabled for having no battles in its
-// span. Every window's emptiness is derived client-side from the 60-day strip
+// span. Every window's emptiness is derived client-side from the 75-day strip
 // the card already holds — Day included, since 2026-07-30 made it a calendar
 // window like the rest (it previously needed a backend flag because a rolling
 // 24h span could not be read off calendar buckets).
@@ -1075,33 +1083,43 @@ const WINDOW_TITLE_EMPTY: Record<BattleHistoryWindow, string> = {
     day: 'No battles today',
     week: 'No battles in the last 7 days',
     month: 'No battles in the last 30 days',
+    fortyfive: 'No battles in the last 45 days',
     sixty: 'No battles in the last 60 days',
+    seventyfive: 'No battles in the last 75 days',
     year: 'No battles in the last 365 days',
 };
 const WINDOW_HEADER_KEY: Record<BattleHistoryWindow, StringKey | null> = {
     day: 'battleHistory.header.today',
     week: 'battleHistory.header.last7',
     month: 'battleHistory.header.last30',
+    fortyfive: 'battleHistory.header.last45',
     sixty: 'battleHistory.header.last60',
+    seventyfive: 'battleHistory.header.last75',
     year: null,
 };
 const WINDOW_HEADER_FALLBACK: Record<BattleHistoryWindow, string> = {
     day: 'Today',
     week: 'Last 7 days',
     month: 'Last 30 days',
+    fortyfive: 'Last 45 days',
     sixty: 'Last 60 days',
+    seventyfive: 'Last 75 days',
     year: 'Last 365 days',
 };
 // The trend strip's date domain, FIXED for every window pill. The strip is a
-// constant backdrop: toggling Day/Week/Month/60d re-scopes the tiles, treemaps
-// and table below it, but never reflows a single bar. The selected span is
-// reported instead by the WindowRangeBracket beneath the strip.
-export const STRIP_DOMAIN_DAYS = 60;
+// constant backdrop: toggling Day/Week/Month/45d/60d/75d re-scopes the tiles,
+// treemaps and table below it, but never reflows a single bar. The selected
+// span is reported instead by the WindowRangeBracket beneath the strip.
+export const STRIP_DOMAIN_DAYS = 75;
 
 // How many of those days the strip actually SHOWS. Day/Week/Month read against
-// a 30-day backdrop — the span they measure is legible there, where against 60
-// a single day is a sliver. Picking 60d widens the backdrop to the full held
-// domain, animated (the bars glide, see .sparkline-bar-rise rect in globals.css).
+// a 30-day backdrop — the span they measure is legible there, where against 75
+// a single day is a sliver. Picking 45d/60d/75d widens the backdrop to the
+// full held domain, animated (the bars glide, see .sparkline-bar-rise rect in
+// globals.css). 45d and 60d share that same 75-day backdrop as 75d — only the
+// bracket's span within it differs — so both now render a VISIBLE bracket
+// (span < domain), the same mechanism Day/Week already use against the 30-day
+// backdrop; only Month and 75d dissolve to full-width.
 //
 // The strip still holds all STRIP_DOMAIN_DAYS days at every setting; the days
 // outside the shown domain are positioned off the left edge of the viewBox and
@@ -1114,7 +1132,7 @@ export const stripDomainForWindow = (w: BattleHistoryWindow): number =>
 // STRIP_DOMAIN_DAYS at the call site so `year` (still typed, no pill exposes it)
 // cannot drive the bracket off the left edge.
 const WINDOW_SPAN_DAYS: Record<BattleHistoryWindow, number> = {
-    day: 1, week: 7, month: 30, sixty: 60, year: 365,
+    day: 1, week: 7, month: 30, fortyfive: 45, sixty: 60, seventyfive: 75, year: 365,
 };
 
 // Window-pill persistence. The pick sticks per (realm, player, mode) — the same
@@ -1225,7 +1243,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         // A restored pick counts as explicit ONLY when it differs from the
         // default. At the default the reader is where an untouched card would
         // have put them, so the standalone no-battles collapse below must still
-        // apply — otherwise remembering "60d" would make empty cards appear for
+        // apply — otherwise remembering "75d" would make empty cards appear for
         // players who previously had none.
         setUserPickedWindow(stored !== null && stored !== DEFAULT_BATTLE_HISTORY_WINDOW);
         setWindowPrefScope(prefScope);
@@ -1370,7 +1388,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     }, [playerName, realm, mode, refreshNonce, requestSignal,
         prefScope, windowPrefScope]);
 
-    // Fallback to 60d for a player with nothing in the last 30 days. The card
+    // Fallback to 75d for a player with nothing in the last 30 days. The card
     // opens on Month; if that span is empty but the wider one is not, showing an
     // empty Month is strictly worse than showing the battles that exist — so the
     // strip's own data promotes the view once it lands. The other pills then dim
@@ -1378,7 +1396,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     //
     // This is a DERIVATION, not a pick, and the distinction is the whole reason
     // it does not call writeWindowPref: persisting it would pin a returning
-    // player to 60d forever, long after they start playing again and Month is
+    // player to 75d forever, long after they start playing again and Month is
     // the better view. It also defers to a real stored pick and to any pill the
     // reader has touched this session.
     useEffect(() => {
@@ -1390,7 +1408,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             buildWindowedDays(stripByDay, n).reduce((sum, d) => sum + (d.battles || 0), 0);
         if (trailing(WINDOW_SPAN_DAYS[DEFAULT_BATTLE_HISTORY_WINDOW]) === 0
             && trailing(STRIP_DOMAIN_DAYS) > 0) {
-            setWindow('sixty');
+            setWindow('seventyfive');
         }
         // `window` is deliberately absent from the deps: this runs on the strip
         // landing, and re-running it when the window changes would fight a
@@ -1414,16 +1432,16 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
             onAvailabilityChange(false, []);
             return;
         }
-        // Judge on the WIDEST span the card can show — the strip's 60 days —
+        // Judge on the WIDEST span the card can show — the strip's 75 days —
         // not on whichever window is selected. The card opens on Month, so a
         // player whose last battles were 45 days ago has an empty month payload;
         // reading availability off that told the parent "no activity" and got
         // the Activity tab disabled before the 30d-empty fallback could promote
-        // them to 60d. That is precisely the population the fallback exists for.
+        // them to 75d. That is precisely the population the fallback exists for.
         // Falls back to the main payload only if the strip never arrives.
         // That fallback is one window NARROWER (Month, so `available_modes`
-        // covers 30 days rather than 60): on a failed strip fetch a ranked
-        // player whose rows sit in the 30-60 day band reports false and the
+        // covers 30 days rather than 75): on a failed strip fetch a ranked
+        // player whose rows sit in the 30-75 day band reports false and the
         // parent opens the Ranked tab on its History sub-view instead of
         // Activity. Accepted — History is populated for exactly that player,
         // the ranked TAB itself gates on `hasKnownRankedGames` rather than on
@@ -1555,7 +1573,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // so render the chrome (sparkline/header/pills/"no battles") instead. The
     // parent dark-outs the tab and switches away when availability is false.
     // `stripLoaded` is load-bearing here, not defensive: the fallback below
-    // switches a 30d-empty player to 60d only once the strip resolves. Without
+    // switches a 30d-empty player to 75d only once the strip resolves. Without
     // the gate the card collapses to null on the empty month payload first and
     // then reappears when the fallback lands — a visible flash for exactly the
     // population the fallback exists to serve.
@@ -1571,7 +1589,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
     // pre-retention-fill region simply renders empty by design. The same array
     // backs the empty-pill derivation below via trailing slices.
     const stripDays = buildWindowedDays(stripByDay, STRIP_DOMAIN_DAYS);
-    // Day/Week/Month read against 30 days; 60d widens to the full held domain.
+    // Day/Week/Month read against 30 days; 75d widens to the full held domain.
     const stripDomain = stripDomainForWindow(window);
     const spanDays = Math.min(WINDOW_SPAN_DAYS[window], stripDomain);
     const sparkline = (
@@ -1604,7 +1622,7 @@ const BattleHistoryCard: React.FC<BattleHistoryCardProps> = ({
         </>
     );
     // Empty-window pill disable. Day emptiness is the backend 24h flag; week/
-    // week/month/60d are derived from trailing slices of the strip by_day the
+    // week/month/75d are derived from trailing slices of the strip by_day the
     // already holds (gated on stripLoaded so a loading card never dims on
     // stale/absent data). A pill dims + goes unclickable when its window has
     // no battles — but never the window currently being viewed (handled at the
