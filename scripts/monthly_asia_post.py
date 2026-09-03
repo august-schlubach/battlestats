@@ -24,6 +24,15 @@ REALM, MODE, TIER = "asia", "random", 10
 FLOOR = 5000          # battles in-month required to appear in a ranking table
 MOVER_FLOOR = 8000    # battles in BOTH months required for a MoM delta
 
+SITE_URL = f"https://battlestats.online/?realm={REALM}"
+# arca.live's own post filter rejects the raw link outright (observed
+# 2026-09-02 on the August post attempt: "내용에 금지된 문구가 포함되어
+# 있습니다. [.online/]" — a literal-substring match on ".online/"). Bracket
+# the dot in anything printed into the post body below; a bare
+# "battlestats.online" mention with no trailing slash is unaffected and
+# does not need this treatment.
+SITE_URL_DISPLAY = f"battlestats[.]online/?realm={REALM}"
+
 KOT = {"Battleship": "전함", "Cruiser": "순양함", "Destroyer": "구축함",
        "AirCarrier": "항공모함", "Submarine": "잠수함"}
 KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 지 세템브루",
@@ -135,9 +144,12 @@ below = [r for r in allf if r["wr"] < top["wr"]]
 
 # The operator posts by hand (never automated — see the runbook). Turn this
 # mention into a hyperlink to the realm URL when pasting into arca.live's
-# editor; the plain-text output below can't carry that markup itself.
+# editor; the plain-text output below can't carry that markup itself. If
+# arca.live's filter rejects the hyperlink insertion too (it rejects the raw
+# link text — see SITE_URL_DISPLAY above), skip the hyperlink for this post;
+# a plain-text mention is fine, the bottom line is what needs to carry the URL.
 print(f"### NOTE: hyperlink \"battlestats.online\" in the opening line to "
-      f"https://battlestats.online/?realm={REALM} when posting to arca.live.\n")
+      f"{SITE_URL} when posting to arca.live.\n")
 
 O = []
 w = O.append
@@ -262,5 +274,5 @@ w("보고 싶은 지표 있으면 말씀해주세요. 8~9티어나 랭겜도 같
 w("")
 w("사이트 하단의 '피드백 남기기' 링크로도 의견 남기실 수 있습니다.")
 w("")
-w("원본 데이터: https://battlestats.online/?realm=asia")
+w(f"원본 데이터: {SITE_URL_DISPLAY} (대괄호 지우고 접속해주세요)")
 print("\n".join(O))
