@@ -67,6 +67,11 @@ NEXT_PUBLIC_LOCALE_SELECTOR=1
 # locale in navigator.languages. Live since v5.3.0. Never persisted, so one
 # click of the selector overrides it permanently.
 NEXT_PUBLIC_LOCALE_AUTODETECT=1
+# Timezone realm defaulting: an unchosen visitor lands on the realm their
+# browser timezone implies (Asia/Oceania → asia, Europe/Africa/Middle East →
+# eu, else na). Live since v5.6.8. Never persisted, so one click of the realm
+# selector overrides it permanently.
+NEXT_PUBLIC_REALM_AUTODETECT=1
 EOF
 fi
 

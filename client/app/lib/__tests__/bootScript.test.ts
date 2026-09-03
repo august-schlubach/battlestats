@@ -1,4 +1,5 @@
 import { buildBootScript } from '../bootScript';
+import { realmForTimeZone } from '../realmDetect';
 
 // The boot script is a raw string injected into <head> and run before paint, so
 // it can neither import a module nor be exercised by rendering the layout. This
@@ -93,5 +94,73 @@ describe('buildBootScript', () => {
         setLanguages(['ko-KR']);
         run(buildBootScript({ autodetectLocale: true }));
         expect(localStorage.getItem('bs-locale')).toBeNull();
+    });
+});
+
+// The realm branch duplicates realmForTimeZone() the same way the locale
+// branch duplicates detectLocale(): the boot string cannot import. The case
+// table below is driven THROUGH realmForTimeZone so a drift between the two
+// fails here rather than as a first-frame realm flash.
+const setTimeZone = (timeZone: string | undefined) => {
+    const resolvedOptions = () => ({ timeZone } as Intl.ResolvedDateTimeFormatOptions);
+    jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(
+        () => ({ resolvedOptions } as unknown as Intl.DateTimeFormat),
+    );
+};
+
+describe('buildBootScript realm autodetect', () => {
+    beforeEach(() => {
+        localStorage.clear();
+        document.documentElement.removeAttribute('data-realm');
+    });
+    afterEach(() => {
+        jest.restoreAllMocks();
+    });
+
+    it('stays na with autodetect off, whatever the timezone', () => {
+        setTimeZone('Asia/Seoul');
+        run(buildBootScript({ autodetectRealm: false }));
+        expect(document.documentElement.dataset.realm).toBe('na');
+    });
+
+    it.each([
+        ['Asia/Seoul', 'asia'],
+        ['Australia/Sydney', 'asia'],
+        ['Pacific/Auckland', 'asia'],
+        ['Europe/Paris', 'eu'],
+        ['Africa/Cairo', 'eu'],
+        ['Atlantic/Reykjavik', 'eu'],
+        ['Asia/Riyadh', 'eu'],
+        ['Asia/Istanbul', 'eu'],
+        ['America/Chicago', 'na'],
+        ['Pacific/Honolulu', 'na'],
+        ['UTC', 'na'],
+    ])('agrees with realmForTimeZone for %s → %s', (tz, realm) => {
+        setTimeZone(tz);
+        run(buildBootScript({ autodetectRealm: true }));
+        expect(document.documentElement.dataset.realm).toBe(realm);
+        expect(realmForTimeZone(tz) ?? 'na').toBe(realm);
+    });
+
+    it('lets a stored realm outrank detection', () => {
+        localStorage.setItem('bs-realm', 'na');
+        setTimeZone('Asia/Tokyo');
+        run(buildBootScript({ autodetectRealm: true }));
+        expect(document.documentElement.dataset.realm).toBe('na');
+    });
+
+    it('never writes the detected realm to storage', () => {
+        setTimeZone('Asia/Tokyo');
+        run(buildBootScript({ autodetectRealm: true }));
+        expect(document.documentElement.dataset.realm).toBe('asia');
+        expect(localStorage.getItem('bs-realm')).toBeNull();
+    });
+
+    it('falls back to na when Intl is unavailable', () => {
+        jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(() => {
+            throw new Error('no Intl');
+        });
+        run(buildBootScript({ autodetectRealm: true }));
+        expect(document.documentElement.dataset.realm).toBe('na');
     });
 });

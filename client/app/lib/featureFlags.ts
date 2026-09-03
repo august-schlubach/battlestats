@@ -30,3 +30,17 @@ export const isLocaleSelectorEnabled = (): boolean =>
 // agree: LocaleContext (React) and the pre-paint head script (lib/bootScript).
 export const isLocaleAutodetectEnabled = (): boolean =>
     process.env.NEXT_PUBLIC_LOCALE_AUTODETECT === '1';
+
+// Timezone realm defaulting. Off unless explicitly enabled. With it on, a
+// visitor who has never chosen a realm lands on the realm their browser's IANA
+// timezone implies (Asia/Oceania → asia, Europe/Africa/Middle East → eu,
+// everything else → na) instead of always na; precedence becomes
+// ?realm= > bs-realm > timezone > na. The detected value is NEVER persisted —
+// bs-realm stays the record of an explicit choice, so one click of the realm
+// selector undoes detection permanently. Motivation: the Korean community
+// post links the bare domain (arca.live's filter rejects the ?realm=asia
+// link), so KR/JP arrivals were landing on the NA treemap. Two consumers must
+// agree: RealmContext (React) and the pre-paint head script (lib/bootScript);
+// the mapping itself lives in lib/realmDetect.ts.
+export const isRealmAutodetectEnabled = (): boolean =>
+    process.env.NEXT_PUBLIC_REALM_AUTODETECT === '1';

@@ -17,7 +17,7 @@ import ConnectionHint from "./components/ConnectionHint";
 import VisitorIdentity from "./components/VisitorIdentity";
 import LocaleBeacon from "./components/LocaleBeacon";
 import { buildBootScript } from "./lib/bootScript";
-import { isLocaleAutodetectEnabled } from "./lib/featureFlags";
+import { isLocaleAutodetectEnabled, isRealmAutodetectEnabled } from "./lib/featureFlags";
 import { getSiteOrigin } from "./lib/siteOrigin";
 import "./globals.css";
 
@@ -66,7 +66,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: buildBootScript({ autodetectLocale: isLocaleAutodetectEnabled() }) }} />
+        <script dangerouslySetInnerHTML={{ __html: buildBootScript({ autodetectLocale: isLocaleAutodetectEnabled(), autodetectRealm: isRealmAutodetectEnabled() }) }} />
         {enableUmami ? <script defer src="/umami/script.js" data-website-id="27c0ee6a-f534-42d4-b49f-27bbadad9848" /> : null}
       </head>
       <body className={inter.className}>
