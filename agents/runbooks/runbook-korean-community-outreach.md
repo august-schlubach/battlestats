@@ -159,6 +159,9 @@ trusting a substring count, and exclude our own drafts from the corpus.
 
 Written in Korean and often abbreviated (힐데 = Hildebrand, 2501/4501 = U-2501/U-4501).
 Confirmed in the wild: 샤토르노, 발라오, 아처피시, 아키, 이즈모, 레판토, 하노버, 슐리펜.
+Corrected by readers on the August 2026 post: 알미란테 이리자르 (Almirante Irizar; we wrote
+이리사르), 오데이셔스 (Audacious; we wrote 오다시어스). Both fixed in the generator; treat a
+reader correction as the top authority for the `KO` table.
 **Always include the English name in parentheses** - our site displays English, so it aids the
 cross-checking we are explicitly inviting.
 

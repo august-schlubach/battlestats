@@ -43,7 +43,7 @@ KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 �
       "Minotaur": "미노타우어", "Yoshino": "요시노", "Småland": "스몰란드",
       "Laffey": "라피", "Daring": "데어링", "Châteaurenault": "샤토르노",
       "AL Shimakaze": "AL 시마카제", "Manfred von Richthofen": "리히트호펜",
-      "Essex": "에식스", "Audacious": "오다시어스", "Shinano": "시나노",
+      "Essex": "에식스", "Audacious": "오데이셔스", "Shinano": "시나노",
       "Malta": "몰타", "Archerfish": "아처피시", "Balao": "발라오",
       "Admiral Nakhimov": "아드미랄 나히모프", "Hindenburg": "힌덴부르크", "Bungo": "붕고", "Slava": "슬라바",
       "Shikishima": "시키시마", "Bourgogne": "부르고뉴", "Libertad": "리베르타드",
@@ -51,7 +51,7 @@ KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 �
       "Affondatore": "아폰다토레", "Conqueror": "컨쿼러", "Schlieffen": "슐리펜",
       "Worcester": "우스터", "Venezia": "베네치아", "Gearing": "기어링",
       "Prins van Oranje": "프린스 판 오라녜", "Lüshun B": "뤼순 B",
-      "Almirante Irizar": "알미란테 이리사르", "20 de Julio": "20 데 훌리오",
+      "Almirante Irizar": "알미란테 이리자르", "20 de Julio": "20 데 훌리오",
       # Added for the August post. Midway/Hayate/Ohio/Gato are standard,
       # high-confidence transliterations (each is a common class/hull name
       # with established Korean naval-discussion usage). Amiral Lartigue and
@@ -60,6 +60,10 @@ KO = {"Sicilia": "시칠리아", "Thor": "토르", "Sete de Setembro": "세치 �
       # native-speaker read before this post goes out (runbook §5 step 3).
       "Midway": "미드웨이", "Hayate": "하야테", "Ohio": "오하이오", "Gato": "가토",
       "Amiral Lartigue": "아미랄 라르티그", "Cassard": "카사르"}
+# Corrected by a reader on the August post (arca.live /b/wows/181854141,
+# 2026-09-02): 이리자르 (was 이리사르) and 오데이셔스 (was 오다시어스). Reader
+# corrections are the highest-authority source for this table; the runbook
+# lists which names are attested.
 
 def _norm(n):
     # WG ship names carry NON-BREAKING spaces (e.g. 'San\xa0Martín'); normalise
