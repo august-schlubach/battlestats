@@ -4449,6 +4449,35 @@
                 "90d-window-shipped",
                 "ship-standings-feature-removed"
             ]
+        },
+        "agents/runbooks/runbook-ship-standings-tier7-spike-2026-09-07.md": {
+            "kind": "runbook",
+            "status": "active",
+            "lifecycle": "dated-active",
+            "section": "feature",
+            "owner": "backend",
+            "aliases": [
+                "tier 7 ship standings spike",
+                "is tier 7 deep enough",
+                "T7 vs T8 board depth",
+                "SHIP_BADGE_TIERS extension",
+                "spike_ship_board_tier7.py"
+            ],
+            "tags": [
+                "ship-badges",
+                "ship-standings",
+                "SHIP_BADGE_TIERS",
+                "SHIP_BADGE_MIN_BATTLES",
+                "spike",
+                "decision",
+                "coverage",
+                "tier-7",
+                "read-only"
+            ],
+            "archive_on": [
+                "tier-7-decision-made",
+                "ship-standings-feature-removed"
+            ]
         }
     }
 }
