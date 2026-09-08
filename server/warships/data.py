@@ -7300,8 +7300,7 @@ _SHIP_COMBAT_METRICS = (
 # Realm-wide per-ship average damage over the trailing SHIP_COMBAT_WINDOW_DAYS
 # of random battles — the same population/window convention as the ShipStats
 # panel above, reduced to the one number the damage treemap colors against.
-# The per-ship aggregate takes SECONDS on popular ships (realm-wide PDSS scan),
-# so it is NEVER computed on the request thread: the battle-history view
+# Neither path may run on the request thread: the battle-history view
 # attaches from this cache only and queues warm_ship_pop_avg_damage_task for
 # misses (tasks.py). Ships below the population floor cache 0 (a "computed,
 # no usable baseline" sentinel — attach translates it to None and does NOT
@@ -7472,14 +7471,14 @@ def _ship_pop_avg_damage_cache_key(realm: str, ship_id: int) -> str:
     return f"ship_pop_avgdmg:v1:{realm}:{int(ship_id)}:{day}"
 
 
-def compute_ship_pop_avg_damage(realm: str, ship_id: int) -> int:
-    """Compute + cache one ship's realm-wide 30d random avg damage. Returns
-    the cached value (0 when the population is below the floor). Task-side
-    only — seconds per popular ship."""
+def _ship_pop_avg_damage_raw(realm: str, ship_id: int, cutoff) -> tuple:
+    """Legacy per-ship window scan of PlayerDailyShipStats. Returns
+    (battles, damage) over [cutoff, today]. Kept as the coverage-gate
+    fallback and as the equivalence reference the fast path is pinned
+    against — it is correct unconditionally, merely slow (5-20s on a
+    popular ship, realm-wide over the 7M+ row table)."""
     from warships.models import PlayerDailyShipStats as _PDSS
 
-    cutoff = django_timezone.now().date() - timedelta(
-        days=SHIP_COMBAT_WINDOW_DAYS)
     with transaction.atomic(), _elevated_work_mem():
         row = (
             _PDSS.objects
@@ -7487,9 +7486,78 @@ def compute_ship_pop_avg_damage(realm: str, ship_id: int) -> int:
                     date__gte=cutoff, player__realm=realm)
             .aggregate(b=Sum('battles'), d=Sum('damage'))
         )
-    battles = int(row['b'] or 0)
+    return int(row['b'] or 0), int(row['d'] or 0)
+
+
+def _ship_pop_avg_damage_rollup(realm: str, ship_id: int, cutoff,
+                                frozen_end) -> tuple:
+    """Fast per-ship window totals: sum the ShipPopDailyAgg rollup over the
+    frozen days [cutoff, frozen_end) and raw-scan PlayerDailyShipStats only
+    for [frozen_end, today] — the trailing SHIP_POP_ROLLUP_REFRESH_DAYS the
+    rollup itself does not treat as settled. Returns (battles, damage).
+
+    `frozen_end` is the ONE seam between the two halves and is derived once
+    by the caller: the rollup side is strictly `date__lt`, the raw side
+    strictly `date__gte`. A `date__lte` on the rollup side would double-count
+    that day for every ship, and a double count has no symptom other than a
+    quietly high number.
+
+    No `_elevated_work_mem()` and no catch-up call here: the rollup sum is
+    ~30 tiny rows and the raw slice is two days for one ship, and this path
+    runs in the same UTC-midnight window as the snapshot chain and the bulk
+    warms. Triggering a realm-wide rollup write from a viewer-driven warm is
+    exactly the contention this replaces."""
+    from warships.models import PlayerDailyShipStats as _PDSS, ShipPopDailyAgg
+
+    frozen = (
+        ShipPopDailyAgg.objects
+        .filter(realm=realm, mode=_PDSS.MODE_RANDOM, ship_id=int(ship_id),
+                date__gte=cutoff, date__lt=frozen_end)
+        .aggregate(b=Sum('battles'), d=Sum('damage_sum'))
+    )
+    trailing = (
+        _PDSS.objects
+        .filter(ship_id=int(ship_id), mode=_PDSS.MODE_RANDOM,
+                date__gte=frozen_end, player__realm=realm)
+        .aggregate(b=Sum('battles'), d=Sum('damage'))
+    )
+    return (
+        int(frozen['b'] or 0) + int(trailing['b'] or 0),
+        int(frozen['d'] or 0) + int(trailing['d'] or 0),
+    )
+
+
+def compute_ship_pop_avg_damage(realm: str, ship_id: int) -> int:
+    """Compute + cache one ship's realm-wide 30d random avg damage. Returns
+    the cached value (0 when the population is below the floor). Task-side
+    only.
+
+    Reads the ShipPopDailyAgg rollup for the frozen days and raw-scans only
+    the trailing refresh days, gated on `ship_pop_rollup_covers_window` with
+    the full raw scan as the fallback (see `_ship_pop_avg_damage_raw`). Output
+    is identical either way — per-day sums compose associatively into the same
+    window totals — so the gate trades speed for nothing.
+
+    Before this, the request-driven warm still ran the whole-window raw scan
+    the bulk path abandoned in July: 5-20s per popular ship, so a 20-ship warm
+    held one of three `background` slots for ~9 minutes, in the 00:00-00:15
+    UTC window where the snapshot chain and bulk warms are already queued.
+    """
+    today = django_timezone.now().date()
+    cutoff = today - timedelta(days=SHIP_COMBAT_WINDOW_DAYS)
+    # The trailing SHIP_POP_ROLLUP_REFRESH_DAYS (today + yesterday) are still
+    # accruing, so the rollup is authoritative only strictly before this date.
+    frozen_end = today - timedelta(days=SHIP_POP_ROLLUP_REFRESH_DAYS - 1)
+    from warships.models import PlayerDailyShipStats as _PDSS
+
+    if ship_pop_rollup_covers_window(
+            realm, _PDSS.MODE_RANDOM, cutoff, frozen_end):
+        battles, damage = _ship_pop_avg_damage_rollup(
+            realm, ship_id, cutoff, frozen_end)
+    else:
+        battles, damage = _ship_pop_avg_damage_raw(realm, ship_id, cutoff)
     value = (
-        int(round((row['d'] or 0) / battles))
+        int(round(damage / battles))
         if battles >= SHIP_POP_AVG_MIN_BATTLES else 0
     )
     cache.set(_ship_pop_avg_damage_cache_key(realm, ship_id), value,
@@ -7508,9 +7576,15 @@ def compute_all_ship_pop_avg_damage(realm: str) -> dict:
     (~34s/realm measured 2026-07-13), first bring the ShipPopDailyAgg daily
     rollup up to date (first call backfills the window; afterwards only the
     trailing refresh days + genuine gaps compute), then sum the window from
-    the small agg table (~30 rows/ship). Output is IDENTICAL to the legacy
-    scan — same cache keys, values, floor, and sentinel semantics — because
-    per-day sums compose associatively into the same window totals."""
+    the small agg table (~30 rows/ship). Output is IDENTICAL to the raw scan
+    (`_ship_pop_avg_damage_raw`) — same cache keys, values, floor, and
+    sentinel semantics — because per-day sums compose associatively into the
+    same window totals.
+
+    This is the ONLY caller of `rollup_ship_pop_daily_catchup` on the warm
+    paths: `compute_ship_pop_avg_damage` reads the rollup this maintains but
+    never writes it, so a viewer-driven warm cannot trigger a realm-wide
+    rollup."""
     from warships.models import PlayerDailyShipStats as _PDSS, ShipPopDailyAgg
 
     rollup_ship_pop_daily_catchup(realm)

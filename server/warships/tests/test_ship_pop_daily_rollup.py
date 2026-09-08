@@ -13,9 +13,13 @@ Invariants proven here:
 - catch-up fills missing dates in the window, skips already-rolled frozen
   days, and always re-rolls the trailing refresh days (the current UTC day
   is still accruing PDSS writes);
-- `compute_all_ship_pop_avg_damage` output is IDENTICAL to the legacy
-  per-ship PDSS aggregation (`compute_ship_pop_avg_damage`, kept as the
-  gap fallback) — same cache keys, same values, same 0 below-floor sentinel;
+- `compute_all_ship_pop_avg_damage` output is IDENTICAL to the raw per-ship
+  PDSS aggregation (`_ship_pop_avg_damage_raw`) — same cache keys, same
+  values, same 0 below-floor sentinel;
+- `compute_ship_pop_avg_damage` (the request-driven gap warm) reads the same
+  rollup for the frozen days and raw-scans only the trailing refresh days:
+  the `frozen_end` seam neither double-counts nor drops a day, the values
+  match the raw scan, and a gap inside the frozen span falls back to it;
 - retention prune (100 days) is self-bounding and scoped per realm.
 """
 from datetime import timedelta
@@ -28,6 +32,7 @@ from warships.data import (
     SHIP_COMBAT_WINDOW_DAYS,
     SHIP_POP_ROLLUP_REFRESH_DAYS,
     SHIP_POP_ROLLUP_RETENTION_DAYS,
+    _ship_pop_avg_damage_raw,
     compute_all_ship_pop_avg_damage,
     compute_ship_pop_avg_damage,
     get_cached_ship_pop_avg_damage,
@@ -61,6 +66,44 @@ class RollupFixtureMixin:
             name="rollup_na_b", player_id=91002, realm="na")
         cls.eu_a = Player.objects.create(
             name="rollup_eu_a", player_id=91003, realm="eu")
+
+    def _seed_window_fixture(self):
+        """Multi-day, multi-ship, multi-player, cross-realm, mixed-mode
+        fixture spanning the window edge."""
+        t = self.today
+        # Ship 42: above floor, spread across the window (edge day included).
+        _seed_pdss(self.na_a, t, 42, battles=6, damage=287_400)
+        _seed_pdss(self.na_b, t - timedelta(days=15), 42, battles=20,
+                   damage=1_000_000)
+        _seed_pdss(self.na_a, t - timedelta(days=SHIP_COMBAT_WINDOW_DAYS),
+                   42, battles=5, damage=200_000)
+        # Outside the window: excluded by both paths.
+        _seed_pdss(self.na_b,
+                   t - timedelta(days=SHIP_COMBAT_WINDOW_DAYS + 1),
+                   42, battles=40, damage=9_999_999)
+        # Ship 43: below the 20-battle floor → 0 sentinel.
+        _seed_pdss(self.na_a, t - timedelta(days=1), 43, battles=2,
+                   damage=95_000)
+        # Ship 44: exactly at the floor.
+        _seed_pdss(self.na_b, t - timedelta(days=7), 44, battles=20,
+                   damage=805_010)
+        # Ranked rows never count toward the random baseline.
+        _seed_pdss(self.na_a, t, 42, mode=PlayerDailyShipStats.MODE_RANKED,
+                   season_id=27, battles=30, damage=5_000_000)
+        # Cross-realm rows never leak in.
+        _seed_pdss(self.eu_a, t, 42, battles=50, damage=50_000_000)
+
+    def _seed_daily_coverage(self, ship_id=99):
+        """One tiny na random row on EVERY window date.
+
+        `ship_pop_rollup_covers_window` reads coverage as "an agg row exists
+        for this date", and `rollup_ship_pop_daily` writes nothing for a
+        realm-day with no PDSS rows. Without a per-day filler the sparse
+        fixture reads as a gap and every fast-path test would silently
+        measure the raw fallback instead."""
+        for offset in range(SHIP_COMBAT_WINDOW_DAYS + 1):
+            _seed_pdss(self.na_a, self.today - timedelta(days=offset),
+                       ship_id, battles=1, damage=1_000)
 
 
 class TestRollupShipPopDaily(RollupFixtureMixin, TestCase):
@@ -207,35 +250,10 @@ class TestRollupCatchup(RollupFixtureMixin, TestCase):
 
 
 class TestComputeAllFromRollup(RollupFixtureMixin, TestCase):
-    def _seed_window_fixture(self):
-        """Multi-day, multi-ship, multi-player, cross-realm, mixed-mode
-        fixture spanning the window edge."""
-        t = self.today
-        # Ship 42: above floor, spread across the window (edge day included).
-        _seed_pdss(self.na_a, t, 42, battles=6, damage=287_400)
-        _seed_pdss(self.na_b, t - timedelta(days=15), 42, battles=20,
-                   damage=1_000_000)
-        _seed_pdss(self.na_a, t - timedelta(days=SHIP_COMBAT_WINDOW_DAYS),
-                   42, battles=5, damage=200_000)
-        # Outside the window: excluded by both paths.
-        _seed_pdss(self.na_b,
-                   t - timedelta(days=SHIP_COMBAT_WINDOW_DAYS + 1),
-                   42, battles=40, damage=9_999_999)
-        # Ship 43: below the 20-battle floor → 0 sentinel.
-        _seed_pdss(self.na_a, t - timedelta(days=1), 43, battles=2,
-                   damage=95_000)
-        # Ship 44: exactly at the floor.
-        _seed_pdss(self.na_b, t - timedelta(days=7), 44, battles=20,
-                   damage=805_010)
-        # Ranked rows never count toward the random baseline.
-        _seed_pdss(self.na_a, t, 42, mode=PlayerDailyShipStats.MODE_RANKED,
-                   season_id=27, battles=30, damage=5_000_000)
-        # Cross-realm rows never leak in.
-        _seed_pdss(self.eu_a, t, 42, battles=50, damage=50_000_000)
-
     def test_identical_output_vs_legacy_per_ship_computation(self):
         self._seed_window_fixture()
-        # Legacy path (direct PDSS aggregate — kept as the gap fallback).
+        # Raw path (direct PDSS aggregate; no agg rows exist yet, so the
+        # per-ship compute takes its coverage-gate fallback).
         legacy = {sid: compute_ship_pop_avg_damage("na", sid)
                   for sid in (42, 43, 44)}
         cache.clear()
@@ -269,3 +287,125 @@ class TestComputeAllFromRollup(RollupFixtureMixin, TestCase):
         self.assertTrue(ShipPopDailyAgg.objects.filter(pk=marker_pk).exists())
         hits, _ = get_cached_ship_pop_avg_damage("na", [42])
         self.assertEqual(hits[42], 47_981)
+
+
+class TestComputeOneShipFromRollup(RollupFixtureMixin, TestCase):
+    """The request-driven per-ship warm (`compute_ship_pop_avg_damage`).
+
+    It reads the rollup for the frozen days and raw-scans only the trailing
+    SHIP_POP_ROLLUP_REFRESH_DAYS, gated on `ship_pop_rollup_covers_window`.
+    Unlike the nightly bulk path it never calls the catch-up: a viewer-driven
+    warm must not trigger a realm-wide rollup write, least of all in the
+    00:00-00:15 UTC window where the snapshot chain already runs.
+    """
+
+    def setUp(self):
+        cache.clear()
+
+    @property
+    def _frozen_end(self):
+        return self.today - timedelta(days=SHIP_POP_ROLLUP_REFRESH_DAYS - 1)
+
+    def _raw_value(self, ship_id):
+        """The unconditionally-correct reference: full-window raw scan, same
+        floor and sentinel arithmetic as the compute."""
+        cutoff = self.today - timedelta(days=SHIP_COMBAT_WINDOW_DAYS)
+        battles, damage = _ship_pop_avg_damage_raw("na", ship_id, cutoff)
+        return int(round(damage / battles)) if battles >= 20 else 0
+
+    def test_frozen_end_seam_neither_double_counts_nor_drops_a_day(self):
+        """`today-1` is rolled up AND still raw-scanned; it must be counted
+        exactly once.
+
+        The catch-up always re-rolls the trailing refresh days, so the rollup
+        genuinely holds a `today-1` row the fast path has to skip. A
+        `date__lte` on the rollup side would double it, which has no symptom
+        other than a quietly high average."""
+        self._seed_daily_coverage()
+        _seed_pdss(self.na_a, self.today - timedelta(days=2), 42,
+                   battles=10, damage=1_000_000)
+        _seed_pdss(self.na_b, self.today - timedelta(days=1), 42,
+                   battles=10, damage=2_000_000)
+        rollup_ship_pop_daily_catchup("na")
+        # Precondition: the seam day really is present on both sides.
+        self.assertTrue(
+            ShipPopDailyAgg.objects.filter(
+                realm="na", ship_id=42, date=self._frozen_end).exists())
+
+        value = compute_ship_pop_avg_damage("na", 42)
+
+        # 3_000_000 / 20 = 150_000. Double-counting today-1 would give
+        # 5_000_000 / 30 = 166_667; dropping it, 1_000_000 / 10 -> below
+        # the floor -> 0.
+        self.assertEqual(value, 150_000)
+        self.assertEqual(value, self._raw_value(42))
+
+    def test_fast_path_matches_the_raw_scan(self):
+        self._seed_window_fixture()
+        self._seed_daily_coverage()
+        rollup_ship_pop_daily_catchup("na")
+
+        values = {sid: compute_ship_pop_avg_damage("na", sid)
+                  for sid in (42, 43, 44)}
+
+        self.assertEqual(values, {sid: self._raw_value(sid)
+                                  for sid in (42, 43, 44)})
+        # Pinned so the two paths cannot drift together.
+        self.assertEqual(values[42], 47_981)
+        self.assertEqual(values[43], 0)        # below floor → sentinel
+        self.assertEqual(values[44], 40_250)
+        # Cached under the same day-scoped keys the treemap reads.
+        hits, missing = get_cached_ship_pop_avg_damage("na", [42, 43, 44])
+        self.assertEqual(missing, [])
+        self.assertEqual(hits, values)
+
+    def test_gap_in_the_frozen_span_falls_back_to_the_raw_scan(self):
+        """A missing rollup day sums to less rather than raising, so the
+        coverage gate is the only thing standing between a gap and a quietly
+        wrong number."""
+        self._seed_window_fixture()
+        self._seed_daily_coverage()
+        rollup_ship_pop_daily_catchup("na")
+        gap_day = self.today - timedelta(days=15)
+        ShipPopDailyAgg.objects.filter(realm="na", date=gap_day).delete()
+
+        value = compute_ship_pop_avg_damage("na", 42)
+
+        # Without the fallback the frozen sum loses that day's 20 battles /
+        # 1_000_000 damage, leaving 11 battles — below the floor — and the
+        # treemap would go grey on a ship that has a baseline.
+        self.assertEqual(value, 47_981)
+        self.assertEqual(value, self._raw_value(42))
+
+    def test_per_ship_warm_never_writes_the_rollup(self):
+        """No catch-up call: the fast path is read-only on ShipPopDailyAgg."""
+        self._seed_window_fixture()
+        self._seed_daily_coverage()
+        rollup_ship_pop_daily_catchup("na")
+        before = set(
+            ShipPopDailyAgg.objects.values_list("pk", flat=True))
+
+        compute_ship_pop_avg_damage("na", 42)
+
+        self.assertEqual(
+            set(ShipPopDailyAgg.objects.values_list("pk", flat=True)), before)
+
+    def test_frozen_days_are_read_from_the_rollup_not_rescanned(self):
+        """Proves the fast path is live rather than merely correct.
+
+        Every other assertion here would also pass if the coverage gate
+        never opened, because the fallback returns the same numbers. So
+        divert one frozen rollup row away from its PDSS source: the compute
+        must follow the rollup."""
+        self._seed_window_fixture()
+        self._seed_daily_coverage()
+        rollup_ship_pop_daily_catchup("na")
+        row = ShipPopDailyAgg.objects.get(
+            realm="na", mode=PlayerDailyShipStats.MODE_RANDOM, ship_id=42,
+            date=self.today - timedelta(days=15))
+        row.damage_sum += 310_000
+        row.save(update_fields=["damage_sum"])
+
+        # (287_400 + 1_310_000 + 200_000) / 31 = 57_980.6… → 57_981.
+        self.assertEqual(compute_ship_pop_avg_damage("na", 42), 57_981)
+        self.assertEqual(self._raw_value(42), 47_981)
